@@ -1,0 +1,21 @@
+[submodule "3rd_party/FreeRTOS-Kernel"]
+	path = 3rd_party/FreeRTOS-Kernel
+	url = https://github.com/FreeRTOS/FreeRTOS-Kernel
+[submodule "3rd_party/common_c"]
+	path = 3rd_party/common_c
+	url = https://github.com/Mengrendufu/common_c.git
+[submodule "3rd_party/sm_hsm"]
+	path = 3rd_party/sm_hsm
+	url = https://github.com/Mengrendufu/sm_hsm.git
+[submodule "3rd_party/sm_sst"]
+	path = 3rd_party/sm_sst
+	url = https://github.com/Mengrendufu/sm_sst.git
+[submodule "3rd_party/cmsis-core"]
+	path = 3rd_party/cmsis-core
+	url = https://github.com/ARM-software/CMSIS_5.git
+[submodule "3rd_party/cmsis-device-f1"]
+	path = 3rd_party/cmsis-device-f1
+	url = https://github.com/STMicroelectronics/cmsis-device-f1.git
+[submodule "3rd_party/stm32f1xx-hal-driver"]
+	path = 3rd_party/stm32f1xx-hal-driver
+	url = https://github.com/STMicroelectronics/stm32f1xx-hal-driver.git

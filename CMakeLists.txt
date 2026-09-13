@@ -1,0 +1,88 @@
+cmake_minimum_required(VERSION 3.25)
+project(sm_blinky LANGUAGES C ASM)
+
+set(ROOT_SST      ${CMAKE_SOURCE_DIR}/3rd_party/sm_sst)
+set(ROOT_HSM      ${CMAKE_SOURCE_DIR}/3rd_party/sm_hsm)
+set(ROOT_COMMON   ${CMAKE_SOURCE_DIR}/3rd_party/common_c)
+set(ROOT_CMSIS_CORE   ${CMAKE_SOURCE_DIR}/3rd_party/cmsis-core)
+set(ROOT_CMSIS_DEVICE ${CMAKE_SOURCE_DIR}/3rd_party/cmsis-device-f1)
+set(ROOT_HAL      ${CMAKE_SOURCE_DIR}/3rd_party/stm32f1xx-hal-driver)
+set(ROOT_FREERTOS ${CMAKE_SOURCE_DIR}/3rd_party/FreeRTOS-Kernel)
+
+set(SRC_FREERTOS
+    ${ROOT_FREERTOS}/tasks.c
+    ${ROOT_FREERTOS}/queue.c
+    ${ROOT_FREERTOS}/list.c
+    ${ROOT_FREERTOS}/timers.c
+    ${ROOT_FREERTOS}/portable/MemMang/heap_4.c
+    ${ROOT_FREERTOS}/portable/GCC/ARM_CM3/port.c
+)
+
+set(SRC_HAL
+    ${ROOT_HAL}/Src/stm32f1xx_hal.c
+    ${ROOT_HAL}/Src/stm32f1xx_hal_cortex.c
+    ${ROOT_HAL}/Src/stm32f1xx_hal_dma.c
+    ${ROOT_HAL}/Src/stm32f1xx_hal_exti.c
+    ${ROOT_HAL}/Src/stm32f1xx_hal_flash.c
+    ${ROOT_HAL}/Src/stm32f1xx_hal_flash_ex.c
+    ${ROOT_HAL}/Src/stm32f1xx_hal_gpio.c
+    ${ROOT_HAL}/Src/stm32f1xx_hal_gpio_ex.c
+    ${ROOT_HAL}/Src/stm32f1xx_hal_pwr.c
+    ${ROOT_HAL}/Src/stm32f1xx_hal_rcc.c
+    ${ROOT_HAL}/Src/stm32f1xx_hal_rcc_ex.c
+    ${ROOT_HAL}/Src/stm32f1xx_hal_tim.c
+    ${ROOT_HAL}/Src/stm32f1xx_hal_tim_ex.c
+    ${ROOT_HAL}/Src/stm32f1xx_hal_uart.c
+)
+
+set(SRC_ALL
+    ${CMAKE_SOURCE_DIR}/application/main.c
+    ${CMAKE_SOURCE_DIR}/application/application.c
+    ${CMAKE_SOURCE_DIR}/application/aos/blinky/blinky.c
+    ${CMAKE_SOURCE_DIR}/bsp/bsp.c
+    ${CMAKE_SOURCE_DIR}/bsp/freertos_hooks.c
+    ${ROOT_CMSIS_DEVICE}/Source/Templates/system_stm32f1xx.c
+    ${CMAKE_SOURCE_DIR}/bsp/stm32f1xx_it.c
+    ${CMAKE_SOURCE_DIR}/bsp/stm32f1xx_hal_msp.c
+    ${CMAKE_SOURCE_DIR}/bsp/stm32f1xx_hal_timebase_tim.c
+    ${CMAKE_SOURCE_DIR}/bsp/syscalls.c
+    ${CMAKE_SOURCE_DIR}/bsp/sysmem.c
+    ${ROOT_CMSIS_DEVICE}/Source/Templates/gcc/startup_stm32f103xe.s
+    ${CMAKE_SOURCE_DIR}/ports/sst_port.c
+    ${CMAKE_SOURCE_DIR}/ports/static_pool/sst_evt_pool.c
+    ${ROOT_SST}/sst_c/src/sst.c
+    ${ROOT_HSM}/src/sm_hsm.c
+    ${ROOT_HSM}/src/sm_tracer.c
+    ${ROOT_COMMON}/src/static_pool/static_pool.c
+    ${SRC_FREERTOS}
+    ${SRC_HAL}
+)
+
+add_executable(${PROJECT_NAME}.elf ${SRC_ALL})
+
+target_include_directories(${PROJECT_NAME}.elf PRIVATE
+    ${CMAKE_SOURCE_DIR}/application
+    ${CMAKE_SOURCE_DIR}/bsp
+    ${CMAKE_SOURCE_DIR}/ports
+    ${CMAKE_SOURCE_DIR}/ports/static_pool
+    ${ROOT_SST}/include
+    ${ROOT_HSM}/include
+    ${ROOT_CMSIS_CORE}/CMSIS/Core/Include
+    ${ROOT_CMSIS_DEVICE}/Include
+    ${ROOT_HAL}/Inc
+    ${ROOT_HAL}/Inc/Legacy
+    ${ROOT_FREERTOS}/include
+    ${ROOT_FREERTOS}/portable/GCC/ARM_CM3
+    ${ROOT_COMMON}/include
+)
+
+target_link_options(${PROJECT_NAME}.elf PRIVATE
+    -T${CMAKE_SOURCE_DIR}/bsp/STM32F103ZETX_FLASH.ld
+    -Wl,-Map=${CMAKE_BINARY_DIR}/${PROJECT_NAME}.map
+)
+
+add_custom_command(TARGET ${PROJECT_NAME}.elf POST_BUILD
+    COMMAND ${CMAKE_OBJCOPY} -O ihex $<TARGET_FILE:${PROJECT_NAME}.elf>
+            ${CMAKE_BINARY_DIR}/${PROJECT_NAME}.hex
+    COMMAND ${CMAKE_SIZE} $<TARGET_FILE:${PROJECT_NAME}.elf>
+)
