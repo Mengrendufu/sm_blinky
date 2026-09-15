@@ -38,6 +38,31 @@ STM32F103ZET6 固件骨架：FreeRTOS 内核 + `sm_sst` 的 AO/事件层 + HMI �
 - 宿主机 gcc 16（MSYS2 UCRT64）把 implicit-function-declaration 当错误，gcc 13 只是 warning。真要链 `sst.c` 时加 `-Wno-error=implicit-function-declaration`，并补 port 桩。MinGW 下 `-Wl,--gc-sections` 不会丢掉这些未引用函数。
 - 测试可执行文件写到 `%TEMP%`，不要落进仓库。
 
+## 烧录：J-Link Commander
+
+`tools\flash.cmd` 一条命令搞定：编译 debug preset → SWD 烧录 → 复位运行。在 Windows cmd 里从**任意目录**都能调，路径按脚本自身位置解析。
+
+```bat
+C:\mengrendufu\workshop\local_prjs\embeded\hmi\sm_blinky\tools\flash.cmd
+C:\mengrendufu\workshop\local_prjs\embeded\hmi\sm_blinky\tools\flash.cmd -nobuild
+```
+
+从 WSL 调用一样：`/mnt/c/Windows/System32/cmd.exe /c "C:\mengrendufu\workshop\local_prjs\embeded\hmi\sm_blinky\tools\flash.cmd"`。
+
+它内部就是下面这两条，要手调参数时直接用：
+
+```sh
+cmake --preset debug && cmake --build --preset build-debug
+C:\mengrendufu\software_ins\JLink\JLink.exe -device STM32F103ZE -if SWD -speed 4000 -autoconnect 1 -ExitOnError 1 -NoGui 1 -CommandFile C:\mengrendufu\workshop\local_prjs\embeded\hmi\sm_blinky\tools\flash.jlink
+```
+
+- Commander 在 `C:\mengrendufu\software_ins\JLink\JLink.exe`（V6.86）。加不加 PATH 都能跑：加了能简写成 `JLink.exe`，不加就写全路径（脚本里就是全路径）。
+- `tools/flash.jlink`：**只放连上目标之后的动作**（`r`/`h`/`loadfile`/`r`/`g`/`qc`），连接参数留在命令行，避免同一个事实写两处。一行一条命令，支持 `//` 注释；`loadfile` 自带擦除与校验，不用先 `erase`。
+- 本版（V6.86）`loadfile` 的支持格式只有 `bin/mot/hex/srec`，所以烧 `build\debug\sm_blinky.hex`；`.elf` 留给 GDB/Keil。
+- 失败判断：脚本以非 0 退出并打印 `[flash] FAILED (ERRORLEVEL=...)`；`ERRORLEVEL` 非 0 来自 `-ExitOnError 1`。
+- 会话里敲 `?` 就是完整命令表。日常够用的：`st`、`Regs`、`mem32 68000000, 8`、`SetBP`/`ClrBP`、`g`、`r`、`qc`。
+- 别用管道或重定向喂 `JLink.exe`（`JLink.exe < /dev/null` 之类）：它会在 `J-Link>` 空转，并且一直占着探针句柄，Keil 那边会连不上。跑完也可能残留 `JLink.exe`/`JLinkGUIServer.exe`：`tasklist | findstr /I jlink` 查一下，占了就 `taskkill /F /PID <pid>`。
+
 ## 目录与依赖
 
 | 目录 | 内容 |
@@ -53,6 +78,7 @@ STM32F103ZET6 固件骨架：FreeRTOS 内核 + `sm_sst` 的 AO/事件层 + HMI �
 
 ## 改动约定
 
+- **固件编译与烧录只在用户明确要求时执行**（说"编译"或"烧录"）。平时只做只读检查、读代码、跑宿主机契约测试；真要编/烧时，先说明跑哪条命令、烧哪份产物（时间戳 + 大小）。
 - 依赖以云端 submodule 为准；本地拷贝只作对照。适配远端时允许改 `ports/`、CMake、BSP，但保留 `free_rtos_blinky` 已验证的板级参数。
 - 要改 `sm_sst` 时：先在本地镜像 `C:\mengrendufu\workshop\local_prjs\sm_sst` 改并推送，再回本仓库同步 submodule 指针。
 - 优先级编码 `0xRRSS`：低字节是 SST 逻辑优先级（用 `SST_MAX_TASK` 校验），高字节是 FreeRTOS 任务优先级（用 `configMAX_PRIORITIES` 校验）。契约检查留在 SST 核心公共入口，port 只额外校验高字节。
@@ -60,9 +86,10 @@ STM32F103ZET6 固件骨架：FreeRTOS 内核 + `sm_sst` 的 AO/事件层 + HMI �
 
 ## 当前状态与已知坑
 
-- git：分支 `master`，`5eb83aa`，工作区干净。
-- 屏（ST7789）的 IM 配置电阻尚未焊成 80-16bit（目标焊 `R5/R7/R10`，不焊 `R6/R8/R9`）。**在此之前不要碰 FSMC/ST7789**，也不上 LVGL。
+- git：分支 `master`，`e0e8103`，工作区有未提交改动（LCD/SRAM 探针）。
+- 屏（ST7789）IM 已短接成 8080-16bit（`R5/R7/R10` 短接）：`RDID=0x8552`、16 位 GRAM 回环、厂商初始化下的显示都实测通过。
+- 板上 SRAM（IS62WV51216，FSMC Bank3/`NE3`）19 根地址线走线实测通过。`ledOn/ledOff` 时间戳已改用 FreeRTOS tick：DWT `CYCCNT` 在脱离调试器后会停摆（`[CYCCNT]` 恒为 0），原因未定性。
 - 板上 CH340 的 DTR/RTS 自动下载支路会干扰 J-Link；`BOOT0`(R12 10K 下拉)、`BOOT1/PB2`(R13 10K 下拉)、`RESET`(R4 10K 上拉) 都有独立上下拉，可安全翘起 `D2` 与 `R30`。
-- WSL 侧没有 J-Link 工具，烧录与 GDB 只能在 Windows 侧做。只烧 `.elf`（GDB 要符号）。
+- WSL 侧没有 J-Link 工具，烧录与 GDB 只能在 Windows 侧做：Keil/GDB 用 `.elf`，Commander 用 `.hex`（见上）。
 - `SM_onAssert` 里的 UART 发送是无限等待，这是知情保留的现状。
 - HAL 层错误出口（`BSP_onFatal` / `BSP_onFault` 收敛到统一复位终点）和断言持久化（`.noinit` SRAM 转存 Flash）都还没实现。

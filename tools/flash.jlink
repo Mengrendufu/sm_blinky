@@ -1,0 +1,14 @@
+// J-Link Commander command file: what runs after the target is connected.
+// Connection parameters stay on the command line, one fact in one place
+// (SEGGER also recommends passing -device there):
+//   JLink.exe -device STM32F103ZE -if SWD -speed 4000 -autoconnect 1
+//             -ExitOnError 1 -NoGui 1 -CommandFile tools\flash.jlink
+// loadfile erases and verifies the flash it writes, so a plain "erase" is
+// not needed. The artifact path is absolute; change it if the build moves.
+
+r
+h
+loadfile C:\mengrendufu\workshop\local_prjs\embeded\hmi\sm_blinky\build\debug\sm_blinky.hex
+r
+g
+qc

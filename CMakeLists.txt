@@ -33,6 +33,8 @@ set(SRC_HAL
     ${ROOT_HAL}/Src/stm32f1xx_hal_tim.c
     ${ROOT_HAL}/Src/stm32f1xx_hal_tim_ex.c
     ${ROOT_HAL}/Src/stm32f1xx_hal_uart.c
+    ${ROOT_HAL}/Src/stm32f1xx_hal_sram.c
+    ${ROOT_HAL}/Src/stm32f1xx_ll_fsmc.c
 )
 
 set(SRC_ALL
@@ -40,6 +42,8 @@ set(SRC_ALL
     ${CMAKE_SOURCE_DIR}/application/application.c
     ${CMAKE_SOURCE_DIR}/application/aos/blinky/blinky.c
     ${CMAKE_SOURCE_DIR}/bsp/bsp.c
+    ${CMAKE_SOURCE_DIR}/bsp/bsp_lcd.c
+    ${CMAKE_SOURCE_DIR}/bsp/bsp_sram.c
     ${CMAKE_SOURCE_DIR}/bsp/freertos_hooks.c
     ${ROOT_CMSIS_DEVICE}/Source/Templates/system_stm32f1xx.c
     ${CMAKE_SOURCE_DIR}/bsp/stm32f1xx_it.c

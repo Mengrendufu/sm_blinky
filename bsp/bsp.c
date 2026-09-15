@@ -24,7 +24,8 @@ void BSP_init(void) {
 }
 //............................................................................
 void BSP_ledOn(void) {
-    uint32_t timeStamp = DWT->CYCCNT;
+    // FreeRTOS tick: the AO beat itself is driven by it, so it cannot freeze.
+    uint32_t timeStamp = (uint32_t)xTaskGetTickCount();
     SM_TRACE_BEGIN(11, 4)
         SM_TRACE_PAYLOAD_BE(timeStamp >> 24)
         SM_TRACE_PAYLOAD_BE(timeStamp >> 16)
@@ -34,7 +35,8 @@ void BSP_ledOn(void) {
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, 0);
 }
 void BSP_ledOff(void) {
-    uint32_t timeStamp = DWT->CYCCNT;
+    // FreeRTOS tick: the AO beat itself is driven by it, so it cannot freeze.
+    uint32_t timeStamp = (uint32_t)xTaskGetTickCount();
     SM_TRACE_BEGIN(10, 4)
         SM_TRACE_PAYLOAD_BE(timeStamp >> 24)
         SM_TRACE_PAYLOAD_BE(timeStamp >> 16)

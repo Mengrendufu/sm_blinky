@@ -9,6 +9,8 @@
 //============================================================================
 #include "sst.h"
 #include "bsp.h"
+#include "bsp_lcd.h"
+#include "bsp_sram.h"
 #include "application.h"
 
 // Class =====================================================================
@@ -72,6 +74,11 @@ static void Blinky_dispatch(Blinky * const me, SST_Evt const * const e) {
 // SM_Hsm ====================================================================
 // UML-Top-Initial
 static SM_StatePtr Blinky_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT {
+    // One-time bus setup for both devices on the FSMC. The probes themselves
+    // run once per beat below, so the wiring can be watched live instead of in
+    // a one-shot boot test.
+    BSP_lcdInit();
+    BSP_sramInit();
     SST_TimeEvt_arm(&container_of(me, Blinky, sm_hsm_)->timeEvt,
                     BSP_TICKS_PER_SEC / 2, BSP_TICKS_PER_SEC / 2);
     return _SM_INIT(&Blinky_on);
@@ -83,6 +90,8 @@ static void Blinky_on_entry_(SM_Hsm * const me) SM_HSM_RETT {
 static SM_RetState Blinky_on_(Blinky * const me, SST_Evt const * const e) SM_HSM_RETT {
     switch (e->sig) {
         case BLINKY_TIMEOUT_SIG: {
+            BSP_lcdProbe();
+            BSP_sramProbe();
             return _SM_TRAN(&Blinky_off);
         }
         default: {
@@ -97,6 +106,8 @@ static void Blinky_off_entry_(SM_Hsm * const me) SM_HSM_RETT {
 static SM_RetState Blinky_off_(Blinky * const me, SST_Evt const * const e) SM_HSM_RETT {
     switch (e->sig) {
         case BLINKY_TIMEOUT_SIG: {
+            BSP_lcdProbe();
+            BSP_sramProbe();
             return _SM_TRAN(&Blinky_on);
         }
         default: {
