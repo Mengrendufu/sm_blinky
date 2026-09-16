@@ -30,15 +30,24 @@
 #define LCD_BL_PORT     GPIOB
 #define LCD_BL_PIN      GPIO_PIN_0
 
-// Trace records: ==LCD==[RDID][<hi> <lo>]==[ST7789/??????]== and ==LCD==[DISPON]==
+// Panel waits. RST is tied to the board reset net (bsp_lcd.h), so the panel
+// has been in reset recovery since the MCU left reset: the datasheet wants no
+// command for the first 5 ms and no SLPOUT before 120 ms (Note 7, p.49). The
+// frame memory stays unreachable for a further 120 ms after SLPOUT; the
+// vendor sequence waits 120, we keep 130.
+#define LCD_RESET_SETTLE_MS  120U
+#define LCD_SLPOUT_SETTLE_MS 130U
+
+// Trace records: ==LCD==[RDID][<hi> <lo>]==[ST7789/??????]==
+//                ==LCD==[DISPON]==
 #define LCD_TRACE_RDID_OK   12U
 #define LCD_TRACE_RDID_BAD  13U
 #define LCD_TRACE_DISP_ON   20U
 
 //============================================================================
-// Panel bring-up. The values are the vendor sequence for this module
-// (ALIENTEK atk_md0240_reg_init), minus the sleep-out wait, which the caller
-// spaces over beats because the panel wants 120 ms after SLPOUT.
+// Panel register sequence: the vendor table for this module (ALIENTEK
+// atk_md0240_reg_init). SLPOUT is not part of it; BSP_lcdInit() sends that
+// first, then waits the panel's sleep-out time out.
 typedef struct {
     uint16_t cmd;
     uint8_t argCount;
@@ -46,23 +55,23 @@ typedef struct {
 } BSP_lcdInitStep_;
 
 static BSP_lcdInitStep_ const lcdInitSeq_[] = {
-    {0x36U,  1U, {0x00U}},                                       // MADCTL
-    {0x3AU,  1U, {LCD_COLMOD_16BIT}},                            // pixel format
-    {0xB2U,  5U, {0x0CU, 0x0CU, 0x00U, 0x33U, 0x33U}},           // porch
-    {0xB7U,  1U, {0x35U}},                                       // gate control
-    {0xBBU,  1U, {0x32U}},                                       // VCOM
-    {0xC0U,  1U, {0x0CU}},                                       // power control
-    {0xC2U,  1U, {0x01U}},                                       // VDVRH enable
-    {0xC3U,  1U, {0x10U}},                                       // VRH
-    {0xC4U,  1U, {0x20U}},                                       // VDV
-    {0xC6U,  1U, {0x0FU}},                                       // frame rate
-    {0xD0U,  2U, {0xA4U, 0xA1U}},                                // power control 2
+    {0x36U,  1U, {0x00U}},                                // MADCTL
+    {0x3AU,  1U, {LCD_COLMOD_16BIT}},                     // pixel format
+    {0xB2U,  5U, {0x0CU, 0x0CU, 0x00U, 0x33U, 0x33U}},    // porch
+    {0xB7U,  1U, {0x35U}},                                // gate control
+    {0xBBU,  1U, {0x32U}},                                // VCOM
+    {0xC0U,  1U, {0x0CU}},                                // power control
+    {0xC2U,  1U, {0x01U}},                                // VDVRH enable
+    {0xC3U,  1U, {0x10U}},                                // VRH
+    {0xC4U,  1U, {0x20U}},                                // VDV
+    {0xC6U,  1U, {0x0FU}},                                // frame rate
+    {0xD0U,  2U, {0xA4U, 0xA1U}},                         // power control 2
     {0xE0U, 14U, {0xD0U, 0x00U, 0x02U, 0x07U, 0x0AU, 0x28U, 0x32U,
                   0x44U, 0x42U, 0x06U, 0x0EU, 0x12U, 0x14U, 0x17U}},
     {0xE1U, 14U, {0xD0U, 0x00U, 0x02U, 0x07U, 0x0AU, 0x28U, 0x31U,
                   0x54U, 0x47U, 0x0EU, 0x1CU, 0x17U, 0x1BU, 0x1EU}},
-    {0x21U,  0U, {0x00U}},                                       // inversion on
-    {0x29U,  0U, {0x00U}}                                        // display on
+    {0x21U,  0U, {0x00U}},                                // inversion on
+    {0x29U,  0U, {0x00U}}                                 // display on
 };
 
 //============================================================================
@@ -75,8 +84,6 @@ static uint16_t BSP_lcdReadId_(void);
 static void BSP_lcdPanelInit_(void);
 static void BSP_lcdTraceId_(void);
 
-static uint16_t lcd_beats;
-
 //============================================================================
 void BSP_lcdInit(void) {
     BSP_lcdGpioInit_();
@@ -84,38 +91,32 @@ void BSP_lcdInit(void) {
 
     // Backlight on, so the panel power path is observable on the bench.
     HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN, GPIO_PIN_SET);
-}
 
-//............................................................................
-// One step per call so the 120 ms the panel wants after SLPOUT costs nothing;
-// after the third call this returns immediately.
-void BSP_lcdBringUp(void) {
-    switch (++lcd_beats) {
-        case 1U:
-            BSP_lcdWriteCmd_(LCD_SLPOUT_CMD);
-            break;
+    // The scheduler is not up yet, so HAL_Delay() - which runs off the TIM1
+    // HAL tick, alive since HAL_Init() - is the only wait available here.
+    uint32_t const sinceReset = HAL_GetTick();
 
-        case 2U:
-            BSP_lcdPanelInit_();
-            SM_TRACE_BEGIN(LCD_TRACE_DISP_ON, 0)
-            SM_TRACE_END()
-            break;
-
-        case 3U:
-            // One identification read: the "panel is talking" line on the bench.
-            BSP_lcdTraceId_();
-            break;
-
-        default:
-            break;
+    if (sinceReset < LCD_RESET_SETTLE_MS) {
+        HAL_Delay(LCD_RESET_SETTLE_MS - sinceReset);
     }
+
+    BSP_lcdWriteCmd_(LCD_SLPOUT_CMD);
+    HAL_Delay(LCD_SLPOUT_SETTLE_MS);
+
+    BSP_lcdPanelInit_();
+    SM_TRACE_BEGIN(LCD_TRACE_DISP_ON, 0)
+    SM_TRACE_END()
+
+    // One identification read: the "panel is talking" line on the bench.
+    BSP_lcdTraceId_();
 }
 
 //............................................................................
 static void BSP_lcdPanelInit_(void) {
     uint8_t step;
 
-    for (step = 0U; step < (uint8_t)(sizeof(lcdInitSeq_) / sizeof(lcdInitSeq_[0]));
+    for (step = 0U;
+         step < (uint8_t)(sizeof(lcdInitSeq_) / sizeof(lcdInitSeq_[0]));
          ++step) {
         uint8_t arg;
 
@@ -203,15 +204,23 @@ static void BSP_lcdFsmcInit_(void) {
     lcd_sram.Init.AsynchronousWait = FSMC_ASYNCHRONOUS_WAIT_DISABLE;
     lcd_sram.Init.WriteBurst = FSMC_WRITE_BURST_DISABLE;
 
-    // Mode A. The panel read path is slow, so give the read data phase room.
-    // Write timing follows the vendor reference for this board + module.
-    read_timing.AddressSetupTime = 0x00;
-    read_timing.DataSetupTime = 0x0F;
+    // Mode A. The read side is not throughput bound - it only runs the boot
+    // RDID - so these values buy margin instead of the smallest legal pair.
+    // Spec targets (ST7789VW Table 4, Read ID): TRCS >= 45 ns, TRDH >= 90,
+    // TRDL >= 45, TRC >= 160. Mode A puts (ADDSET+1) HCLK before the RDX
+    // pulse, (DATAST+3) HCLK behind it, so 6/3 gives 97.2 / 83.3 ns and a
+    // 180.6 ns cycle at HCLK = 72 MHz.
+    read_timing.AddressSetupTime = 0x06;
+    read_timing.DataSetupTime = 0x03;
     read_timing.BusTurnAroundDuration = 0;
     read_timing.AccessMode = FSMC_ACCESS_MODE_A;
 
-    write_timing.AddressSetupTime = 0x00;
-    write_timing.DataSetupTime = 0x01;
+    // The panel spec (ST7789VW Table 4) wants a WRX cycle of at least 66 ns
+    // with 15 ns pulses. In mode A the high time is ADDSET+1 HCLK and the low
+    // time is DATAST+1 HCLK, so 1/2 is the smallest pair that fits: 27.8 ns
+    // high, 41.7 ns low, 69.4 ns cycle at HCLK = 72 MHz.
+    write_timing.AddressSetupTime = 0x01;
+    write_timing.DataSetupTime = 0x02;
     write_timing.BusTurnAroundDuration = 0;
     write_timing.AccessMode = FSMC_ACCESS_MODE_A;
 

@@ -11,6 +11,8 @@
 #include "dbc_assert.h"
 // #include "stm32f1xx_hal_gpio.h"
 #include "bsp.h"
+#include "bsp_lcd.h"
+#include "bsp_sram.h"
 #include "timers.h"
 // #include "stm32f103xe.h"
 
@@ -21,8 +23,39 @@
 #define BSP_TRACE_STACK_TIMER 23U
 
 //============================================================================
+// Trace channel. It has to be alive before anything reports, and the
+// bring-up below reports through it, so it is the first thing BSP_init()
+// does. The pool and the queue are file statics here: no allocation.
+static void BSP_Tracer_init(void) {
+    //........................................................................
+    // SM_Trace initialization......
+    struct SM_Tracer_Frame {
+        void *sto[ (SM_TRACER_LEN-1) / sizeof(void*) + 1];
+    };
+    static struct SM_Tracer_Frame SM_Tracer_pSto[16];
+    static void *SM_Tracer_qSto[16];
+    SM_Tracer_ctor(
+        &SM_Tracer_inst,
+        (void *)SM_Tracer_pSto,
+        sizeof(SM_Tracer_pSto),
+        sizeof(SM_Tracer_pSto[0]),
+        (void *)SM_Tracer_qSto,
+        sizeof(SM_Tracer_qSto) / sizeof(SM_Tracer_qSto[0]));
+}
+//............................................................................
 void BSP_init(void) {
+    // The tracer first: a record pushed before it exists is dropped without a
+    // word, and the panel bring-up below reports.
+    BSP_Tracer_init();
+
     SystemCoreClockUpdate(); // Update SystemCoreClock
+
+    // Board bring-up. Both devices hang off the FSMC, and the panel wants its
+    // sleep-out wait over before anyone can draw into it, so this runs before
+    // the scheduler exists. Contract: BSP_init() returns with the panel
+    // out of sleep and both banks ready.
+    BSP_lcdInit();
+    BSP_sramInit();
 }
 //............................................................................
 // Stack headroom of the three tasks that always exist. The values are the
@@ -176,9 +209,11 @@ DBC_NORETURN void DBC_fault_handler(char const * module, int label) {
 void SST_onStart(void) {
 }
 //............................................................................
+// One idle pass, never a loop: the loop belongs to the caller. On this port
+// that is the FreeRTOS idle task (vApplicationIdleHook() runs once per
+// iteration of its own loop); on the stand-alone SST port it is the kernel's
+// idle loop. Returning also lets the idle task run its bookkeeping.
 void SST_onIdle(void) {
     // __WFI();
-    for (;;) {
-        SM_Tracer_idle(&SM_Tracer_inst);
-    }
+    SM_Tracer_idle(&SM_Tracer_inst);
 }

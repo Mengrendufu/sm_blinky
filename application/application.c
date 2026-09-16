@@ -7,7 +7,6 @@
 // To Public License, Version 2, as published by Sam Hocevar.
 // See http://www.wtfpl.net/ for more details.
 //============================================================================
-#include "sm_port.h"
 #include "sst.h"
 #include "sst_port.h"
 #include "static_pool.h"
@@ -15,21 +14,6 @@
 
 //============================================================================
 void AO_start(void) {
-    //........................................................................
-    // SM_Trace initialization......
-    struct SM_Tracer_Frame {
-        void *sto[ (SM_TRACER_LEN-1) / sizeof(void*) + 1];
-    };
-    static struct SM_Tracer_Frame SM_Tracer_pSto[16];
-    static void *SM_Tracer_qSto[16];
-    SM_Tracer_ctor(
-        &SM_Tracer_inst,
-        (void *)SM_Tracer_pSto,
-        sizeof(SM_Tracer_pSto),
-        sizeof(SM_Tracer_pSto[0]),
-        (void *)SM_Tracer_qSto,
-        sizeof(SM_Tracer_qSto) / sizeof(SM_Tracer_qSto[0]));
-
     //........................................................................
     // AOs......
     // AO_Blinky...

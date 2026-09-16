@@ -22,6 +22,14 @@ int main(void) {
     MX_GPIO_Init();
     MX_USART1_UART_Init();
 
+    // BSP_init() opens the trace channel, then brings up the panel - which
+    // waits out the sleep-out time with HAL_Delay(), so it needs interrupts -
+    // and the SRAM. It has to run before the first FreeRTOS call below: the
+    // timer API enters a critical section, and with the scheduler not started
+    // uxCriticalNesting is 0xaaaaaaaa, so interrupts stay masked from there
+    // until the scheduler takes over - a delay in that window would hang.
+    BSP_init();
+
     SST_sysTimer = xTimerCreateStatic(
         "sstTick",
         configTICK_RATE_HZ / BSP_TICKS_PER_SEC,
@@ -33,7 +41,6 @@ int main(void) {
     configASSERT(xTimerStart(SST_sysTimer, 0U) == pdPASS);
 
     SST_init();
-    BSP_init();
     AO_start();
     SST_start();
 

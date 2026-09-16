@@ -25,9 +25,9 @@ void BSP_init(void);
 void BSP_ledOn(void);
 void BSP_ledOff(void);
 
-// Periodic maintenance record: remaining stack (in words, 1 word = 4 B) of the
-// calling task, the idle task and the timer task. Meant to be called from an
-// AO every few ticks, to size the static stacks from measurements.
+// Periodic maintenance record: remaining stack (in words, 1 word = 4 B) of
+// the calling task, the idle task and the timer task. Meant to be called from
+// an AO every few ticks, to size the static stacks from measurements.
 void BSP_memReport(void);
 
 #endif // BSP_H_

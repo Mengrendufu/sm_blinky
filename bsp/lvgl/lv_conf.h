@@ -12,11 +12,11 @@
 
 //============================================================================
 // LVGL v9 configuration for this board. Only what differs from LVGL's own
-// defaults (src/lv_conf_internal.h) is listed here, so upgrading LVGL does not
-// mean diffing a thousand line template. Widgets, drawing and fonts stay at
-// their defaults for now; trim them once the UI is known.
+// defaults (src/lv_conf_internal.h) is listed here, so upgrading LVGL does
+// not mean diffing a thousand line template. Widgets, drawing and fonts
+// stay at their defaults for now; trim them once the UI is known.
 
-// Display: ST7789 over the 8080 16 bit interface -> one RGB565 word per pixel.
+// Display: ST7789 over the 8080 16-bit interface, one RGB565 word per pixel.
 #define LV_COLOR_DEPTH 16
 
 // Memory: LVGL keeps its own TLSF pool in a static array (work_mem_int in the

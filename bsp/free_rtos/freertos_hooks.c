@@ -37,6 +37,7 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
     (void)pcTaskName;
     /* Project rule: losing the log is allowed, hanging is not. Report through
      * the assert path, which resets the board, so a too small static stack
-     * shows up as a trace record plus a fresh boot instead of a dead board. */
+     * shows up as a trace record plus a fresh boot instead of a dead
+     * board. */
     SM_onAssert("freertos_stack", 1);
 }

@@ -20,21 +20,17 @@
 //   BL  = PB0 (active high)
 //   RST is tied to the board RESET net, so there is no reset GPIO.
 //
-// The bus setup, the vendor register sequence and the panel geometry live here.
-// The drawing API (window + pixels) arrives with the display layer. Bring-up
-// reports twice on the trace channel: DISPON and one RDID read, which is the
-// cheap "panel is talking" line on the bench.
+// The bus setup, the vendor register sequence and the panel geometry live
+// here. The drawing API (window + pixels) arrives with the display layer.
 
 //============================================================================
-// One-time bus setup (GPIO + FSMC) and backlight on. Pure register writes,
-// no blocking, no interrupt dependency, so it is safe to call from an AO
-// init transition.
+// One-time panel bring-up: bus setup (GPIO + FSMC), backlight on, then the
+// vendor register sequence with the panel's own waits around it. It blocks
+// for the better part of 250 ms, so it belongs to BSP_init() - before the
+// scheduler exists, never inside a task - and it is the only writer on this
+// bus until the display layer takes over. Returns with the panel out of
+// sleep and its registers loaded; on the trace channel it reports DISPON
+// plus one RDID read, the cheap "panel is talking" line on the bench.
 void BSP_lcdInit(void);
-
-// One step of the panel bring-up, meant to be called from the AO once per
-// timeout signal: SLPOUT, then the register table one beat later (which covers
-// the 120 ms the panel asks for between the two), then one RDID read. Every
-// later call returns immediately.
-void BSP_lcdBringUp(void);
 
 #endif // BSP_LCD_H_

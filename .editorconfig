@@ -1,0 +1,22 @@
+# Formatting for the lines we author. Line endings are deliberately not pinned
+# here: the tree is a mix of CRLF and LF and that is a separate call.
+#
+# The limit is about our own lines, not about the files we own: the ST template
+# banners and the Amazon licence text keep their 80+ column shape, and an editor
+# only applies this to the text we type or rewrap. tools/check_line_width.py
+# measures exactly that, from git.
+root = true
+
+[*.{c,h}]
+charset = utf-8
+indent_style = space
+indent_size = 4
+max_line_length = 78
+
+# Mirrors and build output: upstream's shape, never ours to reflow.
+[3rd_party/**]
+max_line_length = off
+
+# J-Link scripts carry absolute Windows paths that cannot be wrapped.
+[*.jlink]
+max_line_length = off

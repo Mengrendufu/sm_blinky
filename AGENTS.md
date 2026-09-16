@@ -68,13 +68,14 @@ C:\mengrendufu\software_ins\JLink\JLink.exe -device STM32F103ZE -if SWD -speed 4
 | 目录 | 内容 |
 |---|---|
 | `application/` | `main.c`、`application.c`（AO 启动）、`aos/blinky/`（唯一 AO/HSM） |
-| `bsp/` | 根下只有 `bsp.[ch]`：板级基础（时钟/DWT、LED 引脚与开关、`SM_onAssert`、tracer 出口、`BSP_memReport`） |
+| `bsp/` | 根下只有 `bsp.[ch]`：板级基础（时钟/DWT、LED 引脚与开关、`SM_onAssert`、tracer 出口与构造、`BSP_memReport`） |
 | `bsp/devices/` | FSMC 上的两颗器件：`bsp_lcd`（ST7789，总线 + 面板 bring-up）、`bsp_sram`（IS62WV51216，总线初始化） |
 | `bsp/free_rtos/` | FreeRTOS：`FreeRTOSConfig.h` 与 `freertos_hooks.c`（idle/timer 静态内存、栈溢出钩子） |
 | `bsp/lvgl/` | LVGL 配置（`lv_conf.h`）；将来显示适配层也放这里 |
 | `bsp/platform/` | 平台样板：HAL conf、MSP、TIM1 时基、中断向量、newlib 桩（`syscalls`/`sysmem`）、链接脚本。原来的 `main.h` 已删除，LED 引脚宏移到 `bsp.h` |
 | `ports/` | SST 骑 FreeRTOS 的口；`ports/static_pool/` 是事件池适配 |
 | `tests/` | 宿主机契约测试，未接 CMake |
+| `tools/` | Windows 侧烧录脚本（`flash.cmd`/`flash.jlink`）与 `check_line_width.py` |
 | `3rd_party/` | 7 个 submodule，全部以云端仓库为准 |
 
 依赖：FreeRTOS-Kernel、common_c、sm_hsm、sm_sst、CMSIS Core 5.4.0、CMSIS Device F1 v4.3.3、STM32F1 HAL v1.1.8。
@@ -82,6 +83,8 @@ C:\mengrendufu\software_ins\JLink\JLink.exe -device STM32F103ZE -if SWD -speed 4
 
 ## 改动约定
 
+- **列宽 78，管的是行不是文件**：我们自己新增/修改的行不超过 78 **显示列**（CJK 字符按两列算，不是字节数）。模板与第三方原文——`bsp/platform/` 的 ST 80 列横线和许可文本、`bsp/free_rtos/FreeRTOSConfig.h` 的 Amazon 模板文字——保持原样；即使我们就在这些文件里改代码，也只约束我们加的那几行，原有超长行一律不动。检查：`python3 tools/check_line_width.py` 默认只量工作区相对 HEAD 新增/改写的行，外加未跟踪新文件整份；点名文件时整份量；非 0 退出即超标。`.editorconfig` 登记同一条规则，只有 `3rd_party/` 镜像与 `tools/flash.jlink` 的不可断行绝对路径豁免。
+- **行尾不做统一**：树里 CRLF 与 LF 是混的（历史编辑 + 补丁插行造成的），这是知情保留的状态——不要为了"整齐"把某个文件整份转行尾，那会产生一整个文件级的 diff，把真实改动淹掉。`.editorconfig` 因此也没有钉 `end_of_line`。
 - **固件编译与烧录只在用户明确要求时执行**（说"编译"或"烧录"）。平时只做只读检查、读代码、跑宿主机契约测试；真要编/烧时，先说明跑哪条命令、烧哪份产物（时间戳 + 大小）。
 - **FreeRTOS 走全静态分配**（`configSUPPORT_DYNAMIC_ALLOCATION 0`，不编 `heap_4.c`）。任务栈由各 AO 自己声明（`StaticTask_t` + `StackType_t[]`，见 `blinky.c`），idle/timer 任务的内存由 `bsp/free_rtos/freertos_hooks.c` 提供；新增 AO 必须自带静态栈。栈够不够用 `[MEM][STACK]` 记录（`BSP_memReport`）的高水位来定，不靠猜。
 - 依赖以云端 submodule 为准；本地拷贝只作对照。适配远端时允许改 `ports/`、CMake、BSP，但保留 `free_rtos_blinky` 已验证的板级参数。
@@ -94,7 +97,8 @@ C:\mengrendufu\software_ins\JLink\JLink.exe -device STM32F103ZE -if SWD -speed 4
 - git：分支 `master`，`dc92582`，工作区有未提交改动（全静态分配、LVGL 接入、`bsp/` 目录分层、验证脚手架清理）。
 - 屏（ST7789）IM 已短接成 8080-16bit（`R5/R7/R10` 短接）：`RDID=0x8552`、16 位 GRAM 回环、厂商初始化下的显示都实测通过。
 - 板上 SRAM（IS62WV51216，FSMC Bank3/`NE3`）19 根地址线走线实测通过。`ledOn/ledOff` 时间戳用 FreeRTOS tick：DWT `CYCCNT` 在这颗片子上脱离调试器会停摆（当初那条 `[CYCCNT]` 记录已随验证脚手架一起移除）。
-- 硬件验证脚手架（GRAM16 回环、刷屏色带、`[CYCCNT]`、SRAM 地址线走线探针，RecID 14~19）已移除：LCD 侧只剩 `BSP_lcdBringUp()`（SLPOUT → 寄存器表 → 一次性 RDID），SRAM 侧只剩 `BSP_sramInit()`。`[MEM][STACK]`（21~23）保留，它是给 LVGL AO 栈和静态池定量用的量具。
+- 硬件验证脚手架（GRAM16 回环、刷屏色带、`[CYCCNT]`、SRAM 地址线走线探针，RecID 14~19）已移除：LCD 侧只剩 `BSP_lcdInit()`（SLPOUT → 寄存器表 → 一次性 RDID），SRAM 侧只剩 `BSP_sramInit()`。`[MEM][STACK]`（21~23）保留，它是给 LVGL AO 栈和静态池定量用的量具。
+- 启动顺序：`BSP_init()` → FreeRTOS 定时器 API → `AO_start()` → `vTaskStartScheduler()`。`BSP_init()`（`bsp.c`）内部按 tracer → 时钟 → LCD → SRAM 走：tracer 必须最先构造，否则面板 bring-up 的记录会被 `SM_Trace_push` 静默丢弃；LCD 那段含面板复位恢复 120 ms 与 SLPOUT 后 130 ms，阻塞约 250 ms。它必须在第一次 FreeRTOS 调用之前，因为定时器 API 会进临界区，调度器未启动时 `uxCriticalNesting` 是 `0xaaaaaaaa`，之后中断一直被关，`HAL_Delay` 会死等。面板 `RST` 挂在板级复位网络上，跟着 MCU 一起复位，所以那 120 ms 从复位起算。
 - 板上 CH340 的 DTR/RTS 自动下载支路会干扰 J-Link；`BOOT0`(R12 10K 下拉)、`BOOT1/PB2`(R13 10K 下拉)、`RESET`(R4 10K 上拉) 都有独立上下拉，可安全翘起 `D2` 与 `R30`。
 - WSL 侧没有 J-Link 工具，烧录与 GDB 只能在 Windows 侧做：Keil/GDB 用 `.elf`，Commander 用 `.hex`（见上）。
 - `SM_onAssert` 里的 UART 发送是无限等待，这是知情保留的现状。

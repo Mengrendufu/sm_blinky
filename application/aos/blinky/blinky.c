@@ -9,8 +9,6 @@
 //============================================================================
 #include "sst.h"
 #include "bsp.h"
-#include "bsp_lcd.h"
-#include "bsp_sram.h"
 #include "application.h"
 
 // Class =====================================================================
@@ -29,7 +27,8 @@ static void Blinky_dispatch(Blinky * const me, SST_Evt const * const e);
 static SM_StatePtr Blinky_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT;
 // State-Blinky_on
 static void Blinky_on_entry_(SM_Hsm * const me) SM_HSM_RETT;
-static SM_RetState Blinky_on_(Blinky * const me, SST_Evt const * const e) SM_HSM_RETT;
+static SM_RetState Blinky_on_(Blinky * const me,
+                              SST_Evt const * const e) SM_HSM_RETT;
 SM_HsmState SM_HSM_ROM Blinky_on = {
     (SM_StatePtr)0,              // super
     (SM_InitHandler)0,    // init_
@@ -39,7 +38,8 @@ SM_HsmState SM_HSM_ROM Blinky_on = {
 };
 // State-Blinky-off
 static void Blinky_off_entry_(SM_Hsm * const me) SM_HSM_RETT;
-static SM_RetState Blinky_off_(Blinky * const me, SST_Evt const * const e) SM_HSM_RETT;
+static SM_RetState Blinky_off_(Blinky * const me,
+                               SST_Evt const * const e) SM_HSM_RETT;
 SM_HsmState SM_HSM_ROM Blinky_off = {
     (SM_StatePtr)0,              // super
     (SM_InitHandler)0,    // init_
@@ -86,10 +86,8 @@ static void Blinky_dispatch(Blinky * const me, SST_Evt const * const e) {
 // SM_Hsm ====================================================================
 // UML-Top-Initial
 static SM_StatePtr Blinky_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT {
-    // One-time bus setup for both devices on the FSMC; the panel bring-up then
-    // runs over the first beats below.
-    BSP_lcdInit();
-    BSP_sramInit();
+    // The panel and the SRAM come up in BSP_init(), before the scheduler, so
+    // this AO owns nothing but its own heartbeat.
     SST_TimeEvt_arm(&container_of(me, Blinky, sm_hsm_)->timeEvt,
                     BSP_TICKS_PER_SEC / 2, BSP_TICKS_PER_SEC / 2);
     return _SM_INIT(&Blinky_on);
@@ -98,10 +96,10 @@ static SM_StatePtr Blinky_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT {
 static void Blinky_on_entry_(SM_Hsm * const me) SM_HSM_RETT {
     (void)me; BSP_ledOn();
 }
-static SM_RetState Blinky_on_(Blinky * const me, SST_Evt const * const e) SM_HSM_RETT {
+static SM_RetState Blinky_on_(Blinky * const me,
+                              SST_Evt const * const e) SM_HSM_RETT {
     switch (e->sig) {
         case BLINKY_TIMEOUT_SIG: {
-            BSP_lcdBringUp();
             if ((++blinky_beats % BLINKY_MEM_BEATS) == 0U) {
                 BSP_memReport();
             }
@@ -116,10 +114,10 @@ static SM_RetState Blinky_on_(Blinky * const me, SST_Evt const * const e) SM_HSM
 static void Blinky_off_entry_(SM_Hsm * const me) SM_HSM_RETT {
     (void)me; BSP_ledOff();
 }
-static SM_RetState Blinky_off_(Blinky * const me, SST_Evt const * const e) SM_HSM_RETT {
+static SM_RetState Blinky_off_(Blinky * const me,
+                               SST_Evt const * const e) SM_HSM_RETT {
     switch (e->sig) {
         case BLINKY_TIMEOUT_SIG: {
-            BSP_lcdBringUp();
             if ((++blinky_beats % BLINKY_MEM_BEATS) == 0U) {
                 BSP_memReport();
             }
