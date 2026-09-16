@@ -26,10 +26,10 @@ STM32F103ZET6 固件骨架：FreeRTOS 内核 + `sm_sst` 的 AO/事件层 + HMI �
 /mnt/c/Windows/System32/cmd.exe /c "cd /d C:\mengrendufu\workshop\local_prjs\embeded\hmi\sm_blinky && gcc -std=c11 -Itests/ports -I3rd_party/sm_sst/include -Iports/static_pool -I3rd_party/common_c/include tests/test_sst_evt_pool.c ports/static_pool/sst_evt_pool.c 3rd_party/common_c/src/static_pool/static_pool.c -o %TEMP%\t_evt_pool.exe && %TEMP%\t_evt_pool.exe"
 
 # configASSERT 转发到 SM_onAssert（模块名 / 行号）
-/mnt/c/Windows/System32/cmd.exe /c "cd /d C:\mengrendufu\workshop\local_prjs\embeded\hmi\sm_blinky && gcc -std=c11 -Ibsp -I3rd_party/sm_hsm/include tests/test_freertos_assert.c -o %TEMP%\t_assert.exe && %TEMP%\t_assert.exe"
+/mnt/c/Windows/System32/cmd.exe /c "cd /d C:\mengrendufu\workshop\local_prjs\embeded\hmi\sm_blinky && gcc -std=c11 -Ibsp/free_rtos -I3rd_party/sm_hsm/include tests/test_freertos_assert.c -o %TEMP%\t_assert.exe && %TEMP%\t_assert.exe"
 
 # 复合优先级 0xRRSS 布局的编译期契约（低字节 SST，高字节 FreeRTOS）
-/mnt/c/Windows/System32/cmd.exe /c "cd /d C:\mengrendufu\workshop\local_prjs\embeded\hmi\sm_blinky && arm-none-eabi-gcc -std=c11 -DSTM32F103xE -DUSE_HAL_DRIVER -Iports -Iports/static_pool -Ibsp -I3rd_party/sm_sst/include -I3rd_party/sm_hsm/include -I3rd_party/common_c/include -I3rd_party/FreeRTOS-Kernel/include -I3rd_party/FreeRTOS-Kernel/portable/GCC/ARM_CM3 -I3rd_party/stm32f1xx-hal-driver/Inc -I3rd_party/cmsis-core/CMSIS/Core/Include -I3rd_party/cmsis-device-f1/Include -c tests/test_sst_priority.c -o %TEMP%\t_prio.o"
+/mnt/c/Windows/System32/cmd.exe /c "cd /d C:\mengrendufu\workshop\local_prjs\embeded\hmi\sm_blinky && arm-none-eabi-gcc -std=c11 -DSTM32F103xE -DUSE_HAL_DRIVER -Iports -Iports/static_pool -Ibsp/free_rtos -I3rd_party/sm_sst/include -I3rd_party/sm_hsm/include -I3rd_party/common_c/include -I3rd_party/FreeRTOS-Kernel/include -I3rd_party/FreeRTOS-Kernel/portable/GCC/ARM_CM3 -I3rd_party/stm32f1xx-hal-driver/Inc -I3rd_party/cmsis-core/CMSIS/Core/Include -I3rd_party/cmsis-device-f1/Include -c tests/test_sst_priority.c -o %TEMP%\t_prio.o"
 ```
 
 注意：
@@ -68,7 +68,11 @@ C:\mengrendufu\software_ins\JLink\JLink.exe -device STM32F103ZE -if SWD -speed 4
 | 目录 | 内容 |
 |---|---|
 | `application/` | `main.c`、`application.c`（AO 启动）、`aos/blinky/`（唯一 AO/HSM） |
-| `bsp/` | 时钟、`FreeRTOSConfig.h`、`STM32F103ZETX_FLASH.ld`、HAL conf、中断、`SM_onAssert` |
+| `bsp/` | 根下只有 `bsp.[ch]`：板级基础（时钟/DWT、LED 引脚与开关、`SM_onAssert`、tracer 出口、`BSP_memReport`） |
+| `bsp/devices/` | FSMC 上的两颗器件：`bsp_lcd`（ST7789，总线 + 面板 bring-up）、`bsp_sram`（IS62WV51216，总线初始化） |
+| `bsp/free_rtos/` | FreeRTOS：`FreeRTOSConfig.h` 与 `freertos_hooks.c`（idle/timer 静态内存、栈溢出钩子） |
+| `bsp/lvgl/` | LVGL 配置（`lv_conf.h`）；将来显示适配层也放这里 |
+| `bsp/platform/` | 平台样板：HAL conf、MSP、TIM1 时基、中断向量、newlib 桩（`syscalls`/`sysmem`）、链接脚本。原来的 `main.h` 已删除，LED 引脚宏移到 `bsp.h` |
 | `ports/` | SST 骑 FreeRTOS 的口；`ports/static_pool/` 是事件池适配 |
 | `tests/` | 宿主机契约测试，未接 CMake |
 | `3rd_party/` | 7 个 submodule，全部以云端仓库为准 |
@@ -79,6 +83,7 @@ C:\mengrendufu\software_ins\JLink\JLink.exe -device STM32F103ZE -if SWD -speed 4
 ## 改动约定
 
 - **固件编译与烧录只在用户明确要求时执行**（说"编译"或"烧录"）。平时只做只读检查、读代码、跑宿主机契约测试；真要编/烧时，先说明跑哪条命令、烧哪份产物（时间戳 + 大小）。
+- **FreeRTOS 走全静态分配**（`configSUPPORT_DYNAMIC_ALLOCATION 0`，不编 `heap_4.c`）。任务栈由各 AO 自己声明（`StaticTask_t` + `StackType_t[]`，见 `blinky.c`），idle/timer 任务的内存由 `bsp/free_rtos/freertos_hooks.c` 提供；新增 AO 必须自带静态栈。栈够不够用 `[MEM][STACK]` 记录（`BSP_memReport`）的高水位来定，不靠猜。
 - 依赖以云端 submodule 为准；本地拷贝只作对照。适配远端时允许改 `ports/`、CMake、BSP，但保留 `free_rtos_blinky` 已验证的板级参数。
 - 要改 `sm_sst` 时：先在本地镜像 `C:\mengrendufu\workshop\local_prjs\sm_sst` 改并推送，再回本仓库同步 submodule 指针。
 - 优先级编码 `0xRRSS`：低字节是 SST 逻辑优先级（用 `SST_MAX_TASK` 校验），高字节是 FreeRTOS 任务优先级（用 `configMAX_PRIORITIES` 校验）。契约检查留在 SST 核心公共入口，port 只额外校验高字节。
@@ -86,9 +91,10 @@ C:\mengrendufu\software_ins\JLink\JLink.exe -device STM32F103ZE -if SWD -speed 4
 
 ## 当前状态与已知坑
 
-- git：分支 `master`，`e0e8103`，工作区有未提交改动（LCD/SRAM 探针）。
+- git：分支 `master`，`dc92582`，工作区有未提交改动（全静态分配、LVGL 接入、`bsp/` 目录分层、验证脚手架清理）。
 - 屏（ST7789）IM 已短接成 8080-16bit（`R5/R7/R10` 短接）：`RDID=0x8552`、16 位 GRAM 回环、厂商初始化下的显示都实测通过。
-- 板上 SRAM（IS62WV51216，FSMC Bank3/`NE3`）19 根地址线走线实测通过。`ledOn/ledOff` 时间戳已改用 FreeRTOS tick：DWT `CYCCNT` 在脱离调试器后会停摆（`[CYCCNT]` 恒为 0），原因未定性。
+- 板上 SRAM（IS62WV51216，FSMC Bank3/`NE3`）19 根地址线走线实测通过。`ledOn/ledOff` 时间戳用 FreeRTOS tick：DWT `CYCCNT` 在这颗片子上脱离调试器会停摆（当初那条 `[CYCCNT]` 记录已随验证脚手架一起移除）。
+- 硬件验证脚手架（GRAM16 回环、刷屏色带、`[CYCCNT]`、SRAM 地址线走线探针，RecID 14~19）已移除：LCD 侧只剩 `BSP_lcdBringUp()`（SLPOUT → 寄存器表 → 一次性 RDID），SRAM 侧只剩 `BSP_sramInit()`。`[MEM][STACK]`（21~23）保留，它是给 LVGL AO 栈和静态池定量用的量具。
 - 板上 CH340 的 DTR/RTS 自动下载支路会干扰 J-Link；`BOOT0`(R12 10K 下拉)、`BOOT1/PB2`(R13 10K 下拉)、`RESET`(R4 10K 上拉) 都有独立上下拉，可安全翘起 `D2` 与 `R30`。
 - WSL 侧没有 J-Link 工具，烧录与 GDB 只能在 Windows 侧做：Keil/GDB 用 `.elf`，Commander 用 `.hex`（见上）。
 - `SM_onAssert` 里的 UART 发送是无限等待，这是知情保留的现状。

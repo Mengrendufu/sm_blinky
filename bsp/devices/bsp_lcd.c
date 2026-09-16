@@ -19,49 +19,26 @@
 
 #define LCD_RDID_CMD    0x04U
 #define LCD_SLPOUT_CMD  0x11U  // Frame memory is unreachable while asleep.
-#define LCD_CASET_CMD   0x2AU
-#define LCD_RASET_CMD   0x2BU
-#define LCD_RAMWR_CMD   0x2CU
-#define LCD_RAMRD_CMD   0x2EU
-#define LCD_COLMOD_CMD  0x3AU
 #define LCD_COLMOD_16BIT 0x05U // MCU interface colour format: 16 bit/pixel.
 
 #define LCD_ID_ST7789   0x8552U
 
+// Panel geometry; the display layer will address the panel through these.
 #define LCD_WIDTH       240U
 #define LCD_HEIGHT      320U
-
-// The round trip test paints one row of pixels; anything left over is GRAM.
-#define LCD_PROBE_X     0U
-#define LCD_PROBE_Y     0U
-#define LCD_PROBE_N     4U
-
-// Rows painted per beat once the panel is up, so the frame is refreshed in
-// 20 beats and every beat only spends a fraction of a millisecond on it.
-#define LCD_FILL_ROWS   16U
-
-// SLPOUT, then the rest of the register bring-up one beat later, which covers
-// the 120 ms the panel asks for between the two.
-#define LCD_WAKE_BEATS  2U
 
 #define LCD_BL_PORT     GPIOB
 #define LCD_BL_PIN      GPIO_PIN_0
 
-// Trace records: ==LCD==[RDID][<hi> <lo>]==[OK/??]==
+// Trace records: ==LCD==[RDID][<hi> <lo>]==[ST7789/??????]== and ==LCD==[DISPON]==
 #define LCD_TRACE_RDID_OK   12U
 #define LCD_TRACE_RDID_BAD  13U
-// ==LCD==[GRAM16][OK]==  /  ==LCD==[GRAM16][BAD][idx ..][w2 ..][w3 ..]==
-#define LCD_TRACE_GRAM_OK   14U
-#define LCD_TRACE_GRAM_BAD  15U
-// ==LCD==[CYCCNT][<delta>]==
-#define LCD_TRACE_CYCCNT    16U
-// ==LCD==[DISPON]==
 #define LCD_TRACE_DISP_ON   20U
 
 //============================================================================
 // Panel bring-up. The values are the vendor sequence for this module
-// (ALIENTEK atk_md0240_reg_init), minus the sleep-out wait and the window
-// setup, which the probe does on every access.
+// (ALIENTEK atk_md0240_reg_init), minus the sleep-out wait, which the caller
+// spaces over beats because the panel wants 120 ms after SLPOUT.
 typedef struct {
     uint16_t cmd;
     uint8_t argCount;
@@ -96,18 +73,9 @@ static void BSP_lcdWriteDat_(uint16_t dat);
 static uint16_t BSP_lcdReadDat_(void);
 static uint16_t BSP_lcdReadId_(void);
 static void BSP_lcdPanelInit_(void);
-static void BSP_lcdSetWindow_(uint16_t x0, uint16_t y0,
-                              uint16_t x1, uint16_t y1);
-static uint16_t BSP_lcdReadPoint_(uint16_t x, uint16_t y, uint16_t color,
-                                  uint16_t * const w2, uint16_t * const w3);
 static void BSP_lcdTraceId_(void);
-static void BSP_lcdTraceGram_(void);
-static void BSP_lcdTraceCyccnt_(void);
-static void BSP_lcdFillBand_(void);
 
 static uint16_t lcd_beats;
-static uint16_t lcd_fillRow;
-static uint8_t  lcd_fillColor;
 
 //============================================================================
 void BSP_lcdInit(void) {
@@ -119,27 +87,27 @@ void BSP_lcdInit(void) {
 }
 
 //............................................................................
-void BSP_lcdProbe(void) {
-    ++lcd_beats;
+// One step per call so the 120 ms the panel wants after SLPOUT costs nothing;
+// after the third call this returns immediately.
+void BSP_lcdBringUp(void) {
+    switch (++lcd_beats) {
+        case 1U:
+            BSP_lcdWriteCmd_(LCD_SLPOUT_CMD);
+            break;
 
-    // Wake the panel so its frame memory becomes reachable, then finish the
-    // register bring-up one beat later: one step per beat, so the 120 ms
-    // SLPOUT wait costs nothing.
-    if (lcd_beats == 1U) {
-        BSP_lcdWriteCmd_(LCD_SLPOUT_CMD);
-    } else if (lcd_beats == 2U) {
-        BSP_lcdPanelInit_();
-        SM_TRACE_BEGIN(LCD_TRACE_DISP_ON, 0)
-        SM_TRACE_END()
-    }
+        case 2U:
+            BSP_lcdPanelInit_();
+            SM_TRACE_BEGIN(LCD_TRACE_DISP_ON, 0)
+            SM_TRACE_END()
+            break;
 
-    BSP_lcdTraceId_();
-    if (lcd_beats > LCD_WAKE_BEATS) {
-        BSP_lcdTraceGram_();
-        BSP_lcdFillBand_();
-    }
-    if ((lcd_beats % 8U) == 0U) {
-        BSP_lcdTraceCyccnt_();
+        case 3U:
+            // One identification read: the "panel is talking" line on the bench.
+            BSP_lcdTraceId_();
+            break;
+
+        default:
+            break;
     }
 }
 
@@ -159,28 +127,6 @@ static void BSP_lcdPanelInit_(void) {
 }
 
 //............................................................................
-// Keep the write path busy and give the bench something to look at: one band
-// of rows per beat, the colour changing every time the frame wraps.
-static void BSP_lcdFillBand_(void) {
-    static uint16_t const color[4] = {0xF800U, 0x07E0U, 0x001FU, 0xFFFFU};
-    uint16_t const last = (uint16_t)(lcd_fillRow + LCD_FILL_ROWS - 1U);
-    uint16_t const pixels = (uint16_t)(LCD_WIDTH * LCD_FILL_ROWS);
-    uint16_t i;
-
-    BSP_lcdSetWindow_(0U, lcd_fillRow, (uint16_t)(LCD_WIDTH - 1U), last);
-    BSP_lcdWriteCmd_(LCD_RAMWR_CMD);
-    for (i = 0U; i < pixels; ++i) {
-        BSP_lcdWriteDat_(color[lcd_fillColor]);
-    }
-
-    lcd_fillRow = (uint16_t)(last + 1U);
-    if (lcd_fillRow >= LCD_HEIGHT) {
-        lcd_fillRow = 0U;
-        lcd_fillColor = (uint8_t)((lcd_fillColor + 1U) & 0x03U);
-    }
-}
-
-//............................................................................
 static void BSP_lcdTraceId_(void) {
     uint16_t const id = BSP_lcdReadId_();
 
@@ -195,56 +141,6 @@ static void BSP_lcdTraceId_(void) {
             SM_TRACE_PAYLOAD_BE(id)
         SM_TRACE_END()
     }
-}
-
-//............................................................................
-// Write four patterns into the frame memory and read them back. The patterns
-// cover every data line at both rails and in alternating pairs; the first
-// mismatch is reported together with the raw words that produced it.
-static void BSP_lcdTraceGram_(void) {
-    static uint16_t const pattern[LCD_PROBE_N] = {
-        0xFFFFU, 0x0000U, 0xAAAAU, 0x5555U
-    };
-    uint8_t i;
-
-    for (i = 0U; i < LCD_PROBE_N; ++i) {
-        uint16_t w2;
-        uint16_t w3;
-        uint16_t const back = BSP_lcdReadPoint_(
-            (uint16_t)(LCD_PROBE_X + i), LCD_PROBE_Y, pattern[i], &w2, &w3);
-
-        if (back != pattern[i]) {
-            SM_TRACE_BEGIN(LCD_TRACE_GRAM_BAD, 5)
-                SM_TRACE_PAYLOAD_BE(i)
-                SM_TRACE_PAYLOAD_BE(w2 >> 8)
-                SM_TRACE_PAYLOAD_BE(w2)
-                SM_TRACE_PAYLOAD_BE(w3 >> 8)
-                SM_TRACE_PAYLOAD_BE(w3)
-            SM_TRACE_END()
-            return;
-        }
-    }
-
-    SM_TRACE_BEGIN(LCD_TRACE_GRAM_OK, 0)
-    SM_TRACE_END()
-}
-
-//............................................................................
-// The ledOn/ledOff timestamps come from DWT->CYCCNT. If that counter stops,
-// they repeat; this reports the delta of one probe delay instead.
-static void BSP_lcdTraceCyccnt_(void) {
-    static uint32_t last;
-    uint32_t const now = DWT->CYCCNT;
-    uint32_t const delta = now - last;
-
-    last = now;
-
-    SM_TRACE_BEGIN(LCD_TRACE_CYCCNT, 4)
-        SM_TRACE_PAYLOAD_BE(delta >> 24)
-        SM_TRACE_PAYLOAD_BE(delta >> 16)
-        SM_TRACE_PAYLOAD_BE(delta >> 8)
-        SM_TRACE_PAYLOAD_BE(delta >> 0)
-    SM_TRACE_END()
 }
 
 //............................................................................
@@ -349,44 +245,4 @@ static uint16_t BSP_lcdReadId_(void) {
     id = (uint16_t)(BSP_lcdReadDat_() << 8);
     id |= (uint16_t)(BSP_lcdReadDat_() & 0x00FFU);
     return id;
-}
-
-//............................................................................
-// Window written the way the vendor driver writes parameters: high byte then
-// low byte, for each end of each range.
-static void BSP_lcdSetWindow_(uint16_t x0, uint16_t y0,
-                              uint16_t x1, uint16_t y1) {
-    BSP_lcdWriteCmd_(LCD_CASET_CMD);
-    BSP_lcdWriteDat_((uint16_t)((x0 >> 8) & 0x00FFU));
-    BSP_lcdWriteDat_((uint16_t)(x0 & 0x00FFU));
-    BSP_lcdWriteDat_((uint16_t)((x1 >> 8) & 0x00FFU));
-    BSP_lcdWriteDat_((uint16_t)(x1 & 0x00FFU));
-
-    BSP_lcdWriteCmd_(LCD_RASET_CMD);
-    BSP_lcdWriteDat_((uint16_t)((y0 >> 8) & 0x00FFU));
-    BSP_lcdWriteDat_((uint16_t)(y0 & 0x00FFU));
-    BSP_lcdWriteDat_((uint16_t)((y1 >> 8) & 0x00FFU));
-    BSP_lcdWriteDat_((uint16_t)(y1 & 0x00FFU));
-}
-
-//............................................................................
-// One pixel down the write path and back up the read path. The panel returns
-// its 18 bit frame memory through two words, so the fields are packed back
-// into RGB565 the same way the vendor driver does: D15..D11 carry R, D10..D5
-// carry G and D4..D0 carry B, which is what makes the patterns a bus test.
-static uint16_t BSP_lcdReadPoint_(uint16_t x, uint16_t y, uint16_t color,
-                                  uint16_t * const w2, uint16_t * const w3) {
-    BSP_lcdSetWindow_(x, y, x, y);
-    BSP_lcdWriteCmd_(LCD_RAMWR_CMD);
-    BSP_lcdWriteDat_(color);
-
-    BSP_lcdSetWindow_(x, y, x, y);
-    BSP_lcdWriteCmd_(LCD_RAMRD_CMD);
-    (void)BSP_lcdReadDat_();                  // Dummy, as in the vendor driver.
-    *w2 = BSP_lcdReadDat_();                  // [15:11] R, [7:2] G
-    *w3 = BSP_lcdReadDat_();                  // [15:11] B
-
-    return (uint16_t)((((*w2 >> 11) & 0x1FU) << 11)
-                    | (((*w2 >>  2) & 0x3FU) <<  5)
-                    | (((*w3 >> 11) & 0x1FU) <<  0));
 }

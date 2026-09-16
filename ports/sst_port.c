@@ -44,27 +44,30 @@ static void SST_ao_thread(void *arg) {
 }
 //............................................................................
 void SST_Task_setPrio(SST_Task * const me, SST_TaskPrio prio) {
-    /* 创建 FreeRTOS 任务，me 作为 arg 传入，句柄存回 me->thread */
+    /* 创建 FreeRTOS 任务（静态），me 作为 arg 传入，句柄存回 me->thread */
     /* prio: lo=SST, hi=FreeRTOS；SST 核心已用低字节做过范围检查 */
+    /* 任务栈由 AO 自己声明并通过 tcb/stack/stackSizeWords 交进来 */
     uint8_t const sstPrio = (uint8_t)prio;
     uint8_t const freertosPrio = (uint8_t)(prio >> 8U);
-    configSTACK_DEPTH_TYPE stackWords =
-        (me->stackSizeWords == 0U)
-        ? (configSTACK_DEPTH_TYPE)(configMINIMAL_STACK_SIZE * 4U)
-        : me->stackSizeWords;
+    configSTACK_DEPTH_TYPE const stackWords = me->stackSizeWords;
+
+    configASSERT(me->tcb != (StaticTask_t *)0);
+    configASSERT(me->stack != (StackType_t *)0);
+    configASSERT(stackWords > 0U);
     configASSERT(freertosPrio < (uint8_t)configMAX_PRIORITIES);
     configASSERT(SST_tasks_[sstPrio] == (SST_Task *)0);
     me->prio = sstPrio;
     SST_tasks_[sstPrio] = me;
-    BaseType_t ret = xTaskCreate(
+    me->thread = xTaskCreateStatic(
         SST_ao_thread,      /* 所有 AO 共用同一入口 */
         "SST",
-        stackWords,
+        stackWords,         /* 单位：word */
         me,                 /* ← me 作为 arg，入口函数里拿到身份 */
         (UBaseType_t)freertosPrio,
-        &me->thread         /* ← 句柄存回 me->thread */
+        me->stack,          /* ← AO 自己的栈 */
+        me->tcb             /* ← AO 自己的 TCB */
     );
-    configASSERT(ret == pdPASS);
+    configASSERT(me->thread != (TaskHandle_t)0);
 }
 //............................................................................
 void SST_Task_activate(SST_Task * const me) {

@@ -16,9 +16,18 @@
 //============================================================================
 #define BSP_TICKS_PER_SEC 100U
 
+// On-board LED (DS0). Configured once from main.c, toggled by the blinky AO.
+#define BSP_LED_PORT GPIOB
+#define BSP_LED_PIN  GPIO_PIN_5
+
 //============================================================================
 void BSP_init(void);
 void BSP_ledOn(void);
 void BSP_ledOff(void);
+
+// Periodic maintenance record: remaining stack (in words, 1 word = 4 B) of the
+// calling task, the idle task and the timer task. Meant to be called from an
+// AO every few ticks, to size the static stacks from measurements.
+void BSP_memReport(void);
 
 #endif // BSP_H_

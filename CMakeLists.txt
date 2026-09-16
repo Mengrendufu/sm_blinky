@@ -14,7 +14,6 @@ set(SRC_FREERTOS
     ${ROOT_FREERTOS}/queue.c
     ${ROOT_FREERTOS}/list.c
     ${ROOT_FREERTOS}/timers.c
-    ${ROOT_FREERTOS}/portable/MemMang/heap_4.c
     ${ROOT_FREERTOS}/portable/GCC/ARM_CM3/port.c
 )
 
@@ -41,16 +40,18 @@ set(SRC_ALL
     ${CMAKE_SOURCE_DIR}/application/main.c
     ${CMAKE_SOURCE_DIR}/application/application.c
     ${CMAKE_SOURCE_DIR}/application/aos/blinky/blinky.c
+
     ${CMAKE_SOURCE_DIR}/bsp/bsp.c
-    ${CMAKE_SOURCE_DIR}/bsp/bsp_lcd.c
-    ${CMAKE_SOURCE_DIR}/bsp/bsp_sram.c
-    ${CMAKE_SOURCE_DIR}/bsp/freertos_hooks.c
+    ${CMAKE_SOURCE_DIR}/bsp/devices/bsp_lcd.c
+    ${CMAKE_SOURCE_DIR}/bsp/devices/bsp_sram.c
+    ${CMAKE_SOURCE_DIR}/bsp/free_rtos/freertos_hooks.c
+    ${CMAKE_SOURCE_DIR}/bsp/platform/stm32f1xx_it.c
+    ${CMAKE_SOURCE_DIR}/bsp/platform/stm32f1xx_hal_msp.c
+    ${CMAKE_SOURCE_DIR}/bsp/platform/stm32f1xx_hal_timebase_tim.c
+    ${CMAKE_SOURCE_DIR}/bsp/platform/syscalls.c
+    ${CMAKE_SOURCE_DIR}/bsp/platform/sysmem.c
+
     ${ROOT_CMSIS_DEVICE}/Source/Templates/system_stm32f1xx.c
-    ${CMAKE_SOURCE_DIR}/bsp/stm32f1xx_it.c
-    ${CMAKE_SOURCE_DIR}/bsp/stm32f1xx_hal_msp.c
-    ${CMAKE_SOURCE_DIR}/bsp/stm32f1xx_hal_timebase_tim.c
-    ${CMAKE_SOURCE_DIR}/bsp/syscalls.c
-    ${CMAKE_SOURCE_DIR}/bsp/sysmem.c
     ${ROOT_CMSIS_DEVICE}/Source/Templates/gcc/startup_stm32f103xe.s
     ${CMAKE_SOURCE_DIR}/ports/sst_port.c
     ${CMAKE_SOURCE_DIR}/ports/static_pool/sst_evt_pool.c
@@ -67,6 +68,9 @@ add_executable(${PROJECT_NAME}.elf ${SRC_ALL})
 target_include_directories(${PROJECT_NAME}.elf PRIVATE
     ${CMAKE_SOURCE_DIR}/application
     ${CMAKE_SOURCE_DIR}/bsp
+    ${CMAKE_SOURCE_DIR}/bsp/devices
+    ${CMAKE_SOURCE_DIR}/bsp/free_rtos
+    ${CMAKE_SOURCE_DIR}/bsp/platform
     ${CMAKE_SOURCE_DIR}/ports
     ${CMAKE_SOURCE_DIR}/ports/static_pool
     ${ROOT_SST}/include
@@ -80,8 +84,34 @@ target_include_directories(${PROJECT_NAME}.elf PRIVATE
     ${ROOT_COMMON}/include
 )
 
+#=============================================================================
+# ===LVGL v9 (3rd_party/lvgl), built as its own library.
+# The library only carries LVGL's sources, include paths and its own warning
+# level; the configuration is ours (bsp/lvgl/lv_conf.h), so a feature that is
+# switched off there compiles out inside LVGL itself and the glob stays put.
+file(GLOB_RECURSE LVGL_SRC CONFIGURE_DEPENDS
+    ${CMAKE_SOURCE_DIR}/3rd_party/lvgl/src/*.c
+)
+
+add_library(lvgl STATIC ${LVGL_SRC})
+target_include_directories(lvgl SYSTEM PUBLIC
+    ${CMAKE_SOURCE_DIR}/3rd_party/lvgl
+    ${CMAKE_SOURCE_DIR}/3rd_party/lvgl/src
+)
+target_include_directories(lvgl PRIVATE
+    ${ROOT_HSM}/include      # sm_assert.h, used by LV_ASSERT_HANDLER
+    ${ROOT_COMMON}/include
+)
+target_compile_definitions(lvgl PUBLIC
+    LV_CONF_PATH="${CMAKE_SOURCE_DIR}/bsp/lvgl/lv_conf.h"
+)
+# Third party code: do not drown the firmware build in its -Wextra output.
+target_compile_options(lvgl PRIVATE -w)
+
+target_link_libraries(${PROJECT_NAME}.elf PRIVATE lvgl)
+
 target_link_options(${PROJECT_NAME}.elf PRIVATE
-    -T${CMAKE_SOURCE_DIR}/bsp/STM32F103ZETX_FLASH.ld
+    -T${CMAKE_SOURCE_DIR}/bsp/platform/STM32F103ZETX_FLASH.ld
     -Wl,-Map=${CMAKE_BINARY_DIR}/${PROJECT_NAME}.map
 )
 

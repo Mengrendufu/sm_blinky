@@ -1,4 +1,4 @@
-#include "main.h"
+#include "stm32f1xx_hal.h"
 #include "sst.h"
 #include "bsp.h"
 #include "application.h"
@@ -8,8 +8,10 @@
 
 UART_HandleTypeDef huart1;
 static TimerHandle_t SST_sysTimer;
+static StaticTimer_t SST_sysTimer_sto;
 
 void SystemClock_Config(void);
+void Error_Handler(void);
 static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
 static void SST_sysTimer_cb(TimerHandle_t xTimer);
@@ -20,12 +22,13 @@ int main(void) {
     MX_GPIO_Init();
     MX_USART1_UART_Init();
 
-    SST_sysTimer = xTimerCreate(
+    SST_sysTimer = xTimerCreateStatic(
         "sstTick",
         configTICK_RATE_HZ / BSP_TICKS_PER_SEC,
         pdTRUE,
         (void *)0,
-        SST_sysTimer_cb);
+        SST_sysTimer_cb,
+        &SST_sysTimer_sto);
     configASSERT(SST_sysTimer != NULL);
     configASSERT(xTimerStart(SST_sysTimer, 0U) == pdPASS);
 
@@ -89,13 +92,13 @@ static void MX_GPIO_Init(void)
     __HAL_RCC_GPIOA_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
 
-    HAL_GPIO_WritePin(led0_GPIO_Port, led0_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(BSP_LED_PORT, BSP_LED_PIN, GPIO_PIN_RESET);
 
-    GPIO_InitStruct.Pin = led0_Pin;
+    GPIO_InitStruct.Pin = BSP_LED_PIN;
     GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(led0_GPIO_Port, &GPIO_InitStruct);
+    HAL_GPIO_Init(BSP_LED_PORT, &GPIO_InitStruct);
 }
 
 static void SST_sysTimer_cb(TimerHandle_t xTimer)

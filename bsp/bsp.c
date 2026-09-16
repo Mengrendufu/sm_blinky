@@ -11,16 +11,40 @@
 #include "dbc_assert.h"
 // #include "stm32f1xx_hal_gpio.h"
 #include "bsp.h"
+#include "timers.h"
 // #include "stm32f103xe.h"
 
 //============================================================================
+// Trace records: ==MEM==[STACK][<task>][<free words>]==
+#define BSP_TRACE_STACK_AO    21U
+#define BSP_TRACE_STACK_IDLE  22U
+#define BSP_TRACE_STACK_TIMER 23U
+
+//============================================================================
 void BSP_init(void) {
-    //........................................................................
-    // DWT enable...
-    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-    DWT->CYCCNT = 0;
-    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
     SystemCoreClockUpdate(); // Update SystemCoreClock
+}
+//............................................................................
+// Stack headroom of the three tasks that always exist. The values are the
+// minimum free stack ever seen, in words (1 word = 4 B); they are the numbers
+// the static stack sizes get sized from.
+static void BSP_traceStack_(uint8_t recId, uint16_t words) {
+    SM_TRACE_BEGIN(recId, 2)
+        SM_TRACE_PAYLOAD_BE(words >> 8)
+        SM_TRACE_PAYLOAD_BE(words)
+    SM_TRACE_END()
+}
+//............................................................................
+void BSP_memReport(void) {
+    TaskHandle_t const idle = xTaskGetIdleTaskHandle();
+    TaskHandle_t const timer = xTimerGetTimerDaemonTaskHandle();
+
+    BSP_traceStack_(BSP_TRACE_STACK_AO,
+                    (uint16_t)uxTaskGetStackHighWaterMark((TaskHandle_t)0));
+    BSP_traceStack_(BSP_TRACE_STACK_IDLE,
+                    (uint16_t)uxTaskGetStackHighWaterMark(idle));
+    BSP_traceStack_(BSP_TRACE_STACK_TIMER,
+                    (uint16_t)uxTaskGetStackHighWaterMark(timer));
 }
 //............................................................................
 void BSP_ledOn(void) {
@@ -32,7 +56,7 @@ void BSP_ledOn(void) {
         SM_TRACE_PAYLOAD_BE(timeStamp >>  8)
         SM_TRACE_PAYLOAD_BE(timeStamp >>  0)
     SM_TRACE_END()
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, 0);
+    HAL_GPIO_WritePin(BSP_LED_PORT, BSP_LED_PIN, 0);
 }
 void BSP_ledOff(void) {
     // FreeRTOS tick: the AO beat itself is driven by it, so it cannot freeze.
@@ -43,7 +67,7 @@ void BSP_ledOff(void) {
         SM_TRACE_PAYLOAD_BE(timeStamp >>  8)
         SM_TRACE_PAYLOAD_BE(timeStamp >>  0)
     SM_TRACE_END()
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, 1);
+    HAL_GPIO_WritePin(BSP_LED_PORT, BSP_LED_PIN, 1);
 }
 
 /*==========================================================================*/

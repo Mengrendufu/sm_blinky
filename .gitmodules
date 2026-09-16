@@ -19,3 +19,6 @@
 [submodule "3rd_party/stm32f1xx-hal-driver"]
 	path = 3rd_party/stm32f1xx-hal-driver
 	url = https://github.com/STMicroelectronics/stm32f1xx-hal-driver.git
+[submodule "3rd_party/lvgl"]
+	path = 3rd_party/lvgl
+	url = https://github.com/lvgl/lvgl.git

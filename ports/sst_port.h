@@ -29,9 +29,13 @@
 typedef uint16_t SST_TaskPrio;
 
 //============================================================================
-// additional SST-PORT task attributes for ARM Cortex-M
+// additional SST-PORT task attributes for ARM Cortex-M.
+// The AO owns its task storage: it hands the port a StaticTask_t and a stack
+// buffer, so every stack shows up in the link map instead of an RTOS heap.
 #define SST_PORT_TASK_ATTR \
     TaskHandle_t thread; \
+    StaticTask_t *tcb; \
+    StackType_t *stack; \
     configSTACK_DEPTH_TYPE stackSizeWords;
 //............................................................................
 // additional SST-PORT task operations for ARM Cortex-M

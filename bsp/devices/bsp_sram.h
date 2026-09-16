@@ -21,22 +21,12 @@
 //             A10, which the LCD uses as RS)
 //   Pin map: ALIENTEK core board IO allocation table, Sheet1.
 //
-// The board does not wire the SRAM address pins in order (see the schematic).
-// That mapping is a bijection, so the probe does not need to know it: a cell
-// written through one address reads back through the same one.
-//
-// The probe walks every address line in turn: it writes the base cell and the
-// cell that differs only in that line, then reads both back. A line that is
-// stuck or shorted to another makes those two writes land in the same cell,
-// which the read shows as a mismatch.
+// The board does not wire the SRAM address pins in order (see the schematic);
+// that mapping is a bijection, so software does not need to know it.
 
 //============================================================================
 // One-time bus setup (GPIO + FSMC bank 3). Pure register writes, no blocking,
 // so it is safe to call from an AO init transition.
 void BSP_sramInit(void);
-
-// One probe beat, meant to be called from the AO on every timeout signal.
-// Result goes out on the trace channel.
-void BSP_sramProbe(void);
 
 #endif // BSP_SRAM_H_
