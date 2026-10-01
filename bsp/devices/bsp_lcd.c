@@ -18,8 +18,16 @@
 #define LCD_DAT         (*(volatile uint16_t *)LCD_DAT_ADDR)
 
 #define LCD_RDID_CMD    0x04U
+#define LCD_SWRESET_CMD 0x01U  // Stands in for the hardware reset this board
+                               // cannot give the panel (see BSP_lcdInit).
 #define LCD_SLPOUT_CMD  0x11U  // Frame memory is unreachable while asleep.
 #define LCD_COLMOD_16BIT 0x05U // MCU interface colour format: 16 bit/pixel.
+#define LCD_CASET_CMD   0x2AU
+#define LCD_RASET_CMD   0x2BU
+#define LCD_RAMWR_CMD   0x2CU
+#define LCD_RAMRD_CMD   0x2EU
+#define LCD_DISPON_CMD  0x29U  // Sent once the frame memory is cleared.
+#define LCD_BLACK       0x0000U
 
 #define LCD_ID_ST7789   0x8552U
 
@@ -37,12 +45,33 @@
 // vendor sequence waits 120, we keep 130.
 #define LCD_RESET_SETTLE_MS  120U
 #define LCD_SLPOUT_SETTLE_MS 130U
+// Software reset recovery: 5 ms before the next command, and 120 ms before
+// SLPOUT when the reset lands while the panel is in sleep-in mode (that is
+// what the datasheet says about 01h). 130 again, for margin.
+#define LCD_SWRESET_SETTLE_MS 130U
 
+// Bring-up is verified rather than assumed: the black fill is read back from
+// both halves, and a bring-up that did not land is run again after a longer
+// settle. On a cold start with no debugger the panel gets no clean hardware
+// reset (RESX just follows the rail), so how long its own power-on sequence
+// takes is not ours to know - the retries are what make the cold start
+// deterministic instead of hopeful.
+// The panel only leaves reset once RESX - tied to the board reset net - has
+// risen far enough for its input to see a high level, and how long that takes
+// is not a constant: measured 3018, 3194 and 3816 ms on different power-ons,
+// and at least one that was still not ready after 4563 ms. Debugger attached
+// makes it faster (the probe adds a ground path and an NRST pull-up), so the
+// detached case is the one to size for. The budget below therefore covers the
+// slow end with margin rather than matching any single measurement, and a
+// board that is already up still leaves on the first pass.
+#define LCD_INIT_ATTEMPTS    100U
+#define LCD_RETRY_SETTLE_MS  100U
 // Trace records: ==LCD==[RDID][<hi> <lo>]==[ST7789/??????]==
 //                ==LCD==[DISPON]==
 #define LCD_TRACE_RDID_OK   12U
 #define LCD_TRACE_RDID_BAD  13U
 #define LCD_TRACE_DISP_ON   20U
+#define LCD_TRACE_GRAM      37U
 
 //============================================================================
 // Panel register sequence: the vendor table for this module (ALIENTEK
@@ -70,8 +99,9 @@ static BSP_lcdInitStep_ const lcdInitSeq_[] = {
                   0x44U, 0x42U, 0x06U, 0x0EU, 0x12U, 0x14U, 0x17U}},
     {0xE1U, 14U, {0xD0U, 0x00U, 0x02U, 0x07U, 0x0AU, 0x28U, 0x31U,
                   0x54U, 0x47U, 0x0EU, 0x1CU, 0x17U, 0x1BU, 0x1EU}},
-    {0x21U,  0U, {0x00U}},                                // inversion on
-    {0x29U,  0U, {0x00U}}                                 // display on
+    {0x21U,  0U, {0x00U}}                                 // inversion on
+    // Display on is not in here: BSP_lcdInit() clears the frame memory in
+    // between, so the panel never scans an uninitialised GRAM (BSP_lcdFill_).
 };
 
 //============================================================================
@@ -82,28 +112,77 @@ static void BSP_lcdWriteDat_(uint16_t dat);
 static uint16_t BSP_lcdReadDat_(void);
 static uint16_t BSP_lcdReadId_(void);
 static void BSP_lcdPanelInit_(void);
+static void BSP_lcdFill_(uint16_t colour);
+static uint16_t BSP_lcdReadGram_(uint16_t x, uint16_t y);
+static bool BSP_lcdFilled_(void);
 static void BSP_lcdTraceId_(void);
 
 //============================================================================
 void BSP_lcdInit(void) {
+    uint8_t attempt;
+    uint32_t const sinceReset = HAL_GetTick();
+
     BSP_lcdGpioInit_();
     BSP_lcdFsmcInit_();
 
-    // Backlight on, so the panel power path is observable on the bench.
-    HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN, GPIO_PIN_SET);
-
+    // The panel's RESX is tied to the board reset, so on a cold start it only
+    // follows VDD up instead of being held low until the supply is stable.
+    // The datasheet calls that out (Note 4, p.136-137): with no real reset
+    // after power up the behaviour is not guaranteed, and the remedy it names
+    // is a hardware reset once the supply is up - which this board cannot
+    // give. Software reset is the stand-in, and the symptom of getting the
+    // timing wrong is a frame memory write that only partly lands: half a
+    // frame of noise, the rest black.
     // The scheduler is not up yet, so HAL_Delay() - which runs off the TIM1
     // HAL tick, alive since HAL_Init() - is the only wait available here.
-    uint32_t const sinceReset = HAL_GetTick();
-
+    // A power-on needs far longer than this before the panel will hold frame
+    // memory, and that wait is not served here: the retry loop below starts
+    // early and keeps trying, so the boot costs the panel's real readiness
+    // time rather than a constant that has to cover its worst case.
     if (sinceReset < LCD_RESET_SETTLE_MS) {
         HAL_Delay(LCD_RESET_SETTLE_MS - sinceReset);
     }
 
-    BSP_lcdWriteCmd_(LCD_SLPOUT_CMD);
-    HAL_Delay(LCD_SLPOUT_SETTLE_MS);
+    for (attempt = 0U; attempt < LCD_INIT_ATTEMPTS; ++attempt) {
+        // Sleep-out and the software reset go out once. Note 1 ties the NVM
+        // load (ID bytes, VCOM, ...) to the reset path with tRT up to 120 ms,
+        // so re-sending the reset on every pass only restarts that load. The
+        // register table and the fill are what get retried.
+        if (attempt == 0U) {
+            BSP_lcdWriteCmd_(LCD_SWRESET_CMD);
+            HAL_Delay(LCD_SWRESET_SETTLE_MS);
 
-    BSP_lcdPanelInit_();
+            BSP_lcdWriteCmd_(LCD_SLPOUT_CMD);
+            HAL_Delay(LCD_SLPOUT_SETTLE_MS);
+        }
+
+        BSP_lcdPanelInit_();
+
+        // Frame memory first, display on second: the panel starts scanning
+        // GRAM the moment DISPON lands, and until this clear it holds
+        // whatever the glass powered up with.
+        BSP_lcdFill_(LCD_BLACK);
+
+        if (BSP_lcdFilled_()) {
+            break;
+        }
+
+        // The fill did not land, so the panel is not out of reset yet. Keep
+        // the passes close together: the window between "not yet" and "now"
+        // is only ~112 ms wide, and waiting longer between passes would just
+        // miss it later.
+        HAL_Delay(LCD_RETRY_SETTLE_MS);
+    }
+
+    BSP_lcdWriteCmd_(LCD_DISPON_CMD);
+
+    // Backlight last, and only now: the frame memory is black and the panel
+    // is out of its sleep sequence, so the glass comes on in a defined state.
+    // The panel's own power-up noise, the retries above and the supply ramp
+    // all happened behind a dark glass. From here the display layer owns the
+    // drawing, and the UI thread paints its first frame onto this black.
+    HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN, GPIO_PIN_SET);
+
     SM_TRACE_BEGIN(LCD_TRACE_DISP_ON, 0)
     SM_TRACE_END()
 
@@ -124,6 +203,99 @@ static void BSP_lcdPanelInit_(void) {
         for (arg = 0U; arg < lcdInitSeq_[step].argCount; ++arg) {
             BSP_lcdWriteDat_(lcdInitSeq_[step].args[arg]);
         }
+    }
+}
+
+//............................................................................
+// Window set: CASET + RASET + RAMWR. Parameters go out 8 bit on the low byte,
+// which is what the panel expects in the 16-bit 8080 mode.
+void BSP_lcdSetWindow(uint16_t xs, uint16_t ys,
+                      uint16_t xe, uint16_t ye) {
+    BSP_lcdWriteCmd_(LCD_CASET_CMD);
+    BSP_lcdWriteDat_(xs >> 8U);
+    BSP_lcdWriteDat_(xs & 0x00FFU);
+    BSP_lcdWriteDat_(xe >> 8U);
+    BSP_lcdWriteDat_(xe & 0x00FFU);
+
+    BSP_lcdWriteCmd_(LCD_RASET_CMD);
+    BSP_lcdWriteDat_(ys >> 8U);
+    BSP_lcdWriteDat_(ys & 0x00FFU);
+    BSP_lcdWriteDat_(ye >> 8U);
+    BSP_lcdWriteDat_(ye & 0x00FFU);
+
+    BSP_lcdWriteCmd_(LCD_RAMWR_CMD);
+}
+//............................................................................
+// Fill the window just set. A whole 240x320 screen is 76,800 words, about
+// 5.4 ms of bus time at the in-spec write timing - paid once per boot.
+static void BSP_lcdFill_(uint16_t colour) {
+    uint32_t px;
+
+    BSP_lcdSetWindow(0U, 0U, LCD_WIDTH - 1U, LCD_HEIGHT - 1U);
+
+    for (px = 0U; px < ((uint32_t)LCD_WIDTH * LCD_HEIGHT); ++px) {
+        LCD_DAT = colour;  // straight to the bus: a call per pixel shows up
+    }
+}
+//............................................................................
+// Push pixels into the window BSP_lcdSetWindow() just opened. Same bus write
+// as the fill above, so the per pixel cost is the same - the caller decides
+// how many. The display layer's flush callback is the only user today.
+void BSP_lcdWritePixels(uint16_t const *pixels, uint32_t count) {
+    uint32_t i;
+
+    for (i = 0U; i < count; ++i) {
+        LCD_DAT = pixels[i];
+    }
+}
+
+//............................................................................
+//............................................................................
+// Frame memory readback: narrow the window to one pixel, RAMRD, one dummy
+// read (the first value back is not the pixel), then the pixel itself.
+static uint16_t BSP_lcdReadGram_(uint16_t x, uint16_t y) {
+    BSP_lcdSetWindow(x, y, x, y);
+    BSP_lcdWriteCmd_(LCD_RAMRD_CMD);
+    (void)BSP_lcdReadDat_();
+
+    return BSP_lcdReadDat_();
+}
+//............................................................................
+// Did the clear actually land? The same four points BSP_lcdCheck() reports
+// later, spread over both halves of the frame: a fill that only reached part
+// of the frame memory reads back as noise here, which is the cold start
+// symptom this loop exists to catch.
+static bool BSP_lcdFilled_(void) {
+    static uint16_t const ys[4] = {0U, 159U, 160U, 319U};
+    uint8_t i;
+
+    for (i = 0U; i < 4U; ++i) {
+        if (BSP_lcdReadGram_(0U, ys[i]) != LCD_BLACK) {
+            return false;
+        }
+    }
+
+    return true;
+}
+//............................................................................
+// Sample both halves of the frame down the left edge. If the fill only
+// landed in one of them these values say so, instead of leaving it to the
+// eye. The AO calls this, not bring-up: a boot-time record is not observable
+// from a terminal that cannot be attached until later (see AGENTS.md).
+void BSP_lcdCheck(void) {
+    static uint16_t const ys[4] = {0U, 159U, 160U, 319U};
+    uint8_t i;
+
+    for (i = 0U; i < 4U; ++i) {
+        uint16_t const value = BSP_lcdReadGram_(0U, ys[i]);
+
+        SM_TRACE_BEGIN(LCD_TRACE_GRAM, 5)
+            SM_TRACE_PAYLOAD_BE(0U)
+            SM_TRACE_PAYLOAD_BE(ys[i] >> 8)
+            SM_TRACE_PAYLOAD_BE(ys[i])
+            SM_TRACE_PAYLOAD_BE(value >> 8)
+            SM_TRACE_PAYLOAD_BE(value)
+        SM_TRACE_END()
     }
 }
 
@@ -206,19 +378,26 @@ static void BSP_lcdFsmcInit_(void) {
 
     // Mode A. The read side is not throughput bound - it only runs the boot
     // RDID - so these values buy margin instead of the smallest legal pair.
-    // Spec targets (ST7789VW Table 4, Read ID): TRCS >= 45 ns, TRDH >= 90,
-    // TRDL >= 45, TRC >= 160. Mode A puts (ADDSET+1) HCLK before the RDX
-    // pulse, (DATAST+3) HCLK behind it, so 6/3 gives 97.2 / 83.3 ns and a
-    // 180.6 ns cycle at HCLK = 72 MHz.
+    // Spec targets (ST7789VW Table 4): Read ID wants TRCS >= 45, TRDH >= 90,
+    // TRDL >= 45, TRC >= 160; a frame memory read is much slower, TRCFM >=
+    // 450. Mode A puts (ADDSET+1) HCLK before the RDX pulse and (DATAST+3)
+    // HCLK behind it, so 6/23 gives 97.2 / 361 ns and a 458 ns cycle, which
+    // is the one setting that covers both kinds of read.
     read_timing.AddressSetupTime = 0x06;
-    read_timing.DataSetupTime = 0x03;
+    read_timing.DataSetupTime = 0x17;
     read_timing.BusTurnAroundDuration = 0;
     read_timing.AccessMode = FSMC_ACCESS_MODE_A;
 
     // The panel spec (ST7789VW Table 4) wants a WRX cycle of at least 66 ns
     // with 15 ns pulses. In mode A the high time is ADDSET+1 HCLK and the low
-    // time is DATAST+1 HCLK, so 1/2 is the smallest pair that fits: 27.8 ns
-    // high, 41.7 ns low, 69.4 ns cycle at HCLK = 72 MHz.
+    // time is DATAST+1 HCLK, so 1/2 is the smallest pair that fits the spec:
+    // 27.8 ns high, 41.7 ns low, 69.4 ns cycle at HCLK = 72 MHz. Both pulses
+    // are well over the 15 ns floor, so this meets the datasheet and is kept:
+    // bus throughput matters here (a full-screen flush is 5.33 ms at this
+    // pair against 7.46 ms at 1/4). Widening it was tried while chasing the
+    // cold-start readiness and did not move it (3018 ms against 3194 ms,
+    // inside the 112 ms probe spacing), so there is no evidence linking the
+    // timing to that problem - only a guess that 5% looked thin.
     write_timing.AddressSetupTime = 0x01;
     write_timing.DataSetupTime = 0x02;
     write_timing.BusTurnAroundDuration = 0;

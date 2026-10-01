@@ -11,7 +11,7 @@ set(MCU_ARCH_FLAGS "-mcpu=cortex-m3 -mthumb -mfloat-abi=soft")
 set(MCU_MACRO_FLAGS "-DSTM32F103xE -DUSE_HAL_DRIVER")
 
 set(CMAKE_C_FLAGS
-    "${MCU_ARCH_FLAGS} ${MCU_MACRO_FLAGS} -Wall -Wextra -g -ffunction-sections -fdata-sections"
+    "${MCU_ARCH_FLAGS} ${MCU_MACRO_FLAGS} -O2 -Wall -Wextra -g -ffunction-sections -fdata-sections"
     CACHE STRING "C flags"
     FORCE)
 set(CMAKE_ASM_FLAGS

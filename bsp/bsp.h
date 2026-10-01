@@ -21,13 +21,32 @@
 #define BSP_LED_PIN  GPIO_PIN_5
 
 //============================================================================
+// Trace record ids for the stack report below. Every caller passes its own,
+// so a line says which task the numbers belong to: [MEM][STACK][<who>][<n>].
+#define BSP_TRACE_STACK_BLINKY 21U
+#define BSP_TRACE_STACK_IDLE   22U
+#define BSP_TRACE_STACK_TIMER  23U
+#define BSP_TRACE_STACK_UI     24U
+// 37 belongs to the panel's frame memory check (bsp_lcd.c), so the flash
+// thread's stack report takes 38.
+#define BSP_TRACE_STACK_FLASH  38U
+#define BSP_TRACE_STACK_FLASH_WT 44U
+
+//============================================================================
 void BSP_init(void);
 void BSP_ledOn(void);
 void BSP_ledOff(void);
 
 // Periodic maintenance record: remaining stack (in words, 1 word = 4 B) of
 // the calling task, the idle task and the timer task. Meant to be called from
-// an AO every few ticks, to size the static stacks from measurements.
-void BSP_memReport(void);
+// a task every few ticks, to size the static stacks from measurements.
+void BSP_memReport(uint8_t selfRecId);
+
+// Debug aid: write a short line straight out of the UART instead of through
+// the tracer. The tracer is drained by the idle task, so a hang in a high
+// priority task takes the whole log down with it, and a record pushed from
+// here would never reach the wire. Use it with a *raw* terminal: the
+// sm_tracer_tui parses frames, so plain text like this is dropped there.
+void BSP_traceRaw(char const *text);
 
 #endif // BSP_H_

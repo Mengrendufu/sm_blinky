@@ -57,6 +57,8 @@
 #define configUSE_IDLE_HOOK                      1
 #define configUSE_TICK_HOOK                      0
 #define configUSE_TASK_NOTIFICATIONS             1
+/* Two slots: 0 is a task's own entry wake, 1 is a flash RPC completion. */
+#define configTASK_NOTIFICATION_ARRAY_ENTRIES    2
 #define configCPU_CLOCK_HZ                       ( SystemCoreClock )
 #define configTICK_RATE_HZ                       ((TickType_t)1000)
 #define configMAX_PRIORITIES                     ( 56 )

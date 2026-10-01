@@ -11,6 +11,16 @@
 #include "bsp_sram.h"
 
 //============================================================================
+// Bank base and the benchmark's size. The bank is 1 MB, 512K x 16; 4 KB is
+// enough to average out the first-access effects and small enough to finish
+// in a couple of hundred microseconds.
+#define SRAM_BANK_ADDR  0x68000000U
+#define SRAM_BENCH_WORDS 2048U
+
+// ==TIME==[SRAM][wr <us>][rd <us>][bad <n>]==
+#define SRAM_TRACE_BENCH 42U
+
+//============================================================================
 static void BSP_sramGpioInit_(void);
 static void BSP_sramFsmcInit_(void);
 
@@ -72,18 +82,73 @@ static void BSP_sramFsmcInit_(void) {
     sram.Init.AsynchronousWait = FSMC_ASYNCHRONOUS_WAIT_DISABLE;
     sram.Init.WriteBurst = FSMC_WRITE_BURST_DISABLE;
 
-    // This is a functional probe, not a bandwidth test, so the timing is
-    // deliberately generous: roughly 230 ns per access, far above the access
-    // time of the part that is fitted.
+    // Timing at the fitted part's own limit, with one step of margin.
+    // IS62WV51216BLL is a 55 ns part: tRC/tAA 55, tDOE 25, tWC 55,
+    // tAW/tSCS1/tPWB 45, tPWE 40, tSD 25 ns (AC tables, p.9 and p.11 of the
+    // datasheet). At 72 MHz one HCLK is 13.89 ns and one FSMC access costs
+    // (ADDSET + DATAST + 4) HCLK to read, (ADDSET + DATAST + 3) to write -
+    // the extra cycles are the FSMC's own read sampling and the write hold
+    // cycle (RM0008, "Mode1 read/write accesses"):
+    //
+    //   read  ADDSET=1 DATAST=1 -> 6 HCLK = 83.3 ns: tAA/tRC +51%, tDOE +100%
+    //   write ADDSET=1 DATAST=3 -> 7 HCLK = 97.2 ns: tPWE 55.6 vs 40 (+39%)
+    //
+    // So 2 B / 83.3 ns = 24.0 MB/s to read, 20.6 MB/s to write. DATAST=0 on
+    // the read side would buy 28.8 MB/s, but that leaves a zero length data
+    // phase on a part which wants tRC >= 55 ns, and the build that first used
+    // it is the one that froze when the bank was first touched - not worth
+    // 6 MB/s while that is unexplained. DATAST=2 on the write side would give
+    // 24.0 MB/s and leave tPWE only 1.7 ns of margin.
+    // The 250 ns/access this replaces was a functional probe ("does the bank
+    // answer at all"), never a bandwidth figure.
     read_timing.AddressSetupTime = 0x01;
-    read_timing.DataSetupTime = 0x0F;
+    read_timing.DataSetupTime = 0x01;
     read_timing.BusTurnAroundDuration = 0;
     read_timing.AccessMode = FSMC_ACCESS_MODE_A;
 
     write_timing.AddressSetupTime = 0x01;
-    write_timing.DataSetupTime = 0x0F;
+    write_timing.DataSetupTime = 0x03;
     write_timing.BusTurnAroundDuration = 0;
     write_timing.AccessMode = FSMC_ACCESS_MODE_A;
 
     HAL_SRAM_Init(&sram, &read_timing, &write_timing);
+}
+//............................................................................
+// Microseconds, for the benchmark below. Same trick as the display adapter's:
+// the HAL time base is TIM1 at 1 MHz, so the tick count carries milliseconds
+// and TIM1->CNT the rest of the millisecond.
+static uint32_t BSP_sramUs_(void) {
+    return ((uint32_t)HAL_GetTick() * 1000U) + (uint32_t)TIM1->CNT;
+}
+//............................................................................
+void BSP_sramBench(void) {
+    uint16_t * const base = (uint16_t *)SRAM_BANK_ADDR;
+    uint32_t i;
+    uint32_t t0;
+    uint32_t writeUs;
+    uint32_t readUs;
+    uint16_t bad = 0U;
+
+    t0 = BSP_sramUs_();
+    for (i = 0U; i < SRAM_BENCH_WORDS; ++i) {
+        base[i] = (uint16_t)(0xA5A5U ^ i);
+    }
+    writeUs = BSP_sramUs_() - t0;
+
+    t0 = BSP_sramUs_();
+    for (i = 0U; i < SRAM_BENCH_WORDS; ++i) {
+        if (base[i] != (uint16_t)(0xA5A5U ^ i)) {
+            ++bad;
+        }
+    }
+    readUs = BSP_sramUs_() - t0;
+
+    // ==TIME==[SRAM][wr <us>][rd <us>][bad <n>]==  (4 KB each way)
+    SM_TRACE_BEGIN(SRAM_TRACE_BENCH, 5)
+        SM_TRACE_PAYLOAD_BE((writeUs >> 8) & 0xFFU)
+        SM_TRACE_PAYLOAD_BE(writeUs & 0xFFU)
+        SM_TRACE_PAYLOAD_BE((readUs >> 8) & 0xFFU)
+        SM_TRACE_PAYLOAD_BE(readUs & 0xFFU)
+        SM_TRACE_PAYLOAD_BE((uint8_t)(bad > 255U ? 255U : bad))
+    SM_TRACE_END()
 }

@@ -32,6 +32,7 @@ set(SRC_HAL
     ${ROOT_HAL}/Src/stm32f1xx_hal_tim.c
     ${ROOT_HAL}/Src/stm32f1xx_hal_tim_ex.c
     ${ROOT_HAL}/Src/stm32f1xx_hal_uart.c
+    ${ROOT_HAL}/Src/stm32f1xx_hal_spi.c
     ${ROOT_HAL}/Src/stm32f1xx_hal_sram.c
     ${ROOT_HAL}/Src/stm32f1xx_ll_fsmc.c
 )
@@ -40,10 +41,18 @@ set(SRC_ALL
     ${CMAKE_SOURCE_DIR}/application/main.c
     ${CMAKE_SOURCE_DIR}/application/application.c
     ${CMAKE_SOURCE_DIR}/application/aos/blinky/blinky.c
+    ${CMAKE_SOURCE_DIR}/application/ui/thread/ui.c
+    ${CMAKE_SOURCE_DIR}/application/ui/thread/ui_evt.c
+    ${CMAKE_SOURCE_DIR}/application/ui/thread/ui_disp.c
+    ${CMAKE_SOURCE_DIR}/application/ui/hsm/sm_ui.c
+    ${CMAKE_SOURCE_DIR}/application/flash/thread/flash.c
+    ${CMAKE_SOURCE_DIR}/application/flash/thread/flash_req.c
+    ${CMAKE_SOURCE_DIR}/application/flash/hsm/sm_flash.c
 
     ${CMAKE_SOURCE_DIR}/bsp/bsp.c
     ${CMAKE_SOURCE_DIR}/bsp/devices/bsp_lcd.c
     ${CMAKE_SOURCE_DIR}/bsp/devices/bsp_sram.c
+    ${CMAKE_SOURCE_DIR}/bsp/devices/bsp_flash.c
     ${CMAKE_SOURCE_DIR}/bsp/free_rtos/freertos_hooks.c
     ${CMAKE_SOURCE_DIR}/bsp/platform/stm32f1xx_it.c
     ${CMAKE_SOURCE_DIR}/bsp/platform/stm32f1xx_hal_msp.c
@@ -67,6 +76,12 @@ add_executable(${PROJECT_NAME}.elf ${SRC_ALL})
 
 target_include_directories(${PROJECT_NAME}.elf PRIVATE
     ${CMAKE_SOURCE_DIR}/application
+    ${CMAKE_SOURCE_DIR}/application/ui
+    ${CMAKE_SOURCE_DIR}/application/ui/thread
+    ${CMAKE_SOURCE_DIR}/application/ui/hsm
+    ${CMAKE_SOURCE_DIR}/application/flash
+    ${CMAKE_SOURCE_DIR}/application/flash/thread
+    ${CMAKE_SOURCE_DIR}/application/flash/hsm
     ${CMAKE_SOURCE_DIR}/bsp
     ${CMAKE_SOURCE_DIR}/bsp/devices
     ${CMAKE_SOURCE_DIR}/bsp/free_rtos

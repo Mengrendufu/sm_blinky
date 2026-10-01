@@ -2,6 +2,8 @@
 #include "sst.h"
 #include "bsp.h"
 #include "application.h"
+#include "ui.h"
+#include "flash.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include "timers.h"
@@ -42,6 +44,8 @@ int main(void) {
 
     SST_init();
     AO_start();
+    Ui_start();
+    Flash_start();
     SST_start();
 
     vTaskStartScheduler();

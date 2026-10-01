@@ -13,14 +13,9 @@
 #include "bsp.h"
 #include "bsp_lcd.h"
 #include "bsp_sram.h"
+#include "bsp_flash.h"
 #include "timers.h"
 // #include "stm32f103xe.h"
-
-//============================================================================
-// Trace records: ==MEM==[STACK][<task>][<free words>]==
-#define BSP_TRACE_STACK_AO    21U
-#define BSP_TRACE_STACK_IDLE  22U
-#define BSP_TRACE_STACK_TIMER 23U
 
 //============================================================================
 // Trace channel. It has to be alive before anything reports, and the
@@ -50,12 +45,14 @@ void BSP_init(void) {
 
     SystemCoreClockUpdate(); // Update SystemCoreClock
 
-    // Board bring-up. Both devices hang off the FSMC, and the panel wants its
-    // sleep-out wait over before anyone can draw into it, so this runs before
-    // the scheduler exists. Contract: BSP_init() returns with the panel
-    // out of sleep and both banks ready.
+    // Board bring-up: everything has to be ready before a task touches it,
+    // and the panel wants its sleep-out wait over before anyone draws into
+    // it, so this runs before the scheduler exists. Contract: BSP_init()
+    // returns with the panel out of sleep and black, both banks ready and
+    // the SPI flash probed.
     BSP_lcdInit();
     BSP_sramInit();
+    BSP_flashInit();
 }
 //............................................................................
 // Stack headroom of the three tasks that always exist. The values are the
@@ -68,16 +65,28 @@ static void BSP_traceStack_(uint8_t recId, uint16_t words) {
     SM_TRACE_END()
 }
 //............................................................................
-void BSP_memReport(void) {
+void BSP_memReport(uint8_t selfRecId) {
     TaskHandle_t const idle = xTaskGetIdleTaskHandle();
     TaskHandle_t const timer = xTimerGetTimerDaemonTaskHandle();
 
-    BSP_traceStack_(BSP_TRACE_STACK_AO,
+    BSP_traceStack_(selfRecId,
                     (uint16_t)uxTaskGetStackHighWaterMark((TaskHandle_t)0));
     BSP_traceStack_(BSP_TRACE_STACK_IDLE,
                     (uint16_t)uxTaskGetStackHighWaterMark(idle));
     BSP_traceStack_(BSP_TRACE_STACK_TIMER,
                     (uint16_t)uxTaskGetStackHighWaterMark(timer));
+}
+//............................................................................
+void BSP_traceRaw(char const *text) {
+    // Straight to the peripheral, not through HAL: the tracer's writer and
+    // this one are different tasks, and HAL's handle would answer HAL_BUSY
+    // while the other is mid byte. Register writes cannot be busy, and a few
+    // interleaved bytes are fine when the question is which line got out.
+    while (*text != '\0') {
+        while ((USART1->SR & USART_SR_TXE) == 0U) {
+        }
+        USART1->DR = (uint16_t)(*text++);
+    }
 }
 //............................................................................
 void BSP_ledOn(void) {

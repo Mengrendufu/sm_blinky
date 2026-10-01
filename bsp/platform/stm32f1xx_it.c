@@ -51,7 +51,31 @@
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+// Fault exit. An assertion already resets the board (SM_onAssert, with its
+// record on the wire); a fault on the bare 'while (1)' below would just
+// freeze everything instead, the one outcome the project does not accept
+// (AGENTS.md invariant 7). So a fault blinks the LED twice - two pulses are
+// the signature, telling the bench "this was a fault, not an assert" - and
+// then resets too.
+static void Fault_reset_(void)
+{
+  volatile uint32_t spin;
+  uint8_t i;
 
+  for (i = 0U; i < 2U; ++i) {
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
+    for (spin = 0U; spin < 400000U; ++spin) {
+    }
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET);
+    for (spin = 0U; spin < 400000U; ++spin) {
+    }
+  }
+
+  NVIC_SystemReset();
+
+  for (;;) {
+  }
+}
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
@@ -85,7 +109,7 @@ void NMI_Handler(void)
 void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
-
+  Fault_reset_();
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
   {
@@ -100,7 +124,7 @@ void HardFault_Handler(void)
 void MemManage_Handler(void)
 {
   /* USER CODE BEGIN MemoryManagement_IRQn 0 */
-
+  Fault_reset_();
   /* USER CODE END MemoryManagement_IRQn 0 */
   while (1)
   {
@@ -115,7 +139,7 @@ void MemManage_Handler(void)
 void BusFault_Handler(void)
 {
   /* USER CODE BEGIN BusFault_IRQn 0 */
-
+  Fault_reset_();
   /* USER CODE END BusFault_IRQn 0 */
   while (1)
   {
@@ -130,7 +154,7 @@ void BusFault_Handler(void)
 void UsageFault_Handler(void)
 {
   /* USER CODE BEGIN UsageFault_IRQn 0 */
-
+  Fault_reset_();
   /* USER CODE END UsageFault_IRQn 0 */
   while (1)
   {

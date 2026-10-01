@@ -60,7 +60,7 @@ void SST_Task_setPrio(SST_Task * const me, SST_TaskPrio prio) {
     SST_tasks_[sstPrio] = me;
     me->thread = xTaskCreateStatic(
         SST_ao_thread,      /* 所有 AO 共用同一入口 */
-        "SST",
+        "ao",
         stackWords,         /* 单位：word */
         me,                 /* ← me 作为 arg，入口函数里拿到身份 */
         (UBaseType_t)freertosPrio,
