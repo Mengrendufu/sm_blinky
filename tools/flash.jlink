@@ -5,10 +5,12 @@
 //             -ExitOnError 1 -NoGui 1 -CommandFile tools\flash.jlink
 // loadfile erases and verifies the flash it writes, so a plain "erase" is
 // not needed. The artifact path is absolute; change it if the build moves.
+// J-Link is a Windows program while the build lives in WSL, so the path is
+// the UNC view of the WSL tree (\\wsl.localhost\<distro>\...).
 
 r
 h
-loadfile C:\mengrendufu\workshop\local_prjs\embeded\hmi\sm_blinky\build\debug\sm_blinky.hex
+loadfile \\wsl.localhost\Ubuntu-24.04\home\sunnymatato\projects\sm_repos\embedded\hmi\sm_blinky\build\debug\sm_blinky.hex
 r
 g
 qc
