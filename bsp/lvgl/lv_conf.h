@@ -66,7 +66,7 @@
 // needs it.
 
 // Widgets nobody draws yet.
-#define LV_USE_ARC        0
+#define LV_USE_ARC        1
 #define LV_USE_ARCLABEL   0
 #define LV_USE_BUTTON     0
 #define LV_USE_BUTTONMATRIX 0
