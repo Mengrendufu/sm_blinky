@@ -85,6 +85,26 @@ cmake --preset debug && cmake --build --preset build-debug
 依赖：FreeRTOS-Kernel、common_c、sm_hsm、sm_sst、CMSIS Core 5.4.0、CMSIS Device F1 v4.3.3、STM32F1 HAL v1.1.8。
 第三方统一放 `3rd_party/`，不要新建 `vendor/` 或 `third_party/`。
 
+## UML 模型：不在仓库
+
+架构模型用 StarUML，而 StarUML 是 Windows 程序、**读不了 WSL 原生路径**，所以模型不放仓库。权威副本：
+
+```
+C:\mengrendufu\workshop\umls\staruml\embedded\hmi\architecture.mdj
+```
+
+WSL 侧的读法：`/mnt/c/mengrendufu/workshop/umls/staruml/embedded/hmi/architecture.mdj`
+
+**仓库里只放文档**（`docs/charter.md`）。2026-09-18 曾在 `docs/` 放过一份 `.mdj` 副本，16 天后就落后一版（`bsp` 那次改动没同步进来），已删除——**副本必然漂，所以不放**。
+
+读模型走 uml-sync 技能，不要手解 `.mdj` 的 JSON：
+
+```sh
+python3 ~/.config/opencode/skills/sm/uml-sync/scripts/export_model_tree.py \
+  --mdj /mnt/c/mengrendufu/workshop/umls/staruml/embedded/hmi/architecture.mdj \
+  -o /tmp/model-tree.txt
+```
+
 ## 改动约定
 
 - **列宽 78，管的是行不是文件**：我们自己新增/修改的行不超过 78 **显示列**（CJK 字符按两列算，不是字节数）。模板与第三方原文——`bsp/platform/` 的 ST 80 列横线和许可文本、`bsp/free_rtos/FreeRTOSConfig.h` 的 Amazon 模板文字——保持原样；即使我们就在这些文件里改代码，也只约束我们加的那几行，原有超长行一律不动。检查：`python3 tools/check_line_width.py` 默认只量工作区相对 HEAD 新增/改写的行，外加未跟踪新文件整份；点名文件时整份量；非 0 退出即超标。`.editorconfig` 登记同一条规则，只有 `3rd_party/` 镜像与 `tools/flash.jlink` 的不可断行绝对路径豁免。
