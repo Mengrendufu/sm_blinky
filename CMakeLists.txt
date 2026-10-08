@@ -135,3 +135,42 @@ add_custom_command(TARGET ${PROJECT_NAME}.elf POST_BUILD
             ${CMAKE_BINARY_DIR}/${PROJECT_NAME}.hex
     COMMAND ${CMAKE_SIZE} $<TARGET_FILE:${PROJECT_NAME}.elf>
 )
+
+#=============================================================================
+# ===Bootloader: the first 16 KB of the flash (bootloader/stm32f1xx_bl.ld).
+# Bare metal by design - no RTOS, no LVGL, no sm_sst: nothing runs before it,
+# so the only things it needs are HAL, CMSIS, the startup code and the platform
+# files the app also uses (clock time base, MSP, syscalls).
+set(SRC_BL
+    ${CMAKE_SOURCE_DIR}/bootloader/bl_main.c
+    ${CMAKE_SOURCE_DIR}/bsp/platform/stm32f1xx_it.c
+    ${CMAKE_SOURCE_DIR}/bsp/platform/stm32f1xx_hal_msp.c
+    ${CMAKE_SOURCE_DIR}/bsp/platform/stm32f1xx_hal_timebase_tim.c
+    ${CMAKE_SOURCE_DIR}/bsp/platform/syscalls.c
+    ${CMAKE_SOURCE_DIR}/bsp/platform/sysmem.c
+    ${ROOT_CMSIS_DEVICE}/Source/Templates/system_stm32f1xx.c
+    ${ROOT_CMSIS_DEVICE}/Source/Templates/gcc/startup_stm32f103xe.s
+    ${SRC_HAL}
+)
+
+add_executable(bootloader.elf ${SRC_BL})
+
+target_include_directories(bootloader.elf PRIVATE
+    ${CMAKE_SOURCE_DIR}/bootloader
+    ${CMAKE_SOURCE_DIR}/bsp/platform
+    ${ROOT_CMSIS_CORE}/CMSIS/Core/Include
+    ${ROOT_CMSIS_DEVICE}/Include
+    ${ROOT_HAL}/Inc
+    ${ROOT_HAL}/Inc/Legacy
+)
+
+target_link_options(bootloader.elf PRIVATE
+    -T${CMAKE_SOURCE_DIR}/bootloader/stm32f1xx_bl.ld
+    -Wl,-Map=${CMAKE_BINARY_DIR}/bootloader.map
+)
+
+add_custom_command(TARGET bootloader.elf POST_BUILD
+    COMMAND ${CMAKE_OBJCOPY} -O ihex $<TARGET_FILE:bootloader.elf>
+            ${CMAKE_BINARY_DIR}/bootloader.hex
+    COMMAND ${CMAKE_SIZE} $<TARGET_FILE:bootloader.elf>
+)

@@ -135,7 +135,7 @@ flash 不只是 UI 的资产存储：它还要放**升级镜像**、**配置/KV*
 
 ## 6. 预算
 
-- 内存：内部 SRAM 64 KB（= 0x10000 = 65,536 B，口径同 ST 链接脚本）。现状（LVGL 接入后、上板通过；**`2297bb3` 的 -O2 测量**）：**`bss 58,096 / data 16` ≈ 88.6%**；**Arc 接入（`e5d17c5`，+5.8 KB flash）与启动顺序改动后待重测** —— 重测：`cmake --preset debug && cmake --build --preset build-debug` 后 `arm-none-eabi-size build/debug/sm_blinky.elf`；其中 LVGL 池 24 KB、绘制缓冲 15 KB（240×32×2 = 15,360 B）、UI 栈 8 KB、其余任务栈与静态对象约 10 KB。UI 栈高水位（-O2）剩 **1320 words**，8 KB 很宽裕。扣掉链接脚本要求的 1.5 KB（heap 512 B + MSP 1 KB）后，真正可用的余量约 **5.9 KB**——够 flash 热路径那份 1~4 KB 的哑元缓冲，再要大件就得把池或绘制缓冲挪到外挂 SRAM。
+- 内存：内部 SRAM 64 KB（= 0x10000 = 65,536 B，口径同 ST 链接脚本）。现状（2026-10-08 构建、上板通过；bootloader 落地后 app 从 `0x08004000` 起）：**`bss 56,968 / data 16` ≈ 86.9%**，text 168,844（`arm-none-eabi-size build/debug/sm_blinky.elf`；`_ebss` = `0x2000D894`）；其中 LVGL 池 24 KB、绘制缓冲 15 KB（240×32×2 = 15,360 B）、UI 栈 8 KB、其余任务栈与静态对象约 10 KB。UI 栈高水位（-O2）剩 **1320 words**，8 KB 很宽裕。扣掉链接脚本要求的 1.5 KB（heap 512 B + MSP 1 KB）后，真正可用的余量约 **8.4 KB**（`_ebss` 到 RAM 顶 10,092 B，扣掉 1.5 KB 保留）——够 flash 热路径那份 1~4 KB 的哑元缓冲，再要大件就得把池或绘制缓冲挪到外挂 SRAM。
 - 刷屏：写单价 69.4 ns/字；一条 240×32 = 0.533 ms；整屏 76,800 字 = 5.33 ms（面板下界，DMA 也翻不过去），另加渲染时间。
 - 心跳：B 自适应，`LV_NO_TIMER_READY` 兜底 10 ms。一次全屏重绘会把 UI 线程独占 6~10 ms（≈ 一个心跳周期），这是知情代价。
 - 实测（-O2、72 MHz、240×32 条带，`[TIME]` 记录）：一次 LED 翻转引起的局部刷新 = **3 块 / 8 KiB**，`FRAME` 总计 **≈11.9 ms**：我们自己的 flush 1.35 ms，LVGL 渲染 ≈10.5 ms。按块看，方块那块（72×72）flush 0.80 ms；两行字那两块（72×24）各 flush ≈0.27 ms、渲染各 ≈2.2 ms。折算刷屏单价 ≈155 ns/像素（≈11 周期，接近 FSMC 5 HCLK 的下限）。**整屏重绘那一条还没测**（要构造整屏失效才有记录）。

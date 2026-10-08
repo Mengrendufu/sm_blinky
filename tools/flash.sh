@@ -27,7 +27,7 @@ if [[ "${1:-}" != "-nobuild" ]]; then
 fi
 
 echo "[flash] artifact:"
-ls -l "$ROOT/build/debug/sm_blinky.hex"
+ls -l "$ROOT/build/debug/bootloader.hex" "$ROOT/build/debug/sm_blinky.hex"
 
 CFG="$(wslpath -w "$ROOT/tools/flash.jlink")"
 echo "[flash] J-Link Commander over SWD..."

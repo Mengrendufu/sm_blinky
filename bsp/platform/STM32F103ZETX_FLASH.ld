@@ -1,3 +1,6 @@
+/* sm_blinky app image. The first 16 KB of flash belong to the bootloader
+   (bootloader/stm32f1xx_bl.ld), so the app starts at 0x08004000 -- which is also
+   what application/main.c puts into SCB->VTOR before anything else runs. */
 /*
 ******************************************************************************
 **
@@ -35,8 +38,13 @@
 /* Entry Point */
 ENTRY(Reset_Handler)
 
-/* Highest address of the user mode stack */
-_estack = ORIGIN(RAM) + LENGTH(RAM); /* end of "RAM" Ram type memory */
+/* Highest address of the user mode stack, with the top 32 bytes reserved for
+   the cross-reset flag area below. The formula is deliberately shared by this
+   script and the app's: same address in both images, and the stack (which grows
+   down from _estack) can never reach it. */
+_noinit_base = ORIGIN(RAM) + LENGTH(RAM) - 32;
+_estack = _noinit_base;
+_snoinit = _noinit_base;  /* flag lives at the section address */
 
 _Min_Heap_Size = 0x200; /* required amount of heap */
 _Min_Stack_Size = 0x400; /* required amount of stack */
@@ -45,7 +53,7 @@ _Min_Stack_Size = 0x400; /* required amount of stack */
 MEMORY
 {
   RAM    (xrw)    : ORIGIN = 0x20000000,   LENGTH = 64K
-  FLASH    (rx)    : ORIGIN = 0x8000000,   LENGTH = 512K
+  FLASH    (rx)    : ORIGIN = 0x8004000,   LENGTH = 496K
 }
 
 /* Sections */
@@ -174,6 +182,18 @@ SECTIONS
     . = . + _Min_Heap_Size;
     . = . + _Min_Stack_Size;
     . = ALIGN(8);
+  } >RAM
+
+  /* Cross-reset flag area. The startup code only clears [_sbss, _ebss), and this
+     sits above it, so the value survives a reset (it does NOT survive a power
+     cycle). The address is fixed by the formula above, and both this script and
+     the app's must use the same one: the bootloader writes, the app may read. */
+  ._noinit _noinit_base (NOLOAD) :
+  {
+    KEEP(*(.noinit))
+    KEEP(*(.noinit*))
+    . = ALIGN(4);
+    _enoinit = .;
   } >RAM
 
   /* Remove information from the compiler libraries */

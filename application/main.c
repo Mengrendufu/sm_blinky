@@ -19,6 +19,14 @@ static void MX_USART1_UART_Init(void);
 static void SST_sysTimer_cb(TimerHandle_t xTimer);
 
 int main(void) {
+    // The app image lives at 0x08004000; the first 16 KB belong to the
+    // bootloader. On a real reset the hardware loads MSP and PC from the
+    // vector table at 0x08000000 - the bootloader's - so point VTOR at ours
+    // before anything can take an interrupt. The bootloader sets the same
+    // value just before it jumps; this line covers the other case, where
+    // J-Link loads the app image on its own and no bootloader ran.
+    SCB->VTOR = 0x08004000U;
+
     HAL_Init();
     SystemClock_Config();
     MX_GPIO_Init();
