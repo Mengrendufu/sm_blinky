@@ -1,0 +1,40 @@
+sequenceDiagram
+    autonumber
+    box rgb(232,240,254) 调用方
+        participant main
+    end
+    box rgb(255,244,229) 虚体 · 调度
+        participant Board
+    end
+    box rgb(232,247,236) 实体 · 存在
+        participant Panel
+        participant Sram
+        participant NorFlash
+    end
+
+    main->>Board: 板级初始化
+
+    Board->>Panel: 面板初始化
+    Panel->>Panel: 配置总线
+    Note over Panel: 等 120 ms（自复位起算，未满则补足）
+    loop 最多 100 次
+        opt 仅首次
+            Panel->>Panel: 软复位
+            Note over Panel: 等 130 ms
+            Panel->>Panel: 退出睡眠
+            Note over Panel: 等 130 ms
+        end
+        Panel->>Panel: 下发厂商寄存器表
+        Panel->>Panel: 清屏（开窗 + 写入整屏）
+        Panel->>Panel: 回读四点验证
+        Note over Panel: 未通过则等 100 ms
+    end
+    Panel->>Panel: 开显示
+    Panel->>Panel: 点背光（最后）
+    Panel-->>Board: 就绪
+
+    Board->>Sram: 存储器初始化
+    Sram-->>Board: 就绪
+    Board->>NorFlash: 存储器初始化
+    NorFlash-->>Board: 就绪
+    Board-->>main: 板级就绪

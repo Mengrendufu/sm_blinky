@@ -1,0 +1,65 @@
+sequenceDiagram
+    autonumber
+    box rgb(236,236,240) 复位与启动
+        participant boot as 启动代码
+        participant main
+    end
+    box rgb(255,244,229) 平台与外设
+        participant HAL as HAL（时基/时钟）
+        participant Board as Board（bsp.c）
+        participant Panel as Panel（ST7789）
+        participant Sram as Sram（IS62WV51216）
+        participant NorFlash as NorFlash（W25Q128）
+    end
+    box rgb(240,240,240) 内核与框架
+        participant RTOS as FreeRTOS
+        participant SST
+    end
+    box rgb(240,236,250) 应用
+        participant Blinky as Blinky（AO）
+        participant UI as UI（LVGL）
+        participant Flash as Flash（线程）
+    end
+
+    Note over boot,main: 阶段 0 · 复位之后、main 之前
+    boot->>boot: Reset_Handler：搬 .data、清 .bss → SystemInit()（本构建空操作）
+    boot->>main: __libc_init_array() → main()
+
+    Note over main,RTOS: 阶段 A · 调度器之前 —— 单上下文，无并发
+    main->>HAL: HAL_Init()：MSP（AFIO/PWR、SWD）+ TIM1 时基 1 kHz
+    main->>HAL: 时钟 72 MHz（HSE+PLL×9）+ GPIO（LED）+ UART1
+    main->>Board: BSP_init()（追踪通道最先构造，否则记录被丢）
+    Board->>Panel: BSP_lcdInit()
+    Panel->>Panel: 复位余量 120 ms → SWRESET/SLPOUT → 寄存器表 → 清 GRAM
+    Panel->>Panel: 回读 4 点验证；不过就等 100 ms 再试
+    Note over Panel: 冷上电实测 3.0 / 3.2 / 3.8 s，很冷 > 11 s<br/>整个启动的大头就在这几秒
+    Panel->>Panel: DISPON → 点背光（必须最后）
+    Board->>Sram: BSP_sramInit()（GPIO + FSMC Bank3）
+    Board->>NorFlash: BSP_flashInit()（SPI2 18 MHz + 丢掉首个事务）
+    Board-->>main: 板级就绪（面板全黑、两 bank 就绪、flash 已探）
+    main->>RTOS: 建静态定时器 sstTick（10 ms，自动重载）
+    main->>RTOS: xTimerStart(sstTick)
+    Note over RTOS: 调度器没跑 → 命令只是入队，Tmr 任务起来才兑现
+    main->>SST: SST_init()（只有编译期断言）
+    main->>UI: Ui_start()：顶层初始转移 + 建「ui」（2048 w / 23）+ 绑收件箱
+    main->>Flash: Flash_start()：顶层初始转移 + 建「flash」（256 w / 23）
+    Note over main,Flash: ★ 通道先落地（绑定先于派发）—— 环与唤醒目标就位，之后才允许任何生产者投递
+    main->>Blinky: AO_start() → Blinky_ctor()
+    main->>SST: SST_Task_start(AO_Blinky, 0x1801, 队列 8, ie=0)
+    SST->>RTOS: 建静态任务「ao」（256 w / prio 24）
+    Note over RTOS,Blinky: ★ 线程开启 —— 建出来了，一次都还没跑
+    SST->>Blinky: ★ 顶层初始转移：上膛 500/500 → 进 Blinky_on
+    Blinky->>UI: entry：LED 亮 + 投 LED_ON
+    Note over UI: 通道已绑定 → 投递带唤醒（xTaskNotifyGive，计数保留）<br/>事件在「ui」第一次进循环时取走，不再等 poll timeout
+    main->>SST: SST_start() —— 静态事件池初始化
+    main->>RTOS: vTaskStartScheduler()
+    RTOS->>RTOS: 建 idle / Tmr 任务（栈由 freertos_hooks.c 静态提供）
+    Note over main,RTOS: 不返回 —— main 的上下文到此结束
+
+    Note over main,RTOS: 阶段 B · 调度器之后 —— 三个线程体这时才第一次跑
+    RTOS->>Blinky: 「ao」首次运行 → 等通知
+    RTOS->>UI: 「ui」首次运行 → Ui_dispInit()（LVGL bring-up）
+    UI->>Panel: 首帧：SetWindow + WritePixels
+    RTOS->>Flash: 「flash」首次运行 → 阻塞等请求
+    RTOS->>SST: Tmr 兑现 sstTick 启动 → 每 10 ms 泵 SST_TimeEvt_tick
+    SST->>Blinky: 500 ms 到：投递 BLINKY_TIMEOUT_SIG → 唤醒 → LED 翻转

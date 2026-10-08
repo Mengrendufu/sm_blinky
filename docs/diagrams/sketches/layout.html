@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>sm_blinky · flash 资源加载：存储布局草图</title>
+<style>
+ body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;background:#fafafa;color:#222;margin:0;padding:24px 32px 64px}
+ h1{font-size:20px;margin:0 0 4px} .sub{color:#666;font-size:13px;margin-bottom:8px}
+ h2{font-size:15px;margin:26px 0 4px}
+ .meta{font-size:12px;color:#666;margin-bottom:8px}
+ .bar{display:flex;height:40px;border-radius:4px;overflow:hidden;border:1px solid #ddd;background:#fff}
+ .seg{display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;
+      white-space:nowrap;overflow:hidden;min-width:2px}
+ .note{font-size:12.5px;color:#555;margin:8px 0 0;line-height:1.6}
+ table{border-collapse:collapse;font-size:12.5px;margin-top:8px;width:100%}
+ th,td{border:1px solid #e3e3e3;padding:3px 8px;text-align:left}
+ th{background:#f2f2f2;font-weight:600}
+ td.num{font-family:Consolas,monospace;text-align:right}
+ .sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+ .tag{display:inline-block;font-size:11px;padding:1px 6px;border-radius:3px;margin-left:6px}
+ .ok{background:#e6f4ea;color:#1e7a3c;border:1px solid #b7dfc4}
+ .prop{background:#fff4e5;color:#8a5300;border:1px solid #f0d5ab}
+</style></head><body>
+<h1>sm_blinky · flash 资源加载 —— 存储布局草图</h1>
+<div class="sub">判据来自源码与 docs/charter.md；提案项已标注。用于判断"位置合不合适"，不是最终规格。</div>
+<h2>① NOR W25Q128（16 MB）分区</h2>
+<div class="meta">提案 · 数字待定（docs/charter.md:108）</div>
+<div class="bar">
+  <div class="seg" style="width:0.0244%;background:#8c8c8c" title="meta 4 KB"></div>
+  <div class="seg" style="width:1.5625%;background:#5b8ff9" title="update A 256 KB"></div>
+  <div class="seg" style="width:1.5625%;background:#7aa5ff" title="update B 256 KB"></div>
+  <div class="seg" style="width:50.0000%;background:#f6a623" title="assets 8 MB">assets</div>
+  <div class="seg" style="width:0.7812%;background:#5ad8a6" title="config 128 KB"></div>
+  <div class="seg" style="width:0.0244%;background:#7262fd" title="factory 4 KB"></div>
+  <div class="seg" style="width:46.0449%;background:#d9d9d9" title="保留 7.4 MB">保留</div>
+</div>
+<table><tr><th>段</th><th>起始</th><th>大小</th><th>字节</th><th>占比</th></tr>
+<tr><td><span class="sw" style="background:#8c8c8c"></span>meta</td><td class="num">0x00000000</td><td class="num">4 KB</td><td class="num">4,096</td><td class="num">0.02%</td></tr>
+<tr><td><span class="sw" style="background:#5b8ff9"></span>update A</td><td class="num">0x00001000</td><td class="num">256 KB</td><td class="num">262,144</td><td class="num">1.56%</td></tr>
+<tr><td><span class="sw" style="background:#7aa5ff"></span>update B</td><td class="num">0x00041000</td><td class="num">256 KB</td><td class="num">262,144</td><td class="num">1.56%</td></tr>
+<tr><td><span class="sw" style="background:#f6a623"></span>assets</td><td class="num">0x00081000</td><td class="num">8 MB</td><td class="num">8,388,608</td><td class="num">50.00%</td></tr>
+<tr><td><span class="sw" style="background:#5ad8a6"></span>config</td><td class="num">0x00881000</td><td class="num">128 KB</td><td class="num">131,072</td><td class="num">0.78%</td></tr>
+<tr><td><span class="sw" style="background:#7262fd"></span>factory</td><td class="num">0x008A1000</td><td class="num">4 KB</td><td class="num">4,096</td><td class="num">0.02%</td></tr>
+<tr><td><span class="sw" style="background:#d9d9d9"></span>保留</td><td class="num">0x008A2000</td><td class="num">7.4 MB</td><td class="num">7,725,056</td><td class="num">46.04%</td></tr>
+<tr><td><b>合计</b></td><td class="num">—</td><td class="num"><b>16 MB</b></td><td class="num"><b>16,777,216</b></td><td class="num">100.00%</td></tr></table>
+<div class="note">assets 占整片一半；3 张整屏图只用 450 KB = assets 的 5.5%。</div>
+<h2>② 外挂 SRAM IS62WV51216（1 MB @ 0x68000000）</h2>
+<div class="meta">已核（bsp/devices/bsp_sram.h:14-15）</div>
+<div class="bar">
+  <div class="seg" style="width:43.9453%;background:#f6a623" title="资产区：3 张整屏图 450 KB">资产区：3 张整屏图</div>
+  <div class="seg" style="width:56.0547%;background:#d9d9d9" title="未分配：LVGL 池 / DMA 缓冲（待定） 574 KB">未分配：LVGL 池 / DMA 缓冲（待定）</div>
+</div>
+<table><tr><th>段</th><th>起始</th><th>大小</th><th>字节</th><th>占比</th></tr>
+<tr><td><span class="sw" style="background:#f6a623"></span>资产区：3 张整屏图</td><td class="num">0x68000000</td><td class="num">450 KB</td><td class="num">460,800</td><td class="num">43.95%</td></tr>
+<tr><td><span class="sw" style="background:#d9d9d9"></span>未分配：LVGL 池 / DMA 缓冲（待定）</td><td class="num">0x68070800</td><td class="num">574 KB</td><td class="num">587,776</td><td class="num">56.05%</td></tr>
+<tr><td><b>合计</b></td><td class="num">—</td><td class="num"><b>1 MB</b></td><td class="num"><b>1,048,576</b></td><td class="num">100.00%</td></tr></table>
+<div class="note">今天只被 bsp.c:54（init）与 blinky.c:154（bench）碰过，基本空闲。一张整屏图 = 240×320×2 = 153,600 B。</div>
+<h2>③ 内部 SRAM（64 KB）对照</h2>
+<div class="meta">数字待重测（charter.md §6）</div>
+<div class="bar">
+  <div class="seg" style="width:88.6475%;background:#e8684a" title="已用 bss 58,096 B 56.7 KB">已用 bss 58,096 B</div>
+  <div class="seg" style="width:11.3525%;background:#5ad8a6" title="剩 7,440 B 7.3 KB">剩 7,440 B</div>
+</div>
+<table><tr><th>段</th><th>起始</th><th>大小</th><th>字节</th><th>占比</th></tr>
+<tr><td><span class="sw" style="background:#e8684a"></span>已用 bss 58,096 B</td><td class="num">0x20000000</td><td class="num">56.7 KB</td><td class="num">58,096</td><td class="num">88.65%</td></tr>
+<tr><td><span class="sw" style="background:#5ad8a6"></span>剩 7,440 B</td><td class="num">0x2000E2F0</td><td class="num">7.3 KB</td><td class="num">7,440</td><td class="num">11.35%</td></tr>
+<tr><td><b>合计</b></td><td class="num">—</td><td class="num"><b>64 KB</b></td><td class="num"><b>65,536</b></td><td class="num">100.00%</td></tr></table>
+<div class="note">剩 7,440 B，而一张整屏图要 153,600 B = 剩余空间的 20 倍 —— 这就是必须放外挂 SRAM 的全部理由。</div>
+<h2>④ 资产区内部 · 方案 A：固定偏移（最简）</h2>
+<div class="meta">3 个常量地址，无头部无校验</div>
+<div class="bar">
+  <div class="seg" style="width:33.3333%;background:#f6a623" title="图 1 150 KB">图 1</div>
+  <div class="seg" style="width:33.3333%;background:#f2c14e" title="图 2 150 KB">图 2</div>
+  <div class="seg" style="width:33.3333%;background:#efd07a" title="图 3 150 KB">图 3</div>
+</div>
+<table><tr><th>段</th><th>起始</th><th>大小</th><th>字节</th><th>占比</th></tr>
+<tr><td><span class="sw" style="background:#f6a623"></span>图 1</td><td class="num">+0x0</td><td class="num">150 KB</td><td class="num">153,600</td><td class="num">33.33%</td></tr>
+<tr><td><span class="sw" style="background:#f2c14e"></span>图 2</td><td class="num">+0x25800</td><td class="num">150 KB</td><td class="num">153,600</td><td class="num">33.33%</td></tr>
+<tr><td><span class="sw" style="background:#efd07a"></span>图 3</td><td class="num">+0x4B000</td><td class="num">150 KB</td><td class="num">153,600</td><td class="num">33.33%</td></tr>
+<tr><td><b>合计</b></td><td class="num">—</td><td class="num"><b>450 KB</b></td><td class="num"><b>460,800</b></td><td class="num">100.00%</td></tr></table>
+<div class="note">读失败就只能整块降级为纯色/渐变。总占用 460,800 B。</div>
+<h2>⑤ 资产区内部 · 方案 B：目录表（可扩展）</h2>
+<div class="meta">头部 + 条目表，4 KB 对齐</div>
+<div class="bar">
+  <div class="seg" style="width:0.0138%;background:#8c8c8c" title="头 64 B 64 B"></div>
+  <div class="seg" style="width:0.8673%;background:#7262fd" title="条目表 + 对齐 3.9 KB"></div>
+  <div class="seg" style="width:33.0396%;background:#f6a623" title="图 1 150 KB">图 1</div>
+  <div class="seg" style="width:33.0396%;background:#f2c14e" title="图 2 150 KB">图 2</div>
+  <div class="seg" style="width:33.0396%;background:#efd07a" title="图 3 150 KB">图 3</div>
+</div>
+<table><tr><th>段</th><th>起始</th><th>大小</th><th>字节</th><th>占比</th></tr>
+<tr><td><span class="sw" style="background:#8c8c8c"></span>头 64 B</td><td class="num">+0x0</td><td class="num">64 B</td><td class="num">64</td><td class="num">0.01%</td></tr>
+<tr><td><span class="sw" style="background:#7262fd"></span>条目表 + 对齐</td><td class="num">+0x40</td><td class="num">3.9 KB</td><td class="num">4,032</td><td class="num">0.87%</td></tr>
+<tr><td><span class="sw" style="background:#f6a623"></span>图 1</td><td class="num">+0x1000</td><td class="num">150 KB</td><td class="num">153,600</td><td class="num">33.04%</td></tr>
+<tr><td><span class="sw" style="background:#f2c14e"></span>图 2</td><td class="num">+0x26800</td><td class="num">150 KB</td><td class="num">153,600</td><td class="num">33.04%</td></tr>
+<tr><td><span class="sw" style="background:#efd07a"></span>图 3</td><td class="num">+0x4C000</td><td class="num">150 KB</td><td class="num">153,600</td><td class="num">33.04%</td></tr>
+<tr><td><b>合计</b></td><td class="num">—</td><td class="num"><b>454 KB</b></td><td class="num"><b>464,896</b></td><td class="num">100.00%</td></tr></table>
+<div class="note">换来可增删条目、可 CRC 校验、升级不改固件地址；代价比方案 A 多 4 KB。总占用 464,896 B。</div>
+</body></html>

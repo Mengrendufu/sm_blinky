@@ -1,0 +1,23 @@
+sequenceDiagram
+    autonumber
+    participant Runtime
+    participant BSP
+    participant NOR as NOR W25Q128
+    participant SRAM as 外挂 SRAM
+    participant Trace as Trace（UART1）
+
+    Runtime->>BSP: 读资产头 64 B（调度器之前，BSP 独占总线）
+    BSP->>NOR: 03h 读命令 + 地址（assets 区 +0）
+    NOR-->>BSP: magic / 版本 / 条数 / 目录表
+    Runtime->>Runtime: 校验 magic，取第 1 条：offset / len / CRC
+    Runtime->>BSP: 读背景图 153,600 B → 外挂 SRAM（一条 03h 事务覆盖全块）
+    loop 逐字节 × 153,600（每次 1 B 的 HAL_SPI_TransmitReceive，SPIN，18 MHz）
+        BSP->>NOR: 数据流（CS 全程拉低）
+        NOR-->>BSP: 1 B
+        BSP->>SRAM: 写 1 B（FSMC Bank3 @ 0x68000000）
+    end
+    Runtime->>Runtime: CRC32 比对 3950042814 —— 通过记 DONE；不符或读失败标记「无资产」
+    Runtime->>Trace: 记录 offset / len / CRC / 结果
+    Runtime->>Runtime: vTaskStartScheduler() —— flash 交还运行期角色
+    Runtime->>SRAM: UI 首帧：bg_image_src → 0x68000000
+    Runtime->>Runtime: 运行期切页只换 bg_image_src（零 flash 访问）

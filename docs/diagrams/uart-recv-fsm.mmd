@@ -1,0 +1,58 @@
+stateDiagram-v2
+    direction TB
+
+    [*] --> IDLE : 上电：UART1 已就绪，面板还没 bring-up
+
+    state "S1 等握手（窗口 200 ms）" as IDLE
+    state "S2 已回 ACK" as HELLO
+    state "S3 等块头" as WAITBLK
+    state "S4 擦该扇区" as ERASE
+    state "S5 收块 + 逐页编程" as RECV
+    state "S6 校验块 + 回 ACK/NAK" as ACKBLK
+    state "S7 回读整张验 CRC" as VERIFY
+    state "S8 写资产头（原子点）" as COMMIT
+    state "S9 发 DONE" as DONE
+    state "SX 发 ABORT" as ABORT
+    state "SN 退出维护模式 → 正常启动" as NORMAL
+
+    IDLE --> HELLO : 握手帧合法：0xAA + 版本 + 长度 ≤ assets 剩余 + CRC32
+    IDLE --> NORMAL : 200 ms 内没收到 或 帧非法（回错码）
+
+    HELLO --> WAITBLK : 已发 ACK 0x55 + 扇区基址 + 块大小 4 KB
+
+    WAITBLK --> ERASE : 块头合法：序号 = 期望值、长度 ≤ 4 KB、头 CRC16 自洽
+    WAITBLK --> ABORT : 超时 500 ms 或 序号不符
+
+    ERASE --> RECV : 扇区擦除完成（WREN + 20h + 等 BUSY，实测 ≈130 ms）
+    ERASE --> ABORT : 等 BUSY 超时（FLASH_ERASE_MS = 2000）
+
+    RECV --> RECV : 每收 1 B：填 256 B 页缓冲 + 流式 CRC32；缓冲满 → 02h 页编程 + 等 BUSY
+    RECV --> ACKBLK : 收满声明长度
+    RECV --> ABORT : 字节间超时 2 ms（帧内断流）
+
+    ACKBLK --> WAITBLK : 块 CRC 通过 → 回 ACK（还有下一块）
+    ACKBLK --> ERASE : 块 CRC 不符 → 回 NAK，重擦重写该块（重试 ≤ 3）
+    ACKBLK --> ABORT : 重试 3 次仍不符
+    ACKBLK --> VERIFY : 已是最后一块且通过
+
+    VERIFY --> COMMIT : 回读整张算 CRC32 == 脚本告知值
+    VERIFY --> ABORT : CRC 不符
+
+    COMMIT --> DONE : 头写入后回读确认（magic / len / CRC）
+    COMMIT --> ABORT : 头写入失败（旧头已覆盖 → 等同「无资产」）
+
+    DONE --> [*] : 回 DONE 帧 → 复位
+    ABORT --> NORMAL : 回 ABORT 帧
+    NORMAL --> [*] : 继续 BSP_init() → 面板 → 调度器（UI 退纯色形态）
+
+    note right of IDLE
+        挂点：main() 里 MX_USART1_UART_Init() 之后、BSP_init() 之前。
+        此时 trace 还没构造（不抢 UART1）、面板还没 bring-up（进维护模式省掉 3~4 s）、
+        也还没碰 FreeRTOS 临界区（uxCriticalNesting 陷阱未开始），所以可以用 HAL_Delay。
+    end note
+
+    note right of RECV
+        缓冲只要 256 B 页大小：内部 SRAM 只剩 7,440 B（charter §6）。
+        代价：块内重传要把整个 4 KB 扇区重擦一遍。
+        接收用轮询 + 超时，不用 ISR/环形缓冲 —— 维护模式下 CPU 没别的活。
+    end note

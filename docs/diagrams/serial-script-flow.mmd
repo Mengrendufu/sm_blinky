@@ -1,0 +1,36 @@
+sequenceDiagram
+    autonumber
+    participant S as 脚本（burn-asset.py）
+    participant F as 外部资源（镜像 / BL.elf / .jlink 模板）
+    participant J as J-Link（cmd.exe → JLink.exe）
+    participant U as 串口（CH340，115200）
+    participant BL as Bootloader
+
+    S->>F: 读镜像（153,600 B）→ 算 CRC32 = 3950042814
+    S->>F: 读 BL.elf 的 _snoinit 符号 → 得标志地址（不写死，bss 长大也不失配）
+    S->>F: 取 enter-burn.jlink 模板 → 填地址 → 生成命令文件
+    S->>U: 建对象但不打开：rtscts/dsrdtr=False，rts/dtr=False（setter 有 is_open 守卫 → 只记录）
+    S->>U: open() —— 打开瞬间写下去就是 deassert，不碰 NRST（已实测）
+    S->>J: 起 JLink.exe -CommandFile（r → h → w4 标志 → r → g → qc）
+    J->>BL: NRST 复位（串口此时开着，但 deassert 不干预）
+    BL->>BL: 读 noinit 标志命中 → 停在烧写模式（不限时等）
+    S->>U: 握手帧 0xAA + 版本 + 长度 + CRC32（重复发，直到收到 ACK）
+    U->>BL: 转发
+    BL-->>U: ACK 0x55 + 扇区基址 + 块大小 4 KB
+    U-->>S: 收到 ACK（记录第几次尝试）
+    Note over S,U: 握手超时 5 s → 打印三种诊断：控制线没压住 / J-Link 那步失败 / BOOT0 被 RTS 拉高进了 ROM bootloader
+
+    loop 38 块 × 4 KB（停等，无硬件流控）
+        S->>U: 块头（序号 + 长度 + CRC16）+ 该块数据
+        U->>BL: 转发 → 收进 4 KB 块缓冲（还没碰 flash）
+        BL->>BL: 块 CRC 比对 —— 不符就回 NAK，此时 flash 未被写过
+        BL-->>U: ACK（块校验通过）
+        U-->>S: ACK 或 NAK（NAK → 重传该块，最多 3 次；再失败则退出并报块号）
+    end
+
+    BL->>BL: 回读整张算 CRC32 → 与脚本值比对 → 写资产头（★ 掉电原子点）
+    BL-->>U: DONE + 实测耗时
+    U-->>S: 收到 DONE
+    S->>S: 打印时间账（串口 ≈13.3 s + 擦写 ≈5.5 s；38 次擦 + 600 页）
+    S->>U: close() —— deassert 下开/关都不干预 NRST（已实测）
+    BL->>BL: 清 noinit 标志 → 校验 app 向量表 → VTOR/MSP → 跳 app

@@ -2,3 +2,5 @@ build/
 .cache/
 compile_commands.json
 .clangd
+mermaid.min.js
+docs/diagrams/sketches/bg/*.rgb565

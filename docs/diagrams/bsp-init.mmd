@@ -1,0 +1,57 @@
+sequenceDiagram
+    autonumber
+    box rgb(232,240,254) 调用方
+        participant main
+    end
+    box rgb(255,244,229) 虚体 · 调度
+        participant Board
+    end
+    box rgb(232,247,236) 实体 · 存在
+        participant Panel
+        participant Sram
+        participant NorFlash
+    end
+    box rgb(240,236,250) 硬件与通道
+        participant FSMC
+        participant ST as ST7789
+        participant SPI2
+        participant WQ as W25Q128
+    end
+
+    main->>Board: 板级初始化
+    Board->>Board: 更新系统时钟
+
+    Note over Board,Panel: 阶段一 · 面板 bring-up（全图 80% 的时间在这里）
+    Board->>Panel: 面板初始化
+    Panel->>FSMC: 配置引脚与 Bank4
+    Note over Panel,ST: 等 120 ms（自复位起算，未满则补足）
+    loop 最多 100 次
+        opt 仅首次
+            Panel->>ST: 软复位
+            Note over Panel,ST: 等 130 ms
+            Panel->>ST: 退出睡眠
+            Note over Panel,ST: 等 130 ms
+        end
+        Panel->>ST: 下发厂商寄存器表
+        Panel->>ST: 开窗（全屏）
+        Panel->>ST: 写入整屏（清黑）
+        Panel->>ST: 回读四点
+        Note over Panel,ST: 未通过则等 100 ms
+    end
+    Panel->>ST: 开显示
+    Panel->>Panel: 点背光（最后）
+    Panel->>ST: 读面板 ID
+    Panel-->>Board: 就绪
+
+    Note over Board,Sram: 阶段二 · 存储器总线（纯寄存器写，零等待）
+    Board->>Sram: 存储器初始化
+    Sram->>FSMC: 配置引脚与 Bank3
+    Sram-->>Board: 就绪
+
+    Note over Board,NorFlash: 阶段三 · 串行 flash（含一次刻意的丢弃读）
+    Board->>NorFlash: 存储器初始化
+    NorFlash->>SPI2: 配置引脚与 SPI2
+    NorFlash->>WQ: 读状态寄存器（丢弃）
+    NorFlash-->>Board: 就绪
+
+    Board-->>main: 板级就绪

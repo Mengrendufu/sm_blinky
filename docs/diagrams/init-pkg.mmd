@@ -1,0 +1,26 @@
+sequenceDiagram
+    autonumber
+    participant Runtime as Runtime（application）
+    participant RTOS as FreeRTOS
+    participant SST as sm_sst
+    participant BSP as bsp
+
+    Runtime->>Runtime: 系统时钟更新（72 MHz，TIM1 时基 1 kHz）
+    Runtime->>BSP: 板级初始化
+    BSP->>BSP: 面板初始化（复位 → 寄存器表 → 清屏 → 回读4点验证 or 延时）
+    BSP->>BSP: SRAM 内存映射（FSMC_BANK3）
+    BSP->>BSP: NORFLASH 配置（SPI 外设初始化，自丢弃一次读取）
+    BSP-->>Runtime: DONE
+    Runtime->>RTOS: 建定时器 sstTick（10 ms）并启动
+    Runtime->>SST: 框架初始化
+    Runtime->>Runtime: ① UI（8 KB 栈）② Flash ③ Blinky 依次落地 —— 通道先成型（绑定先于派发）
+    Runtime->>SST: AO_Blinky 上线
+    SST->>RTOS: 建任务「ao」
+    SST->>Runtime: 顶层初始转移 → LED 亮 + 投 LED_ON
+    Runtime->>RTOS: 启动调度器
+    RTOS->>Runtime: 三个线程体首次运行（ao / ui / flash）
+    Runtime->>Runtime: UI 首帧（LVGL 渲染 → 面板）
+    loop 周期运行
+        RTOS->>SST: 每 10 ms 泵 SST_TimeEvt_tick
+        SST->>Runtime: 500 ms 到 → 翻转 LED
+    end

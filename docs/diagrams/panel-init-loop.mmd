@@ -1,0 +1,39 @@
+sequenceDiagram
+    autonumber
+    participant app as application
+    participant bsp as bsp
+    participant panel as 面板（ST7789）
+
+    app->>bsp: BSP_init() → BSP_lcdInit()
+    bsp->>bsp: GPIO + FSMC 初始化（BSP_lcdGpioInit_ / BSP_lcdFsmcInit_）
+
+    opt 冷启动余量不足 120 ms
+        bsp->>bsp: HAL_Delay(120 - sinceReset)
+    end
+
+    loop 最多 100 轮（attempt 0..99），直到回读验证通过
+        opt attempt == 0 —— 复位只发一次
+            bsp->>panel: SWRESET（0x01）
+            bsp->>bsp: HAL_Delay(130)
+            bsp->>panel: SLPOUT（0x11）
+            bsp->>bsp: HAL_Delay(130)
+        end
+
+        bsp->>panel: 寄存器表（BSP_lcdPanelInit_）
+        bsp->>panel: 清 GRAM = 黑（BSP_lcdFill_）
+
+        loop 4 个采样点（y = 0 / 159 / 160 / 319）
+            bsp->>panel: 读 GRAM（0, y）
+            panel-->>bsp: 像素值
+        end
+
+        alt 4 点全黑 —— 面板已出复位
+            bsp->>bsp: break：跳出重试循环
+        else 有点不是黑
+            bsp->>bsp: HAL_Delay(100) → 下一轮
+        end
+    end
+
+    bsp->>panel: DISPON（0x29）
+    bsp->>panel: 点背光（必须最后）
+    bsp-->>app: 面板就绪（全黑、两 bank 就绪、flash 已探）

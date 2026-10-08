@@ -1,0 +1,26 @@
+sequenceDiagram
+    autonumber
+    participant RST as 复位源（J-Link NRST / RESET 键 / 上电）
+    participant BL as Bootloader（0x08000000，16 KB）
+    participant NOR as NOR W25Q128
+    participant App as App（0x08004000 起）
+
+    RST->>BL: NRST 释放 —— 硬件取 BL 的向量表（MSP = BL 栈顶、PC = BL 复位向量）
+    BL->>BL: HAL_Init → 时钟 72 MHz（FLASH_LATENCY_2）→ UART1 收发 → BSP_flashInit()
+    BL->>BL: 读 noinit 标志（RAM，跨复位保留；由 J-Link 置位，烧完由自己清零）
+    BL->>BL: 标志命中 → 进烧写模式（走 asset-burn 那张图，不限时等脚本）
+    BL->>BL: 标志未命中 → 开 200 ms 握手窗口（人工按板上 RESET 键时走这条）
+    BL->>BL: 窗口内没握手 → 判定为正常启动，继续往下
+    BL->>NOR: 读资产头（magic / len / CRC）—— 只校验，不搬运（搬运是 app 的事）
+    BL->>BL: 校验 app 向量表：向量[0] 落在 RAM 范围、向量[1] 落在 flash 范围
+    BL->>BL: 向量表非法 → 不跳 app，改停在烧写模式等脚本（安全网，避免跳进野地址）
+    BL->>BL: 收尾：关中断、清 pending、复位用过的外设（SPI2 的 CS 拉高、UART 关、SysTick 停）
+    BL->>BL: SCB->VTOR = 0x08004000
+    BL->>App: MSP = 向量[0]（app 的 _estack，必须由 BL 设，硬件只在 NRST 时做这件事）
+    BL->>App: 跳到 向量[1]（app 的复位向量）
+    App->>App: app 的 startup：搬 .data、清 .bss（不动 noinit）、SystemInit 再设一次 VTOR
+    App->>NOR: app 启动：BSP_init → 读资产头 → 一次性搬进外挂 SRAM
+
+    Note right of BL: flash 契约：BL 占 0x08000000 起 16 KB（自己的 .ld）；app 的 .ld 改成 ORIGIN = 0x08004000，CMake 里 VECT_TAB_OFFSET = 0x4000；两个 hex 都要烧（tools/flash.jlink 加一行）
+    Note right of BL: noinit 契约：标志放固定绝对地址（公式 ORIGIN(RAM)+LENGTH(RAM)-32，并把 _estack 一起下移 32 B）；两个 .ld 同一公式 → 地址一致、MSP 永远碰不到它。不能放在 .bss 之后：BL 的 .bss 几百字节、app 的 55 KB，地址会差出 55 KB
+    Note right of BL: RAM 契约：BL 运行时 app 没在跑，整个 64 KB SRAM 归它，栈与 4 KB 块缓冲随意。未来 A/B 升级在这里扩展：从 NOR 的 update 槽搬进内部 flash（要开 HAL_FLASH + meta 有效标志）

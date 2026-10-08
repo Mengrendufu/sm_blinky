@@ -1,0 +1,38 @@
+sequenceDiagram
+    autonumber
+    participant Script as 单个脚本（PC，管全程）
+    participant UARTL as CH340 / UART1（115200）
+    participant JL as J-Link（SWD）
+    participant BL as Bootloader
+    participant NOR as NOR W25Q128
+    participant App as App（0x08004000 起）
+
+    Script->>UARTL: ① 开串口并一直保持：open 之前就把 dtr/rts 记为 False → 打开瞬间即 deassert，不碰 NRST
+    Script->>JL: ② 置标志 + 复位：r → h → w4 NOINIT_ADDR, 0xB00710AD → r → g → qc
+    JL->>BL: NRST 复位 —— 串口虽已打开，但 DTR/RTS 是 deassert，NRST 归 J-Link 独占
+    BL->>BL: 上电：时钟 72 MHz → UART1 收发 → BSP_flashInit()
+    BL->>BL: 读 noinit 标志 —— 命中 0xB00710AD 则停在烧写模式（不限时等）
+    BL->>App: 标志未命中 且 200 ms 内无握手 → 直接跳（人工按板上 RESET 键时走这条）
+    Script->>UARTL: ③ 握手帧 0xAA + 版本 + 长度 153,600 + CRC32（重复发，直到收到 ACK）
+    UARTL->>BL: 收到握手
+    BL->>BL: 校验长度 ≤ assets 区剩余、CRC 自检 → 进烧写状态机
+    BL-->>Script: ACK 0x55 + 扇区基址 + 块大小 4 KB
+    Script->>Script: 切块 38 × 4 KB，每块带序号 + CRC16
+
+    loop 38 块 × 4 KB
+        Script->>UARTL: ④ 数据块（4 KB + 块头）
+        UARTL->>BL: 收进 4 KB 块缓冲（bootloader 独占 64 KB 内部 RAM，不用外挂 SRAM）
+        BL->>BL: 块 CRC 比对 —— 不符回 NAK，此时还没碰 flash
+        BL->>NOR: WREN + 扇区擦除 20h（等 BUSY，实测 ≈130 ms）+ 逐页 02h（256 B/页）
+        BL-->>Script: ACK
+    end
+
+    BL->>NOR: 回读整张算 CRC32，与脚本告知值比对
+    BL->>NOR: ★ 最后写资产头（magic / len / CRC）—— 掉电原子点
+    BL-->>Script: DONE
+    Script->>Script: ⑤ 打印：串口 13.3 s + 擦写 ≈5.5 s（38 次擦 + 600 页）
+    Script->>UARTL: ⑥ 关闭串口（已实测：deassert 下开/关都不干预 NRST，无需改硬件）
+    BL->>BL: 清 noinit 标志（下次启动不再进烧写模式）
+    BL->>App: 校验 app 向量表（SP 落 RAM、PC 落 flash）→ 关中断、复位 SPI2/GPIO
+    BL->>App: SCB->VTOR = APP_BASE、MSP = 向量[0]、跳到 向量[1]
+    App->>NOR: app 启动：BSP_init → 读资产头 → 一次性搬进外挂 SRAM

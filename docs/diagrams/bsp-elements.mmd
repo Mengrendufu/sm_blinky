@@ -1,0 +1,9 @@
+flowchart LR
+    Board(["Board<br/>Subsystem · 虚体<br/>只调度，无自身状态"])
+    Panel["Panel<br/>Component · 实体<br/>窗口寄存器 · GRAM"]
+    Sram["Sram<br/>Component · 实体<br/>1 MB 地址空间"]
+    NorFlash["NorFlash<br/>Component · 实体<br/>SPI 句柄 · 16 MB 阵列"]
+
+    Board -- 初始化 --> Panel
+    Board -- 初始化 --> Sram
+    Board -- 初始化 --> NorFlash

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>sm_blinky · 动画型画面布局（v2）</title>
+<style>
+ body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;background:#f5f5f5;color:#222;margin:0;padding:24px 32px 64px}
+ h1{font-size:20px;margin:0 0 4px} .sub{color:#666;font-size:13px;margin-bottom:20px;line-height:1.7}
+ h2{font-size:15px;margin:28px 0 10px;border-bottom:1px solid #ddd;padding-bottom:4px}
+ .row{display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start}
+ .frame{text-align:center}
+ .screen{position:relative;width:480px;height:640px;background:#000;border:1px solid #999;
+          box-shadow:0 2px 10px rgba(0,0,0,.18);overflow:hidden}
+ .w{position:absolute;display:flex;align-items:center;justify-content:center;font-family:Consolas,monospace}
+ .w.leftal{justify-content:flex-start;padding-left:12px;box-sizing:border-box}
+ .lblbox{border:1px dashed rgba(150,150,150,.6);border-radius:2px}
+ .topbar{border-bottom:1px solid #222}
+ .arc{position:absolute;border-radius:50%;display:flex;align-items:center;justify-content:center}
+ .arcin{width:74%;height:74%;border-radius:50%}
+ .bar{position:absolute;overflow:hidden}
+ .dirty{position:absolute;border:2px dashed rgba(255,60,60,.9);background:rgba(255,60,60,.10)}
+ .dirtag{position:absolute;font-size:11px;color:#ffdede;background:rgba(180,20,20,.85);
+          padding:0 4px;border-radius:2px;font-family:Consolas,monospace}
+ .cap{font-size:12px;color:#555;margin-top:6px}
+ table{border-collapse:collapse;font-size:12.5px;margin-top:6px;width:100%}
+ th,td{border:1px solid #e3e3e3;padding:3px 8px;text-align:left;vertical-align:top}
+ th{background:#f2f2f2;font-weight:600} td.num{text-align:right;font-family:Consolas,monospace}
+ code{background:#eee;padding:0 4px;border-radius:3px;font-size:12px}
+ .note{font-size:12.5px;color:#555;line-height:1.7;margin-top:10px}
+ .ok{background:#e6f4ea;color:#1e7a3c;border:1px solid #b7dfc4;padding:1px 6px;border-radius:3px;font-size:11px}
+ .no{background:#fdecea;color:#a12a1c;border:1px solid #f2c0b8;padding:1px 6px;border-radius:3px;font-size:11px}
+</style></head><body>
+<h1>sm_blinky · 动画型画面布局（v2）</h1>
+<div class="sub">
+<b>只用镜像里已存在的控件</b>：<code>lv_arc</code> / <code>lv_bar</code> / <code>lv_led</code> / <code>lv_line</code> / <code>lv_label</code> / <code>lv_anim</code>
+（实测符号数：arc 5、bar 7、led 2、line 2、label 13、anim 24；<b>slider / switch / spinner / chart 都是 0</b> → 想用要先开 <code>LV_USE_*</code>，会加代码体积）。<br>
+2× 放大，虚线框=文本尺寸估算；动画周期取 <code>LV_DEF_REFR_PERIOD = 33 ms</code>（30 fps，lv_conf_internal.h:255）。
+</div>
+
+<h2>① 动画型仪表页（LED ON）</h2>
+<div class="row"><div class="frame"><div class="screen"><div class="w lblbox leftal" style="left:24px;top:12px;width:128px;height:32px;color:#E0E4E8;font-size:14px">sm_blinky</div><div class="w topbar" style="left:0px;top:0px;width:480px;height:56px;background:#101418;color:#333;font-size:14px"></div><div class="w" style="left:432px;top:18px;width:20px;height:20px;border-radius:10px;background:#00C853;color:#333;font-size:14px"></div><div class="arc" style="left:144px;top:88px;width:192px;height:192px;background:conic-gradient(#00C853 0 62%, #2a3038 62% 100%)"><div class="arcin" style="background:#000000"></div></div><div class="w lblbox" style="left:192px;top:168px;width:96px;height:32px;color:#E0E4E8;font-size:14px">62 %</div><div class="w" style="left:120px;top:320px;width:96px;height:96px;border-radius:20px;background:#00C853;color:rgba(0,0,0,.55);font-size:14px">LED</div><div class="w" style="left:264px;top:320px;width:96px;height:96px;border-radius:20px;background:#303840;color:#C8CDD2;font-size:14px">TMR</div><div class="bar" style="left:32px;top:448px;width:416px;height:24px;border-radius:12px;background:#2a3038"><div style="width:62%;height:100%;border-radius:12px;background:#00C853"></div></div><div class="w lblbox" style="left:32px;top:496px;width:128px;height:32px;color:#808890;font-size:14px">edges 1234</div><div class="w lblbox" style="left:352px;top:496px;width:96px;height:32px;color:#808890;font-size:14px">12.3 ms</div></div><div class="cap">标题条 + 弧 + 两个方块 + 进度条</div></div></div>
+
+<h2>② LED OFF</h2>
+<div class="row"><div class="frame"><div class="screen"><div class="w lblbox leftal" style="left:24px;top:12px;width:128px;height:32px;color:#E0E4E8;font-size:14px">sm_blinky</div><div class="w topbar" style="left:0px;top:0px;width:480px;height:56px;background:#101418;color:#333;font-size:14px"></div><div class="w" style="left:432px;top:18px;width:20px;height:20px;border-radius:10px;background:#303840;color:#333;font-size:14px"></div><div class="arc" style="left:144px;top:88px;width:192px;height:192px;background:conic-gradient(#303840 0 62%, #2a3038 62% 100%)"><div class="arcin" style="background:#000000"></div></div><div class="w lblbox" style="left:192px;top:168px;width:96px;height:32px;color:#E0E4E8;font-size:14px">62 %</div><div class="w" style="left:120px;top:320px;width:96px;height:96px;border-radius:20px;background:#303840;color:rgba(0,0,0,.55);font-size:14px">LED</div><div class="w" style="left:264px;top:320px;width:96px;height:96px;border-radius:20px;background:#303840;color:#C8CDD2;font-size:14px">TMR</div><div class="bar" style="left:32px;top:448px;width:416px;height:24px;border-radius:12px;background:#2a3038"><div style="width:62%;height:100%;border-radius:12px;background:#303840"></div></div><div class="w lblbox" style="left:32px;top:496px;width:128px;height:32px;color:#808890;font-size:14px">edges 1234</div><div class="w lblbox" style="left:352px;top:496px;width:96px;height:32px;color:#808890;font-size:14px">12.3 ms</div></div><div class="cap">同一套控件，颜色与数值变</div></div></div>
+
+<h2>③ 脏区（每帧要重绘的像素）—— 这才是动画的预算</h2>
+<div class="row"><div class="frame"><div class="screen"><div class="w lblbox leftal" style="left:24px;top:12px;width:128px;height:32px;color:#E0E4E8;font-size:14px">sm_blinky</div><div class="w topbar" style="left:0px;top:0px;width:480px;height:56px;background:#101418;color:#333;font-size:14px"></div><div class="w" style="left:432px;top:18px;width:20px;height:20px;border-radius:10px;background:#00C853;color:#333;font-size:14px"></div><div class="arc" style="left:144px;top:88px;width:192px;height:192px;background:conic-gradient(#00C853 0 62%, #2a3038 62% 100%)"><div class="arcin" style="background:#000000"></div></div><div class="w lblbox" style="left:192px;top:168px;width:96px;height:32px;color:#E0E4E8;font-size:14px">62 %</div><div class="w" style="left:120px;top:320px;width:96px;height:96px;border-radius:20px;background:#00C853;color:rgba(0,0,0,.55);font-size:14px">LED</div><div class="w" style="left:264px;top:320px;width:96px;height:96px;border-radius:20px;background:#303840;color:#C8CDD2;font-size:14px">TMR</div><div class="bar" style="left:32px;top:448px;width:416px;height:24px;border-radius:12px;background:#2a3038"><div style="width:62%;height:100%;border-radius:12px;background:#00C853"></div></div><div class="w lblbox" style="left:32px;top:496px;width:128px;height:32px;color:#808890;font-size:14px">edges 1234</div><div class="w lblbox" style="left:352px;top:496px;width:96px;height:32px;color:#808890;font-size:14px">12.3 ms</div><div class="dirty" style="left:144px;top:88px;width:192px;height:192px"></div><div class="dirtag" style="left:147px;top:91px">96×96 ≈ 12.5 ms</div><div class="dirty" style="left:32px;top:448px;width:416px;height:24px"></div><div class="dirtag" style="left:35px;top:451px">208×12 ≈ 3.4 ms</div><div class="dirty" style="left:120px;top:320px;width:96px;height:96px"></div><div class="dirtag" style="left:123px;top:323px">48×48 ≈ 3.1 ms</div><div class="dirty" style="left:432px;top:18px;width:20px;height:20px"></div><div class="dirtag" style="left:435px;top:21px">10×10 ≈ 0.1 ms</div><div class="dirty" style="left:32px;top:496px;width:128px;height:32px"></div><div class="dirtag" style="left:35px;top:499px">64×16 ≈ 1.4 ms</div></div><div class="cap">红框=动画时要重绘的区域，标注是该块的估算耗时</div></div></div>
+<table>
+<tr><th>控件</th><th>脏区 px</th><th>估算/帧</th><th>33 ms 周期占用</th><th>结论</th><th>说明</th></tr>
+<tr><td>arc 96×96</td><td class="num">9,216</td><td class="num">12.5 ms</td><td class="num">38%</td><td>✓ 可以连续动画</td><td>值动画（lv_anim）</td></tr><tr><td>bar 208×12</td><td class="num">2,496</td><td class="num">3.4 ms</td><td class="num">10%</td><td>✓✓ 随便动</td><td>值动画</td></tr><tr><td>方块 48×48</td><td class="num">2,304</td><td class="num">3.1 ms</td><td class="num">9%</td><td>✓✓ 随便动</td><td>颜色/亮度动画</td></tr><tr><td>lv_led 10×10</td><td class="num">100</td><td class="num">0.1 ms</td><td class="num">0%</td><td>✓✓ 随便动</td><td>呼吸灯</td></tr><tr><td>label ~64×16</td><td class="num">1,024</td><td class="num">1.4 ms</td><td class="num">4%</td><td>✓✓ 随便动</td><td>文字变化</td></tr><tr><td>整屏 240×320</td><td class="num">76,800</td><td class="num">104.4 ms</td><td class="num">317%</td><td>✗ 不可行</td><td>整屏动画（对照，不可行）</td></tr>
+</table>
+<div class="note">
+估算公式：<code>脏区 px × (1.2 µs 渲染 + 0.16 µs 刷屏)</code>，两个系数来自 charter §6 的实测（方块 72×72 = 5,184 px → 渲染 ≈6 ms；每行字 72×24 = 1,728 px → ≈2.2 ms；flush 1.35 ms / 8,640 px）。<br>
+<b>结论</b>：弧 ≤ 96×96（≈9,200 px）可以连续动画；132×132 的弧（17,424 px）只能做一次性过渡；<b>整屏动画（76,800 px ≈104 ms）在这颗片子上不可能</b> —— 上限约 9.6 fps。<br>
+<b>多控件同时动画要算总和</b>：弧 + 进度条 = 11,712 px ≈ 16 ms ≈ 48% ✓ 可行；再叠两个方块就到 76% ✗ 太紧。
+</div>
+
+<h2>④ 控件清单（绝对定位，无 layout 引擎 —— <code>LV_USE_FLEX/GRID = 0</code>）</h2>
+<table>
+<tr><th>控件</th><th>像素框</th><th>用途</th><th>动画方式</th></tr>
+<tr><td>label "sm_blinky"</td><td>(12,6)–(76,22)</td><td>标题</td><td>不动</td></tr>
+<tr><td>lv_led 10×10</td><td>(216,9)–(226,19)</td><td>心跳指示</td><td><code>lv_led_set_brightness</code> + lv_anim 呼吸</td></tr>
+<tr><td><b>lv_arc 96×96</b></td><td>(72,44)–(168,140)</td><td>主指标（占位：边数/目标）</td><td><code>lv_arc_set_value</code> 走 lv_anim 缓动</td></tr>
+<tr><td>label "62 %"</td><td>(96,84)–(144,100)</td><td>弧中心数值</td><td>跟弧一起刷</td></tr>
+<tr><td>obj 48×48 ×2</td><td>(60,160)–(108,208)<br>(132,160)–(180,208)</td><td>LED / TMR 状态块</td><td>bg_color 过渡</td></tr>
+<tr><td>lv_bar 208×12</td><td>(16,224)–(224,236)</td><td>进度/占用率</td><td><code>lv_bar_set_value</code> + 缓动</td></tr>
+<tr><td>label ×2</td><td>(16,248) / (176,248)</td><td>边数、帧时间</td><td>数值变化时刷</td></tr>
+</table>
+<div class="note">
+<span class="ok">今天就能写</span> 上面这套控件全部已在镜像里，不用改 <code>lv_conf.h</code>。<br>
+<span class="no">要开开关</span> slider / switch / spinner / chart / image —— 每个都要在 <code>lv_conf.h</code> 打开并重新编译，代码体积会涨（text 现在 168.8 KB / 512 KB）。
+</div>
+</body></html>
