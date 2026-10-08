@@ -31,9 +31,29 @@
 // so on the wire), and the NOR flash work that needs it.
 //============================================================================
 #include "stm32f1xx_hal.h"
+#include "bsp_flash.h"
+#include "sm_tracer.h"
 
 #include <stdbool.h>
 #include <string.h>
+
+//============================================================================
+// The flash driver traces through the shared macros, and the tracer's block
+// allocator enters a FreeRTOS critical section - something this program cannot
+// do: there is no scheduler here, and the pre-scheduler latch would leave
+// interrupts masked for good. So sm_tracer.c is not linked into this image;
+// these two stubs keep the exact signatures, which turns every SM_TRACE_* in
+// bsp_flash.c into nothing.
+unsigned char *SM_Trace_getBlock(SM_Tracer * const me) {
+    (void)me;
+
+    return (unsigned char *)0;
+}
+//............................................................................
+void SM_Trace_push(SM_Tracer * const me, unsigned char *pfb) {
+    (void)me;
+    (void)pfb;
+}
 
 //============================================================================
 // What the two linker scripts and the app's main() agree on.
@@ -62,6 +82,10 @@
 #define BL_BLOCK_BYTES 4096U
 #define BL_ASSET_MAX   0x00040000U  // sanity bound on the length field
 #define BL_ASSET_BASE  0x00081000U  // NOR assets area (charter partition plan)
+#define BL_ASSET_DATA  (BL_ASSET_BASE + 0x1000U)  // header keeps its own sector
+#define BL_HDR_MAGIC   0x41535431U  // "AST1"
+#define BL_HDR_BYTES   16U          // magic | len | crc32 | ver | 2 reserved
+#define BL_PAGE_BYTES  256U         // the device's program page
 
 // Block phase. Still no flash: the point of this step is the wire and the
 // retransmit path, and the final CRC over the whole image (the one checksum
@@ -93,10 +117,13 @@ uint32_t Bl_bytes_;     // payload bytes folded into the running CRC
 uint32_t Bl_crcRun_;    // running CRC32 over the payload (folded per good block)
 uint32_t Bl_final_;     // 0 = no final frame yet, 1 = matched, 2 = mismatched
 uint32_t Bl_last_;      // index of the last block taken
+uint32_t Bl_written_;   // blocks that made it into the NOR (written + verified)
+uint32_t Bl_wrBad_;     // blocks whose erase/program/read-back failed
 
 // Needed so a re-sent block does not get folded into the running CRC twice;
 // the flash step will want the bytes anyway.
 static uint8_t Bl_block_[BL_MAX_BLOCK];
+static uint8_t Bl_page_[BL_PAGE_BYTES];      // read-back bites
 
 static UART_HandleTypeDef Bl_uart_;
 
@@ -114,6 +141,8 @@ static uint32_t Bl_be32_(uint8_t const *p);
 static void Bl_putBe32_(uint8_t *p, uint32_t v);
 static bool Bl_frameOk_(uint8_t const *frame);
 static bool Bl_readExact_(uint8_t *dst, uint32_t len);
+static bool Bl_writeBlock_(uint32_t idx, uint32_t len);
+static bool Bl_commit_(void);
 static void Bl_ackFrame_(void);
 static void Bl_ack1_(void);
 static void Bl_nak_(void);
@@ -296,6 +325,64 @@ static void Bl_nak_(void) {
     (void)HAL_UART_Transmit(&Bl_uart_, &n, 1U, 100U);
 }
 //............................................................................
+// Program one block into the NOR and read it back. Same bus, so the read-back
+// is a check of what the device kept, not of what we think we sent.
+static bool Bl_writeBlock_(uint32_t idx, uint32_t len) {
+    uint32_t const addr = BL_ASSET_DATA + (idx * BL_MAX_BLOCK);
+    uint32_t off;
+    uint32_t n;
+
+    if (!BSP_flashEraseSector(addr)) {
+        return false;
+    }
+
+    for (off = 0U; off < len; off += BL_PAGE_BYTES) {
+        n = ((len - off) > BL_PAGE_BYTES) ? BL_PAGE_BYTES : (len - off);
+        if (!BSP_flashProgramPage(addr + off, &Bl_block_[off], n)) {
+            return false;
+        }
+    }
+
+    for (off = 0U; off < len; off += BL_PAGE_BYTES) {
+        n = ((len - off) > BL_PAGE_BYTES) ? BL_PAGE_BYTES : (len - off);
+        if (!BSP_flashRead(addr + off, Bl_page_, n)) {
+            return false;
+        }
+        if (memcmp(Bl_page_, &Bl_block_[off], n) != 0) {
+            return false;
+        }
+    }
+
+    return true;
+}
+//............................................................................
+// The header goes last, so a power cut anywhere before this leaves the sector
+// erased and the asset simply "not there" - which is the degradation the app
+// already knows how to handle.
+static bool Bl_commit_(void) {
+    uint8_t hdr[BL_HDR_BYTES];
+
+    Bl_putBe32_(&hdr[0], BL_HDR_MAGIC);
+    Bl_putBe32_(&hdr[4], Bl_bytes_);
+    Bl_putBe32_(&hdr[8], Bl_crcRun_);
+    hdr[12] = 0U;
+    hdr[13] = (uint8_t)BL_PROTO_VER;
+    hdr[14] = 0U;
+    hdr[15] = 0U;
+
+    if (!BSP_flashEraseSector(BL_ASSET_BASE)) {
+        return false;
+    }
+    if (!BSP_flashProgramPage(BL_ASSET_BASE, hdr, BL_HDR_BYTES)) {
+        return false;
+    }
+    if (!BSP_flashRead(BL_ASSET_BASE, Bl_page_, BL_HDR_BYTES)) {
+        return false;
+    }
+
+    return memcmp(Bl_page_, hdr, BL_HDR_BYTES) == 0;
+}
+//............................................................................
 // Read exactly len bytes, one at a time. Returns false on the first gap: the
 // caller answers NAK and the PC sends the block again.
 static bool Bl_readExact_(uint8_t *dst, uint32_t len) {
@@ -326,7 +413,8 @@ static void Bl_burn_(void) {
     uint32_t len;
     uint32_t lo16;
 
-    Bl_say_("[bootloader] burn mode: handshake, then blocks\r\n");
+    Bl_say_("[bootloader] burn mode: handshake, blocks, then the header\r\n");
+    BSP_flashInit();
 
     for (;;) {
         // Polling: burn mode has nothing else to do and the app is not
@@ -373,12 +461,23 @@ static void Bl_burn_(void) {
                 continue;
             }
 
-            // Folded in only now: a block that failed its CRC must not reach
-            // the running CRC, or the final check could never match.
+            // Into the NOR first: a block that fails its CRC never gets this
+            // far, and one that fails to write is re-sent (the erase makes the
+            // second attempt clean).
+            if (!Bl_writeBlock_(idx, len)) {
+                ++Bl_wrBad_;
+                Bl_nak_();
+                continue;
+            }
+
+            // Folded in only after the write: a block that failed its CRC or
+            // its write must not reach the running CRC, or the final check
+            // could never match.
             Bl_crcRun_ = Bl_crc32Update_(Bl_crcRun_, Bl_block_, len);
             Bl_bytes_ += len;
             Bl_last_ = idx;
             ++Bl_blocks_;
+            ++Bl_written_;
             Bl_ack1_();
             continue;
         }
@@ -388,12 +487,25 @@ static void Bl_burn_(void) {
             if (!Bl_readExact_(&fin[1], BL_FIN_LEN - 1U)) {
                 continue;
             }
-            if ((Bl_be32_(&fin[1]) == Bl_bytes_)
-                && (Bl_be32_(&fin[5]) == Bl_crcRun_)) {
-                Bl_final_ = 1U;
-                Bl_ack1_();
-            } else {
+            if ((Bl_be32_(&fin[1]) != Bl_bytes_)
+                || (Bl_be32_(&fin[5]) != Bl_crcRun_)) {
                 Bl_final_ = 2U;
+                Bl_nak_();
+                continue;
+            }
+            // CRC agrees: write the header, which is the atomic point. Only
+            // then is the asset "there", and only then does the flag go away.
+            if (Bl_commit_()) {
+                Bl_final_ = 1U;
+                _snoinit = 0U;
+                Bl_ack1_();
+                // The work is done and the flag is gone: reset so the board
+                // comes up in the app on its own. The counters live in RAM and
+                // survive the reset, so a probe can still read them.
+                HAL_Delay(50U);
+                NVIC_SystemReset();
+            } else {
+                Bl_final_ = 3U;
                 Bl_nak_();
             }
             continue;

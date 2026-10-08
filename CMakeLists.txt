@@ -143,6 +143,7 @@ add_custom_command(TARGET ${PROJECT_NAME}.elf POST_BUILD
 # files the app also uses (clock time base, MSP, syscalls).
 set(SRC_BL
     ${CMAKE_SOURCE_DIR}/bootloader/bl_main.c
+    ${CMAKE_SOURCE_DIR}/bsp/devices/bsp_flash.c
     ${CMAKE_SOURCE_DIR}/bsp/platform/stm32f1xx_it.c
     ${CMAKE_SOURCE_DIR}/bsp/platform/stm32f1xx_hal_msp.c
     ${CMAKE_SOURCE_DIR}/bsp/platform/stm32f1xx_hal_timebase_tim.c
@@ -157,7 +158,15 @@ add_executable(bootloader.elf ${SRC_BL})
 
 target_include_directories(bootloader.elf PRIVATE
     ${CMAKE_SOURCE_DIR}/bootloader
+    ${CMAKE_SOURCE_DIR}/bsp
+    ${CMAKE_SOURCE_DIR}/bsp/devices
+    ${CMAKE_SOURCE_DIR}/bsp/free_rtos
     ${CMAKE_SOURCE_DIR}/bsp/platform
+    ${CMAKE_SOURCE_DIR}/ports
+    ${ROOT_HSM}/include
+    ${ROOT_COMMON}/include
+    ${ROOT_FREERTOS}/include
+    ${ROOT_FREERTOS}/portable/GCC/ARM_CM3
     ${ROOT_CMSIS_CORE}/CMSIS/Core/Include
     ${ROOT_CMSIS_DEVICE}/Include
     ${ROOT_HAL}/Inc

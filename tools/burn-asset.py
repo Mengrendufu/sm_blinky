@@ -123,6 +123,10 @@ def send_blocks(ser, img, corrupt=None):
     total = len(img)
     blocks = 0
     retries = 0
+    # Each block now costs a 4 KB sector erase (~130 ms) plus programming and a
+    # read-back, so the wait for its answer has to be seconds, not the 50 ms
+    # the handshake used.
+    ser.timeout = 3.0
     t0 = time.time()
     for idx, off in enumerate(range(0, total, BLOCK)):
         blk = bytearray(img[off:off + BLOCK])

@@ -45,6 +45,15 @@ void BSP_flashProbe(void);
 // that is the flash thread, and nothing else may touch the bus meanwhile.
 bool BSP_flashRead(uint32_t address, uint8_t *dst, uint32_t len);
 
+// Erase one 4 KB sector. `address` must be sector aligned. Measured ~130 ms
+// on this part (see the note next to FLASH_ERASE_MS in bsp_flash.c).
+bool BSP_flashEraseSector(uint32_t address);
+
+// Program up to one 256 B page: `address` must be page aligned and the range
+// must stay inside that page. Waits the device out before returning.
+bool BSP_flashProgramPage(uint32_t address, uint8_t const *data,
+                          uint32_t len);
+
 // Read/write self test: it erases every sector, writes a signature and reads
 // it back. Start it once - it spins up its own task, because a multi minute
 // sweep has no business running in an AO whose event queue holds 8 entries.

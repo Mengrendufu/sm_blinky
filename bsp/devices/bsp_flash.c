@@ -27,6 +27,9 @@
 
 // Geometry and the two waits that matter: a 4 KB sector erase is 45 ms
 // typical and 400 ms worst case, a 256 byte page program 0.7 ms / 3 ms.
+#define FLASH_DEV_PAGE      256UL   // NOR program page, datasheet 7.2.x
+// (not FLASH_PAGE_SIZE: the HAL already uses that name for the internal
+//  flash page size, and redefining it would lie to the HAL's own driver)
 #define FLASH_SECTOR_SIZE   4096UL
 #define FLASH_SECTORS       4096U // 16 MB / 4 KB
 #define FLASH_SIZE          (FLASH_SECTOR_SIZE * FLASH_SECTORS)
@@ -102,7 +105,7 @@ static bool BSP_flashWriteEnable_(void);
 static bool BSP_flashWaitReady_(uint32_t timeoutMs);
 static bool BSP_flashEraseSector_(uint32_t address);
 static bool BSP_flashProgram_(uint32_t address, uint8_t const *data,
-                              uint8_t len);
+                              uint32_t len);
 static bool BSP_flashTestSector_(uint16_t sector);
 static uint16_t BSP_flashWtCount_(void);
 static void BSP_flashTrace3_(uint8_t recId, uint32_t id);
@@ -154,6 +157,26 @@ void BSP_flashProbe(void) {
 // transaction covers the whole block. No overrun to clean up either: the
 // byte-wise exchange reads the receive register on every unit, so RXNE
 // never stays set.
+// The two write primitives the asset burner needs, exposed for the bootloader
+// (the app's own write path stays the wear self test). Thin wrappers: the
+// ordering rules - write enable, wait for the device, no page crossing - are
+// the private ones' business, and they are the ones already exercised.
+bool BSP_flashEraseSector(uint32_t address) {
+    return BSP_flashEraseSector_(address);
+}
+//............................................................................
+bool BSP_flashProgramPage(uint32_t address, uint8_t const *data,
+                          uint32_t len) {
+    // One page at most, and never across a boundary: the device would
+    // wrap and silently program the start of the page again.
+    if ((len == 0U) || (len > FLASH_DEV_PAGE)
+        || ((address % FLASH_DEV_PAGE) + len > FLASH_DEV_PAGE)) {
+        return false;
+    }
+
+    return BSP_flashProgram_(address, data, len);
+}
+//............................................................................
 bool BSP_flashRead(uint32_t address, uint8_t *dst, uint32_t len) {
     uint8_t const addr[3] = {
         (uint8_t)(address >> 16),
@@ -473,13 +496,13 @@ static bool BSP_flashEraseSector_(uint32_t address) {
 }
 //............................................................................
 static bool BSP_flashProgram_(uint32_t address, uint8_t const *data,
-                              uint8_t len) {
+                              uint32_t len) {
     uint8_t const addr[3] = {
         (uint8_t)(address >> 16),
         (uint8_t)(address >> 8),
         (uint8_t)address
     };
-    uint8_t i;
+    uint32_t i;
 
     if (!BSP_flashWriteEnable_()) {
         return false;
