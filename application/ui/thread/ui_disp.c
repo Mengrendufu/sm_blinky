@@ -39,7 +39,7 @@
 // Which background slot the demo shows. 0 = bg-a (夜色仪表),
 // 1 = bg-b (网格科技),
 // 2 = bg-c (暮色准照片) - the three the burner wrote, in that order.
-#define UI_BG_SLOT 1U
+#define UI_BG_SLOT 0U
 
 // Temporary measurement: what one refresh really costs, and how much of it is
 // our own flush. Two records per refresh that flushed something, so the log
