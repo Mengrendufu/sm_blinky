@@ -80,7 +80,7 @@ void SM_Trace_push(SM_Tracer * const me, unsigned char *pfb) {
 #define BL_ACK_LEN     11U   // 55 + base(4) + block(2) + crc32(4)
 #define BL_PROTO_VER   1U
 #define BL_BLOCK_BYTES 4096U
-#define BL_ASSET_MAX   0x00040000U  // sanity bound on the length field
+#define BL_ASSET_MAX   0x00080000U  // 512 KB: three fixed-size slots today
 #define BL_ASSET_BASE  0x00081000U  // NOR assets area (charter partition plan)
 #define BL_ASSET_DATA  (BL_ASSET_BASE + 0x1000U)  // header keeps its own sector
 #define BL_HDR_MAGIC   0x41535431U  // "AST1"

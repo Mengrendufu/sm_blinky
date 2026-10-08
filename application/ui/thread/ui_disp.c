@@ -36,6 +36,11 @@
 // has no timer pending, and as the ceiling for what it does ask for.
 #define UI_FALLBACK_MS 10U
 
+// Which background slot the demo shows. 0 = bg-a (夜色仪表),
+// 1 = bg-b (网格科技),
+// 2 = bg-c (暮色准照片) - the three the burner wrote, in that order.
+#define UI_BG_SLOT 1U
+
 // Temporary measurement: what one refresh really costs, and how much of it is
 // our own flush. Two records per refresh that flushed something, so the log
 // stays readable:
@@ -210,6 +215,7 @@ static void Ui_buildWidgets_(void) {
     lv_obj_t * const screen = lv_screen_active();
     lv_obj_t *title;
     Asset const * const asset = Asset_get();
+    void const * const bgPixels = Asset_slot(asset, UI_BG_SLOT);
 
     lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -226,8 +232,7 @@ static void Ui_buildWidgets_(void) {
     // external SRAM - nothing is copied, and nothing is decoded. Without it
     // screen keeps the black background, which is the degradation the design
     // counts on.
-    if (asset->present
-        && (asset->len == (UI_LCD_HOR * UI_LCD_VER * 2U))) {
+    if (bgPixels != (void const *)0) {
         lv_obj_t *bg;
 
         Ui_bgDsc_.header.magic = LV_IMAGE_HEADER_MAGIC;
@@ -235,8 +240,8 @@ static void Ui_buildWidgets_(void) {
         Ui_bgDsc_.header.w = UI_LCD_HOR;
         Ui_bgDsc_.header.h = UI_LCD_VER;
         Ui_bgDsc_.header.stride = UI_LCD_HOR * 2U;
-        Ui_bgDsc_.data_size = asset->len;
-        Ui_bgDsc_.data = (uint8_t const *)asset->pixels;
+        Ui_bgDsc_.data_size = ASSET_SLOT_BYTES;
+        Ui_bgDsc_.data = (uint8_t const *)bgPixels;
 
         bg = lv_image_create(screen);
         lv_image_set_src(bg, &Ui_bgDsc_);

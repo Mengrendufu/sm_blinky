@@ -27,10 +27,16 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+// One slot per background. The images are all the same size today, so the
+// payload is just slots laid end to end; a table with per-slot lengths is the
+// step after this one (it only earns its keep once they differ).
+#define ASSET_SLOT_BYTES  153600U   // 240 x 320 x 2, RGB565
+
 typedef struct {
     bool present;               // header sane and the payload CRC matched
-    uint32_t len;               // payload bytes
+    uint32_t len;               // payload bytes (all slots together)
     uint32_t crc32;             // payload CRC32, as the header wrote it
+    uint32_t slots;             // how many whole slots the payload holds
     void const *pixels;         // RGB565, in the external SRAM
 } Asset;
 
@@ -39,5 +45,13 @@ Asset Asset_load(void);
 
 // What Asset_load() found. Never NULL.
 Asset const *Asset_get(void);
+
+// How many bytes of the external SRAM the asset occupies (0 when absent).
+// Anything that writes into that SRAM has to stay out of this range.
+uint32_t Asset_bytes(void);
+
+// The pixels of slot i, or NULL when the asset is not present or i is past
+// last slot.
+void const *Asset_slot(Asset const *asset, uint32_t i);
 
 #endif // ASSET_H_

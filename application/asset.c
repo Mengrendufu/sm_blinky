@@ -20,7 +20,7 @@
 #define ASSET_DATA   (ASSET_BASE + 0x1000U)
 #define ASSET_SRAM   0x68000000U    // external IS62WV51216, FSMC bank 3
 #define ASSET_MAGIC  0x41535431U    // "AST1", the word the bootloader writes
-#define ASSET_MAX    0x00040000U    // sanity bound on the header's length
+#define ASSET_MAX    0x00080000U    // 512 KB: three fixed-size slots today
 #define ASSET_TRACE  45U
 
 static Asset Asset_;
@@ -39,6 +39,7 @@ Asset Asset_load(void) {
     Asset_.present = false;
     Asset_.len = 0U;
     Asset_.crc32 = 0U;
+    Asset_.slots = 0U;
     Asset_.pixels = (void const *)0;
 
     if (!BSP_flashRead(ASSET_BASE, hdr, sizeof hdr)) {
@@ -63,6 +64,7 @@ Asset Asset_load(void) {
     Asset_.pixels = (void const *)ASSET_SRAM;
     Asset_.present = (Asset_crc_((uint8_t const *)(uintptr_t)ASSET_SRAM, len)
                       == crc);
+    Asset_.slots = len / ASSET_SLOT_BYTES;
 
     SM_TRACE_BEGIN(ASSET_TRACE, 5)
         SM_TRACE_PAYLOAD_BE(Asset_.present ? 1U : 0U)
@@ -77,6 +79,19 @@ Asset Asset_load(void) {
 //............................................................................
 Asset const *Asset_get(void) {
     return &Asset_;
+}
+//............................................................................
+uint32_t Asset_bytes(void) {
+    return Asset_.present ? Asset_.len : 0U;
+}
+//............................................................................
+void const *Asset_slot(Asset const *asset, uint32_t i) {
+    if (!asset->present || (i >= asset->slots)) {
+        return (void const *)0;
+    }
+
+    return (void const *)((uint8_t const *)asset->pixels
+                          + (i * ASSET_SLOT_BYTES));
 }
 //............................................................................
 static uint32_t Asset_be32_(uint8_t const *p) {
