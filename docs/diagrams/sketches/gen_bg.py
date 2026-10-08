@@ -64,11 +64,22 @@ def roundrect_sdf(x, y, x1, y1, x2, y2, r):
     return math.hypot(dx, dy) - r
 
 
-# --- bg-a 夜色仪表：整片纯色 + 一个圆角矩形轮廓（给"仪表盘"留位置）--------
+# --- bg-a 夜色仪表：同心环光晕（每环一个精确色阶）+ 圆角框 ----------------
+# 光晕不做插值，直接画成 6 个同心环，每环一个落在 RGB565 格点上的颜色。
+# 这样"量化"不是敌人而是画笔：零量化损失、零噪点，读起来仍然是光晕。
+A_GLOW = [c565(0, 16, 24), c565(0, 24, 32), c565(8, 32, 40),
+          c565(8, 40, 48), c565(16, 48, 56), c565(16, 56, 64)]
+A_GLOW_C = (120, 108)
+A_GLOW_R0 = 26
+
+
 def bg_a(x, y):
     d = roundrect_sdf(x, y, 40, 28, 199, 187, 24)
     if -2.0 <= d <= 0.0:
         return SLATE
+    ring = int(math.hypot(x - A_GLOW_C[0], y - A_GLOW_C[1]) / A_GLOW_R0)
+    if ring < len(A_GLOW):
+        return A_GLOW[len(A_GLOW) - 1 - ring]     # 中心最亮
     return INK
 
 
@@ -93,7 +104,7 @@ def bg_c(x, y):
     return INK
 
 
-NAMES = [("bg-a", "夜色仪表：纯色 + 圆角框轮廓（无渐变、无光晕）", bg_a),
+NAMES = [("bg-a", "夜色仪表：6 环同心光晕（每环一个精确色阶）+ 圆角框", bg_a),
          ("bg-b", "网格科技：纯色 + 24 px 细网格 + 2 条细斜条", bg_b),
          ("bg-c", "暮色：3 条宽横带 + 2 条暖色地平线", bg_c)]
 
