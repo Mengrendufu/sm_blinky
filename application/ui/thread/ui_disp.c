@@ -227,11 +227,10 @@ static void Ui_buildWidgets_(void) {
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
 
     // The bootloader's asset, if it verified: the whole screen becomes one
-    // image
-    // and the widgets sit on top of it. The descriptor points straight at the
-    // external SRAM - nothing is copied, and nothing is decoded. Without it
-    // screen keeps the black background, which is the degradation the design
-    // counts on.
+    // image and the widgets sit on top of it. The descriptor points
+    // straight at the external SRAM - nothing is copied, nothing is decoded.
+    // Without it the screen keeps the black background, which is the
+    // degradation the design counts on.
     if (bgPixels != (void const *)0) {
         lv_obj_t *bg;
 
@@ -267,4 +266,5 @@ static void Ui_buildWidgets_(void) {
     Ui_edges_ = lv_label_create(screen);
     lv_obj_set_style_text_color(Ui_edges_, lv_color_hex(0x808890U), 0);
     lv_obj_align(Ui_edges_, LV_ALIGN_CENTER, 0, 72);
+
 }

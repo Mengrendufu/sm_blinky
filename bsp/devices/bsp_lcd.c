@@ -84,7 +84,12 @@ typedef struct {
 } BSP_lcdInitStep_;
 
 static BSP_lcdInitStep_ const lcdInitSeq_[] = {
-    {0x36U,  1U, {0x00U}},                                // MADCTL
+    // MADCTL: BGR bit set. Measured, not inherited: with 0x00 the panel swaps
+    // red and blue (a red/green/blue/white/black bar test came back
+    // blue/green/red/white/black), which turns the teal backgrounds yellow.
+    // The vendor's own ATK-MD0240 driver writes 0x00, so this module wants
+    // the other order - the bars say so.
+    {0x36U,  1U, {0x08U}},                                // MADCTL (BGR)
     {0x3AU,  1U, {LCD_COLMOD_16BIT}},                     // pixel format
     {0xB2U,  5U, {0x0CU, 0x0CU, 0x00U, 0x33U, 0x33U}},    // porch
     {0xB7U,  1U, {0x35U}},                                // gate control
