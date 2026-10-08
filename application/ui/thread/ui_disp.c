@@ -16,6 +16,7 @@
 // (charter §6); the flush is CPU driven for now - it is exactly the call that
 // will turn into a blocking DMA submission in the display increments.
 
+#include "asset.h"
 #include "bsp.h"
 #include "bsp_lcd.h"
 #include "ui_disp_priv.h"
@@ -49,6 +50,7 @@
 #define UI_TRACE_BLK   41U
 
 static lv_display_t *Ui_disp_;
+static lv_image_dsc_t Ui_bgDsc_;
 static lv_obj_t *Ui_led_;
 static lv_obj_t *Ui_state_;
 static lv_obj_t *Ui_edges_;
@@ -207,6 +209,7 @@ static uint32_t Ui_us_(void) {
 static void Ui_buildWidgets_(void) {
     lv_obj_t * const screen = lv_screen_active();
     lv_obj_t *title;
+    Asset const * const asset = Asset_get();
 
     lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -216,6 +219,30 @@ static void Ui_buildWidgets_(void) {
     // first refresh does not tint the whole glass on the way in.
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000U), 0);
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+
+    // The bootloader's asset, if it verified: the whole screen becomes one
+    // image
+    // and the widgets sit on top of it. The descriptor points straight at the
+    // external SRAM - nothing is copied, and nothing is decoded. Without it
+    // screen keeps the black background, which is the degradation the design
+    // counts on.
+    if (asset->present
+        && (asset->len == (UI_LCD_HOR * UI_LCD_VER * 2U))) {
+        lv_obj_t *bg;
+
+        Ui_bgDsc_.header.magic = LV_IMAGE_HEADER_MAGIC;
+        Ui_bgDsc_.header.cf = LV_COLOR_FORMAT_RGB565;
+        Ui_bgDsc_.header.w = UI_LCD_HOR;
+        Ui_bgDsc_.header.h = UI_LCD_VER;
+        Ui_bgDsc_.header.stride = UI_LCD_HOR * 2U;
+        Ui_bgDsc_.data_size = asset->len;
+        Ui_bgDsc_.data = (uint8_t const *)asset->pixels;
+
+        bg = lv_image_create(screen);
+        lv_image_set_src(bg, &Ui_bgDsc_);
+        lv_obj_align(bg, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_remove_flag(bg, LV_OBJ_FLAG_CLICKABLE);
+    }
 
     title = lv_label_create(screen);
     lv_label_set_text(title, "sm_blinky");

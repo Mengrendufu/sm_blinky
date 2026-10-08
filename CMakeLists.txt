@@ -40,6 +40,7 @@ set(SRC_HAL
 set(SRC_ALL
     ${CMAKE_SOURCE_DIR}/application/main.c
     ${CMAKE_SOURCE_DIR}/application/application.c
+    ${CMAKE_SOURCE_DIR}/application/asset.c
     ${CMAKE_SOURCE_DIR}/application/aos/blinky/blinky.c
     ${CMAKE_SOURCE_DIR}/application/ui/thread/ui.c
     ${CMAKE_SOURCE_DIR}/application/ui/thread/ui_evt.c
@@ -68,6 +69,7 @@ set(SRC_ALL
     ${ROOT_HSM}/src/sm_hsm.c
     ${ROOT_HSM}/src/sm_tracer.c
     ${ROOT_COMMON}/src/static_pool/static_pool.c
+    ${ROOT_COMMON}/src/crc/crc32.c
     ${SRC_FREERTOS}
     ${SRC_HAL}
 )
@@ -88,6 +90,7 @@ target_include_directories(${PROJECT_NAME}.elf PRIVATE
     ${CMAKE_SOURCE_DIR}/bsp/platform
     ${CMAKE_SOURCE_DIR}/ports
     ${CMAKE_SOURCE_DIR}/ports/static_pool
+    ${CMAKE_SOURCE_DIR}/ports/common_c
     ${ROOT_SST}/include
     ${ROOT_HSM}/include
     ${ROOT_CMSIS_CORE}/CMSIS/Core/Include

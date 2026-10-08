@@ -1,5 +1,6 @@
 #include "stm32f1xx_hal.h"
 #include "sst.h"
+#include "asset.h"
 #include "bsp.h"
 #include "application.h"
 #include "ui.h"
@@ -39,6 +40,13 @@ int main(void) {
     // uxCriticalNesting is 0xaaaaaaaa, so interrupts stay masked from there
     // until the scheduler takes over - a delay in that window would hang.
     BSP_init();
+
+    // The asset the bootloader wrote, if it got that far. Read here on
+    // purpose:
+    // the NOR and the external SRAM are both up after BSP_init(), and this is
+    // still before the first FreeRTOS call. The UI thread picks the result up
+    // when it builds its screen.
+    (void)Asset_load();
 
     SST_sysTimer = xTimerCreateStatic(
         "sstTick",
