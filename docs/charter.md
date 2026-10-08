@@ -225,3 +225,19 @@ SRAM 布局：背景槽只在资产表里存在"图片形态"条目时才占位�
 - LVGL 软件渲染耗时很可能**大于**总线时间（F103 无 FPU/DMA2D）→ 全屏重绘可能吃掉一整个心跳周期，必要时分帧。
 - 外挂 SRAM 与 LCD 共用 FSMC：DMA 与 CPU 争用，选 §8.1 时要一起算。
 - `LV_OS_NONE` 没有锁：跨线程调用 `lv_*` 是静默损坏，不报错。
+
+## 10. 启动器与资产链路（2026-10-08 落地，已上板）
+
+**镜像布局**：flash 前 16 KB 是 bootloader（`bootloader/`，自带 `stm32f1xx_bl.ld`），app 从 `0x08004000` 起。两份 `.ld` 用同一公式在 RAM 顶端留 32 B 跨复位标志（`_noinit_base = ORIGIN(RAM)+LENGTH(RAM)-32`，`_snoinit` = `0x2000FFE0`，MSP 从它往下长所以永不覆盖）。**CPU 复位永远从 `0x08000000` 取向量 → 只烧 app 不烧 BL 就起不来**，`tools/flash.jlink` 两个 hex 都烧。
+
+**BL 现在做什么**：时钟 → UART1（收发 115200）→ 读标志 → 200 ms 窗口 → 校验 app 向量表 → 交接；标志命中则停在烧写模式，跑「握手 → 分块 → 最终整张 CRC → 擦写 NOR → 读回 memcmp → 写资产头」，写完清标志、`NVIC_SystemReset()` 自己去跑 app。text 9.4 KB / 16 KB，裸机（不链 FreeRTOS/LVGL/sm_sst）。
+
+**资产链路**：PC 脚本（`tools/burn-asset.py`，Windows 侧跑，pyserial + J-Link）→ 串口 → BL → NOR（`assets` 区 `0x00081000` 起：头 1 扇区 + 3 个固定 153,600 B 槽位）；app 启动时读头 → 载荷搬进外挂 SRAM（`0x68000000`）→ 对 **SRAM 副本**算 CRC32 与头部比对 → LVGL 用 `lv_image` 直接指 SRAM 当整屏背景（1:1 直拷贝，不拷贝不解码）。
+
+**实测**：单张 153,600 B ≈ 22 s；三张 460,800 B ≈ 66 s（115200 串口约 40 s，其余是擦除/编程/回读）；最终校验三方一致（脚本 / 目标机 / Python `zlib.crc32`）；`--corrupt-block` 验过重传路径且坏块不折进运行 CRC。代价：`LV_USE_IMAGE 1` 让 app text +5,980 B（168,844 → 174,872）。
+
+**资产图按 RGB565 格点设计**（详见 AGENTS.md）：颜色取 8/4/8 整数倍、形状用几何、光晕用同心环 → 零量化损失（生成器带断言）。源在 `docs/diagrams/sketches/gen_bg.py`，三张：bg-a 六环光晕 / bg-b 网格+细斜线 / bg-c 宽横带+地平线；`UI_BG_SLOT` 一行切换。
+
+**面板 BGR 位**：`MADCTL` = `0x08`（实测定位，见 AGENTS.md —— 这个 bug 从第一天就在）。
+
+**还没做**：① 资产表（每张带自己的长度/CRC —— 尺寸固定时槽位够用，尺寸不一才需要）；② 运行期页面切换（要输入设备）；③ NOR 的读回校验只到「块级 memcmp」。
