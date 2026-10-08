@@ -258,6 +258,7 @@ void BSP_lcdWritePixels(uint16_t const *pixels, uint32_t count) {
 //............................................................................
 // Frame memory readback: narrow the window to one pixel, RAMRD, one dummy
 // read (the first value back is not the pixel), then the pixel itself.
+//............................................................................
 static uint16_t BSP_lcdReadGram_(uint16_t x, uint16_t y) {
     BSP_lcdSetWindow(x, y, x, y);
     BSP_lcdWriteCmd_(LCD_RAMRD_CMD);
