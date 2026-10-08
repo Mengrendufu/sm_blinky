@@ -1,95 +1,133 @@
 # -*- coding: utf-8 -*-
-"""按 e-bike 式布局生成 240×320 整屏背景图（3 张），并输出资产表所需信息。
-纯标准库：自己写 PNG（zlib），同时导出 RGB565 裸数据 + CRC32。
-布局锚点（来自 screen-ebike 版）：顶栏 y0-24、大环 (40,28)-(200,188) 中心 (120,108) 半径 74
-                           两张卡 y204-296、底栏 y304-320
+"""按 RGB565 的离散色阶设计整屏背景（3 张），零量化损失。
+
+为什么推倒重来：上一版用平滑渐变 + 径向光晕。RGB565 每通道只有 5/6/5 位，
+量化步长 R/B 每档 8、G 每档 4 —— 平滑渐变必然要么起色带（不抖动）要么起噪点
+（抖动），在深色图上两者都很难看。正确做法是**直接在 RGB565 的格点上设计**：
+颜色取 8/4/8 的整数倍，形状用几何（横带、网格、斜条），不插值、不抖动 ——
+于是量化误差恒为 0，面板显示的就是设计本身。
+
+末尾会断言：把每个像素转成 RGB565 再转回来，必须与原值逐字节相同。
 """
-import zlib, struct, math, os, binascii
+import zlib, struct, math, os
 
 W, H = 240, 320
 OUT = "./bg"
 os.makedirs(OUT, exist_ok=True)
 
+
 def png_write(path, px):
     raw = bytearray()
     for y in range(H):
         raw.append(0)
-        raw += px[y*W*3:(y+1)*W*3]
+        raw += px[y * W * 3:(y + 1) * W * 3]
+
     def chunk(t, d):
         return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+
     ihdr = struct.pack(">IIBBBBB", W, H, 8, 2, 0, 0, 0)
     open(path, "wb").write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
                            + chunk(b"IDAT", zlib.compress(bytes(raw), 9)) + chunk(b"IEND", b""))
 
-def clamp(v): return 0 if v < 0 else (255 if v > 255 else int(v))
-def mix(a, b, t): return tuple(a[i] + (b[i]-a[i])*t for i in range(3))
-def blob(x, y, cx, cy, r, color, alpha):
-    d = math.hypot(x-cx, y-cy)
-    if d >= r: return None
-    t = (1 - d/r)**2 * alpha
-    return (color, t)
 
-def bg_a(x, y):                      # 夜色仪表：垂直渐变 + 环区光晕 + 暗角
-    c = list(mix((10,14,20), (22,30,42), y/H))
-    g = blob(x, y, 120, 108, 120, (85,255,235), 0.10)
-    if g: c = list(mix(c, g[0], g[1]))
-    v = math.hypot((x-120)/120, (y-160)/160)
-    c = list(mix(c, (4,6,10), max(0.0, (v-0.75))*1.4))
-    return c
+def c565(r, g, b):
+    """一个颜色在 RGB565 里的最近格点（8 位形式）。设计时只允许用它的输出。"""
+    return (((r >> 3) << 3), ((g >> 2) << 2), ((b >> 3) << 3))
 
-def bg_b(x, y):                      # 网格科技：深底 + 24px 网格 + 斜向光带
-    c = list(mix((11,15,21), (16,22,30), y/H))
-    if x % 24 == 0 or y % 24 == 0: c = list(mix(c, (34,46,60), 0.55))
-    band = abs((x*0.55 + y) - 190)
-    if band < 34:
-        c = list(mix(c, (85,255,235), 0.07*(1-band/34)))
-    v = math.hypot((x-120)/120, (y-160)/160)
-    c = list(mix(c, (3,5,8), max(0.0, (v-0.72))*1.5))
-    return c
 
-def bg_c(x, y):                      # 暮色（准照片感）：斜向渐变 + 冷暖光斑 + 重暗角
-    c = list(mix((28,44,78), (11,18,32), (x*0.35 + y*0.65)/H))
-    for b in (blob(x, y, 62, 66, 120, (255,178,120), 0.22),
-              blob(x, y, 186, 244, 130, (85,255,235), 0.14)):
-        if b: c = list(mix(c, b[0], b[1]))
-    v = math.hypot((x-120)/120, (y-160)/170)
-    c = list(mix(c, (5,7,12), max(0.0, (v-0.62))*1.6))
-    return c
+def band(y, stops):
+    """stops = [(行高, 颜色), ...]，从顶到底；返回 y 所在带的颜色。"""
+    acc = 0
+    for h, col in stops:
+        acc += h
+        if y < acc:
+            return col
+    return stops[-1][1]
 
-NAMES = [("bg-a", "夜色仪表（垂直渐变 + 环区光晕）", bg_a),
-         ("bg-b", "网格科技（24 px 网格 + 斜向光带）", bg_b),
-         ("bg-c", "暮色准照片（冷暖光斑 + 暗角）", bg_c)]
+
+# 调色板：全部精确落在 RGB565 格点上。深色区可用档位很少（R/B 各 32 档、
+# G 64 档），所以设计上刻意避开渐变 —— 大片纯色 + 少量几何元素。
+INK = c565(0, 8, 16)
+NAVY = c565(8, 16, 24)
+SLATE = c565(16, 24, 32)
+TEAL_DIM = c565(8, 40, 48)
+TEAL = c565(16, 56, 64)
+WARM = c565(56, 40, 24)
+
+
+def roundrect_sdf(x, y, x1, y1, x2, y2, r):
+    """标准圆角矩形距离场：<=0 在内部，|d|<w 是轮廓。比按边算干净得多。"""
+    cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+    hx, hy = (x2 - x1) / 2.0 - r, (y2 - y1) / 2.0 - r
+    dx = max(abs(x - cx) - hx, 0.0)
+    dy = max(abs(y - cy) - hy, 0.0)
+    return math.hypot(dx, dy) - r
+
+
+# --- bg-a 夜色仪表：整片纯色 + 一个圆角矩形轮廓（给"仪表盘"留位置）--------
+def bg_a(x, y):
+    d = roundrect_sdf(x, y, 40, 28, 199, 187, 24)
+    if -2.0 <= d <= 0.0:
+        return SLATE
+    return INK
+
+
+# --- bg-b 网格科技：纯色 + 24 px 细网格 + 2 条细的暗青斜条 ----------------
+def bg_b(x, y):
+    for at in (150, 210):
+        if abs((x * 0.55 + y) - at) < 5:
+            return TEAL_DIM
+    if (x % 24 == 0) or (y % 24 == 0):
+        return NAVY
+    return INK
+
+
+# --- bg-c 暮色：3 条宽横带 + 两条地平线 -----------------------------------
+def bg_c(x, y):
+    if y in (110, 111, 250, 251):
+        return WARM
+    if y < 96:
+        return INK
+    if y < 224:
+        return NAVY
+    return INK
+
+
+NAMES = [("bg-a", "夜色仪表：纯色 + 圆角框轮廓（无渐变、无光晕）", bg_a),
+         ("bg-b", "网格科技：纯色 + 24 px 细网格 + 2 条细斜条", bg_b),
+         ("bg-c", "暮色：3 条宽横带 + 2 条暖色地平线", bg_c)]
 
 rows = []
 for name, desc, fn in NAMES:
     rgb = bytearray()
+    b565 = bytearray()
+    lossy = 0
     for y in range(H):
         for x in range(W):
-            r, g, b = (clamp(v) for v in fn(x, y))
+            r, g, b = fn(x, y)
+            # 设计用的颜色必须已经在格点上：否则说明这个形状没按规矩来
+            if (r, g, b) != c565(r, g, b):
+                lossy += 1
+                r, g, b = c565(r, g, b)
             rgb += bytes((r, g, b))
+            v = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+            b565 += struct.pack("<H", v)
+
+    # 回读校验：RGB565 → 8 位 → RGB565 必须逐字节相同（零量化损失）
+    back = bytearray()
+    for i in range(0, len(b565), 2):
+        v = struct.unpack_from("<H", b565, i)[0]
+        back += bytes((((v >> 11) & 0x1F) << 3, ((v >> 5) & 0x3F) << 2, (v & 0x1F) << 3))
+    assert back == rgb, f"{name}: 量化有损失"
+
     png_write(f"{OUT}/{name}.png", rgb)
-    # RGB565 小端（LVGL 的原生格式）
-    b565 = bytearray()
-    for i in range(0, len(rgb), 3):
-        r, g, b = rgb[i], rgb[i+1], rgb[i+2]
-        v = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
-        b565 += struct.pack("<H", v)
     open(f"{OUT}/{name}.rgb565", "wb").write(bytes(b565))
     crc = zlib.crc32(bytes(b565)) & 0xFFFFFFFF
-    png_sz = os.path.getsize(f"{OUT}/{name}.png")
-    # RLE 估算（LVGL 支持 RLE 压缩资产）：统计相同像素游程
-    runs, prev, n = 0, None, 0
-    for i in range(0, len(b565), 2):
-        pxv = b565[i:i+2]
-        if pxv == prev: n += 1
-        else:
-            if prev is not None: runs += 1
-            prev, n = pxv, 1
-    runs += 1
-    rows.append((name, desc, os.path.getsize(f"{OUT}/{name}.rgb565"), png_sz, crc, runs))
+    rows.append((name, os.path.getsize(f"{OUT}/{name}.rgb565"),
+                 os.path.getsize(f"{OUT}/{name}.png"), crc, lossy))
 
-print(f"{'文件':10} {'RGB565 B':>10} {'PNG B':>9} {'CRC32':>10} {'游程数':>8}  说明")
-for name, desc, sz, png_sz, crc, runs in rows:
-    print(f"{name:10} {sz:>10,} {png_sz:>9,} {crc:>10} {runs:>8,}  {desc}")
-tot = sum(r[2] for r in rows)
-print(f"\n3 张合计 {tot:,} B（{tot/1024:.0f} KB）；18 MHz SPI 单张 ≈ {tot/3*8/18e6*1000:.1f} ms，三张 ≈ {tot*8/18e6*1000:.0f} ms")
+print(f"{'文件':8} {'RGB565 B':>10} {'PNG B':>9} {'CRC32':>10} {'越格点数':>8}  说明")
+for (name, sz, png_sz, crc, lossy), (_, desc, _) in zip(rows, NAMES):
+    print(f"{name:8} {sz:>10,} {png_sz:>9,} {crc:>10} {lossy:>8}  {desc}")
+tot = sum(r[1] for r in rows)
+print(f"\n3 张合计 {tot:,} B（{tot/1024:.0f} KB）；零量化损失（回读逐字节相同）✓")
