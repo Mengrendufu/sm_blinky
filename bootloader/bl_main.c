@@ -45,8 +45,33 @@
 #define BL_FLAG_MAGIC  0xB00710ADU
 #define BL_BOOT_MS     200U         // handshake window for the RESET key
 
+// Burn-mode handshake (step 3 of the plan: prove the wire, touch no flash).
+//
+//   request  PC -> BL:  AA | ver(1) | len(4 BE) | crc32(4 BE)     10 bytes
+//                       crc32 covers ver+len (5 bytes)
+//   reply    BL -> PC:  55 | base(4 BE) | block(2 BE) | crc32(4 BE)  12 bytes
+//                       crc32 covers the first 7 bytes, so the PC can tell a
+//                       real answer from noise on a line the trace also drives
+//   refusal  BL -> PC:  4E
+#define BL_REQ_MAGIC   0xAAU
+#define BL_ACK_MAGIC   0x55U
+#define BL_NAK_MAGIC   0x4EU
+#define BL_REQ_LEN     10U
+#define BL_ACK_LEN     11U   // 55 + base(4) + block(2) + crc32(4)
+#define BL_PROTO_VER   1U
+#define BL_BLOCK_BYTES 4096U
+#define BL_ASSET_MAX   0x00040000U  // sanity bound on the length field
+#define BL_ASSET_BASE  0x00081000U  // NOR assets area (charter partition plan)
+
 // Written by J-Link, cleared here. Same address in both images (see the .ld).
 extern uint32_t _snoinit;
+
+// Burn-mode counters. Global on purpose: a J-Link probe reads them by name
+// (arm-none-eabi-nm gives the addresses) while the target keeps running.
+uint32_t Bl_frames_;    // frames that started with the marker byte
+uint32_t Bl_ok_;        // frames that passed the CRC
+uint32_t Bl_bad_;       // frames rejected: version, length or CRC
+uint32_t Bl_len_;       // length field of the last accepted frame
 
 static UART_HandleTypeDef Bl_uart_;
 
@@ -55,7 +80,14 @@ static void Bl_clock_(void);
 static void Bl_uartInit_(void);
 static void Bl_say_(char const *text);
 static bool Bl_appSane_(void);
+static void Bl_burn_(void) __attribute__((noreturn));
 static void Bl_handOver_(void) __attribute__((noreturn));
+static uint32_t Bl_crc32_(uint8_t const *data, uint32_t len);
+static uint32_t Bl_be32_(uint8_t const *p);
+static void Bl_putBe32_(uint8_t *p, uint32_t v);
+static bool Bl_frameOk_(uint8_t const *frame);
+static void Bl_ack_(void);
+static void Bl_nak_(void);
 
 //============================================================================
 int main(void) {
@@ -66,9 +98,7 @@ int main(void) {
     Bl_say_("\r\n[bootloader] up\r\n");
 
     if (_snoinit == BL_FLAG_MAGIC) {
-        Bl_say_("[bootloader] flag set: burn mode, protocol still TODO\r\n");
-        for (;;) {
-        }
+        Bl_burn_();
     }
 
     // No flag: a normal start. The window gives whoever pressed the board's
@@ -155,6 +185,110 @@ static void Bl_uartInit_(void) {
 static void Bl_say_(char const *text) {
     (void)HAL_UART_Transmit(&Bl_uart_, (uint8_t *)(uintptr_t)text,
                             (uint16_t)strlen(text), 100U);
+}
+//............................................................................
+// CRC32, the same one zlib.crc32() computes (poly 0xEDB88320, init all ones,
+// final xor), so the PC side can use its standard library call.
+static uint32_t Bl_crc32_(uint8_t const *data, uint32_t len) {
+    uint32_t crc = 0xFFFFFFFFU;
+    uint32_t i;
+    uint8_t bit;
+
+    for (i = 0U; i < len; ++i) {
+        crc ^= data[i];
+        for (bit = 0U; bit < 8U; ++bit) {
+            crc = ((crc & 1U) != 0U) ? ((crc >> 1) ^ 0xEDB88320U)
+                                     : (crc >> 1);
+        }
+    }
+
+    return crc ^ 0xFFFFFFFFU;
+}
+//............................................................................
+static uint32_t Bl_be32_(uint8_t const *p) {
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16)
+           | ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+}
+//............................................................................
+static void Bl_putBe32_(uint8_t *p, uint32_t v) {
+    p[0] = (uint8_t)(v >> 24);
+    p[1] = (uint8_t)(v >> 16);
+    p[2] = (uint8_t)(v >> 8);
+    p[3] = (uint8_t)v;
+}
+//............................................................................
+static bool Bl_frameOk_(uint8_t const *frame) {
+    uint32_t const ver = frame[1];
+    uint32_t const len = Bl_be32_(&frame[2]);
+    uint32_t const crc = Bl_be32_(&frame[6]);
+
+    if (ver != BL_PROTO_VER) {
+        return false;
+    }
+    if ((len == 0U) || (len > BL_ASSET_MAX)) {
+        return false;
+    }
+
+    return crc == Bl_crc32_(&frame[1], 5U);
+}
+//............................................................................
+static void Bl_ack_(void) {
+    uint8_t out[BL_ACK_LEN];
+
+    out[0] = BL_ACK_MAGIC;
+    Bl_putBe32_(&out[1], BL_ASSET_BASE);
+    out[5] = (uint8_t)(BL_BLOCK_BYTES >> 8);
+    out[6] = (uint8_t)(BL_BLOCK_BYTES & 0xFFU);
+    Bl_putBe32_(&out[7], Bl_crc32_(out, 7U));
+
+    (void)HAL_UART_Transmit(&Bl_uart_, out, BL_ACK_LEN, 100U);
+}
+//............................................................................
+static void Bl_nak_(void) {
+    uint8_t n = BL_NAK_MAGIC;
+
+    (void)HAL_UART_Transmit(&Bl_uart_, &n, 1U, 100U);
+}
+//............................................................................
+// Burn mode, handshake only: collect one request frame, check it, answer it.
+// Nothing touches the NOR here on purpose - the point of this step is the wire.
+static void Bl_burn_(void) {
+    uint8_t frame[BL_REQ_LEN];
+    uint8_t b;
+    uint32_t count = 0U;
+
+    Bl_say_("[bootloader] burn mode: waiting for a handshake\r\n");
+
+    for (;;) {
+        // Polling, 20 ms per byte: burn mode has nothing else to do and the
+        // app is not running, so a byte missed here is lost for good.
+        if (HAL_UART_Receive(&Bl_uart_, &b, 1U, 20U) != HAL_OK) {
+            continue;
+        }
+
+        if ((count == 0U) && (b != BL_REQ_MAGIC)) {
+            continue;               // resynchronise on the frame marker
+        }
+
+        frame[count] = b;
+        ++count;
+        if (count < BL_REQ_LEN) {
+            continue;
+        }
+
+        count = 0U;
+        ++Bl_frames_;
+
+        if (!Bl_frameOk_(frame)) {
+            ++Bl_bad_;
+            Bl_nak_();
+            continue;
+        }
+
+        ++Bl_ok_;
+        Bl_len_ = Bl_be32_(&frame[2]);
+        Bl_ack_();
+    }
 }
 //............................................................................
 // Cheap sanity check on the image we are about to hand the CPU to. Both words

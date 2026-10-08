@@ -19,8 +19,16 @@ JLINK = r"C:\mengrendufu\software_ins\JLink\JLink.exe"
 JL_OPTS = "-device STM32F103ZE -if SWD -speed 4000 -autoconnect 1 -ExitOnError 1 -NoGui 1"
 CMD = "/mnt/c/Windows/System32/cmd.exe"
 
-# ---- TODO(协议)：这些数字定下来才能互操作 ----
-MAGIC_REQ, MAGIC_ACK, MAGIC_NAK = 0xAA, 0x55, 0x4E
+# ---- 线协议（握手部分已与目标机联调验证，见 AGENTS.md 的镜像布局条）----
+#   request  PC -> BL:  AA | ver(1) | len(4 BE) | crc32(4 BE)        10 B
+#                        crc32 覆盖 ver+len
+#   reply    BL -> PC:  55 | base(4 BE) | block(2 BE) | crc32(4 BE)  11 B
+#                        crc32 覆盖前 7 B（帧头也在内）
+#   refusal  BL -> PC:  4E（版本 / 长度 / 帧 CRC 任一不过）
+# 块级载荷还没定（下一步），但整张的最终校验定了：资产头里的 CRC32。
+REQ_MAGIC, ACK_MAGIC, NAK_MAGIC = 0xAA, 0x55, 0x4E
+PROTO_VER = 1
+REQ_LEN, ACK_LEN = 10, 11
 BLOCK = 4096
 HANDSHAKE_TIMEOUT_S = 5.0
 BLOCK_ACK_TIMEOUT_S = 2.0
@@ -75,25 +83,37 @@ def jlink_flag_and_reset(addr, tpl):
     print(f"[burn] J-Link 完成，用时 {time.time()-t0:.1f} s")
 
 
-def handshake(ser, img_len, crc32):
-    """③ 重复发握手帧直到 ACK；超时给明确诊断。"""
-    req = struct.pack(">BBI I", MAGIC_REQ, 1, img_len, crc32)  # TODO(协议): 帧格式/长度字段
+def handshake(ser, img_len):
+    """③ 重复发握手帧直到 ACK；对回帧自己再算一遍 CRC（本轮唯一的硬要求：最终校验）。"""
+    core = struct.pack(">BI", PROTO_VER, img_len)
+    req = bytes([REQ_MAGIC]) + core + struct.pack(">I", zlib.crc32(core) & 0xFFFFFFFF)
     deadline = time.time() + HANDSHAKE_TIMEOUT_S
     sent = 0
     while time.time() < deadline:
         ser.reset_input_buffer()
-        ser.write(req); sent += 1
+        ser.write(req)
+        sent += 1
         t0 = time.time()
         while time.time() - t0 < 0.2:
             b = ser.read(1)
-            if b and b[0] == MAGIC_ACK:
-                rest = ser.read(8)                      # TODO(协议): ACK 载荷 = 基址 + 块大小
-                print(f"[burn] 收到 ACK（第 {sent} 次握手），基址/块大小 {rest.hex()}")
-                return
-            if b and b[0] == MAGIC_NAK:
-                sys.exit("[burn] 目标回 NAK（帧非法或长度超 assets 区）")
+            if b and b[0] == NAK_MAGIC:
+                sys.exit("[burn] 目标回 NAK：版本 / 长度 / 帧 CRC 有一个没过")
+            if not (b and b[0] == ACK_MAGIC):
+                continue
+            rest = ser.read(ACK_LEN - 1)
+            if len(rest) != ACK_LEN - 1:
+                sys.exit(f"[burn] ACK 只收到 {len(rest) + 1}/{ACK_LEN} 字节")
+            body = bytes([ACK_MAGIC]) + rest[0:6]
+            crc = struct.unpack(">I", rest[6:10])[0]
+            want = zlib.crc32(body) & 0xFFFFFFFF
+            if crc != want:
+                sys.exit(f"[burn] ACK 的 CRC 对不上：{crc:08X} vs {want:08X}")
+            base, block = struct.unpack(">IH", rest[0:6])
+            print(f"[burn] ACK（第 {sent} 次握手）：基址 0x{base:08X}、块 {block} B、帧 CRC 验过")
+            return base, block
     sys.exit("[burn] 握手超时。检查：① 串口开完后 rts/dtr 是否都是 deassert（否则 RESET 被压住）"
-             "② J-Link 那一步是否成功 ③ BOOT0 是否被 RTS 拉高进了 ROM bootloader（再复位一次）")
+             " ② J-Link 那一步是否成功 ③ BOOT0 是否被 RTS 拉高进了 ROM bootloader（再复位一次）")
+
 
 
 def send_blocks(ser, img):
@@ -127,6 +147,7 @@ def main():
     ap.add_argument("--elf", default="build/debug/bootloader.elf")
     ap.add_argument("--tpl", default=os.path.join(os.path.dirname(__file__), "enter-burn.jlink.tpl"))
     ap.add_argument("--no-jlink", action="store_true", help="跳过 J-Link（标志已置好时用，便于调协议）")
+    ap.add_argument("--handshake-only", action="store_true", help="握上手就停（联调用，不碰 flash）")
     a = ap.parse_args()
 
     img = open(a.image, "rb").read()
@@ -138,7 +159,10 @@ def main():
     try:
         if not a.no_jlink:
             jlink_flag_and_reset(noinit_addr(a.elf), a.tpl)   # ②
-        handshake(ser, len(img), crc)                    # ③
+        handshake(ser, len(img))                         # ③
+        if a.handshake_only:
+            print("[burn] --handshake-only：到此为止（不碰 flash）")
+            return
         send_blocks(ser, img)                            # ④ + ⑤
         todo = ser.read(8)                               # TODO(协议): DONE 帧 + 回读 CRC 结果
         print(f"[burn] 收尾回复：{todo.hex()}")
