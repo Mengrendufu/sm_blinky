@@ -1,0 +1,14 @@
+// Read-back for the intermittent cold start.
+//
+// BSP_lcdReadyTick_ @ 0x200067CC
+//   0        -> the panel never accepted a fill in the 40-pass budget (~4.5 s)
+//   non-zero -> the tick at which it did
+//
+// RCC_CSR @ 0x40021024: which reset started this boot. POR alone means a real
+// power-on; SFTRST or PINRST would mean something else reset the part.
+
+h
+mem32 0x200067CC, 1
+mem32 0x40021024, 1
+g
+qc

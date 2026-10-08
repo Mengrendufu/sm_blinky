@@ -1,0 +1,17 @@
+// Stack high-water marks, read straight out of RAM.
+//
+// FreeRTOS fills a task stack with 0xA5 when the task is created and grows it
+// downwards, so counting untouched words from the LOW end of the array gives
+// the same number uxTaskGetStackHighWaterMark() reports - without needing the
+// trace channel.
+//
+//   Ui_stack_    @ 0x20000578  2048 words (8 KB)
+//   Blinky_stack @ 0x200000C8   256 words (1 KB)
+//   Flash_stack_ @ 0x20006238   256 words (1 KB)
+
+h
+mem32 0x20000578, 2048
+mem32 0x200000C8, 256
+mem32 0x20006238, 256
+g
+qc

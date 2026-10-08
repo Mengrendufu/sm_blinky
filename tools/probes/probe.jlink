@@ -1,0 +1,20 @@
+// Read-only probe: halt, read, resume. No reset, no flash write.
+//   JLink.exe -device STM32F103ZE -if SWD -speed 4000 -autoconnect 1
+//             -ExitOnError 1 -NoGui 1 -CommandFile <this file>
+
+h
+Regs
+
+// Reset cause. RCC_CSR flags are sticky until RMVF is written, and the
+// firmware never touches this register, so it still describes the last boot.
+mem32 0x40021024, 1
+
+// SCB fault status: CFSR / HFSR / DFSR / MMFAR
+mem32 0xE000ED28, 4
+
+// FSMC: BCR1..BTR4 (bank 3 = SRAM, bank 4 = panel), then BWTR3/BWTR4
+mem32 0xA0000000, 8
+mem32 0xA0000110, 4
+
+g
+qc

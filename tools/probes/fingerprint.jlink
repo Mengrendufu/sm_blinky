@@ -1,0 +1,63 @@
+// Probe #5 -- fingerprint on the widgets, not on the empty background.
+//
+// The demo screen (ui_disp.c): square 72x72 at CENTER+(0,-48) -> x 84..156,
+// y 76..148; "LED ON/OFF" label at CENTER+(0,44) -> y ~197..211.
+// Row 112 therefore has to show the square, row 204 the label text, and both
+// have to sit on black elsewhere. If those are missing while the background
+// is black, the panel's GRAM is fine but nothing drew; if the whole row is
+// noise, the GRAM itself is wrong.
+//
+// CASET/RASET parameters go out high byte first, then low byte (bsp_lcd.c
+// BSP_lcdSetWindow). Getting them the other way round silently widens the
+// window, which is how probe #4 ended up sampling empty rows.
+
+h
+
+mem32 0x20007040, 1
+
+// row 112, x = 0..239 -- straight through the square
+w2 0x6C0007FE, 0x002A
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x00EF
+w2 0x6C0007FE, 0x002B
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0070
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0070
+w2 0x6C0007FE, 0x002E
+mem16 0x6C000800, 241
+
+// row 204, x = 0..239 -- through the LED state label
+w2 0x6C0007FE, 0x002A
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x00EF
+w2 0x6C0007FE, 0x002B
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x00CC
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x00CC
+w2 0x6C0007FE, 0x002E
+mem16 0x6C000800, 241
+
+// row 16, x = 0..239 -- through the title
+w2 0x6C0007FE, 0x002A
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x00EF
+w2 0x6C0007FE, 0x002B
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0010
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0010
+w2 0x6C0007FE, 0x002E
+mem16 0x6C000800, 241
+
+mem32 0x20007040, 1
+
+g
+qc

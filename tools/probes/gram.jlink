@@ -1,0 +1,72 @@
+// Read-only probe #2. Halts, reads, resumes. No reset, no flash write.
+//
+// Question it answers: what does the panel's frame memory actually hold, and
+// how long has this boot been running (so a reset loop would show as a small
+// tick count).
+//
+// FSMC access via the debug port goes through the same programmed timing as
+// the CPU's, so these reads see what the firmware sees.
+//
+// LCD window: bank4 base 0x6C000000, RS = A10 -> command 0x6C0007FE,
+// data 0x6C000800. 0x00 is the ST7789's no-op, used here only to prove the
+// J-Link write command works before touching real state.
+
+h
+
+// How long has this boot been up (FreeRTOS ticks, 1 tick = 1 ms)?
+mem32 0x20007040, 1
+// Current task control block, to name the task the CPU was in.
+mem32 0x20007518, 1
+// RCC_CR / RCC_CFGR: is the clock still 72 MHz off the PLL?
+mem32 0x40021000, 2
+
+// --- write command syntax check: NOP to the panel, must not disturb it ---
+w2 0x6C0007FE, 0x0000
+
+// --- frame memory readback, three rows --------------------------------
+// CASET 0..239, RASET row..row, RAMRD, one dummy, then the pixels.
+
+// row 0
+w2 0x6C0007FE, 0x002A
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x00EF
+w2 0x6C0007FE, 0x002B
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C0007FE, 0x002E
+mem16 0x6C000800, 12
+
+// row 160
+w2 0x6C0007FE, 0x002A
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x00EF
+w2 0x6C0007FE, 0x002B
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x00A0
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x00A0
+w2 0x6C0007FE, 0x002E
+mem16 0x6C000800, 12
+
+// row 319
+w2 0x6C0007FE, 0x002A
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x00EF
+w2 0x6C0007FE, 0x002B
+w2 0x6C000800, 0x0001
+w2 0x6C000800, 0x003F
+w2 0x6C000800, 0x0001
+w2 0x6C000800, 0x003F
+w2 0x6C0007FE, 0x002E
+mem16 0x6C000800, 12
+
+g
+qc

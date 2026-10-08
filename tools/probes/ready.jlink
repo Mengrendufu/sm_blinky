@@ -1,0 +1,13 @@
+// Experiment B read-back: the tick at which the panel first accepted a fill
+// with the relaxed write timing (ADDSET=1, DATAST=4 -> 97.2 ns instead of
+// 69.4 ns).
+//
+// BSP_lcdReadyTick_ @ 0x200067CC
+//   baseline with the old timing: 3194 ms (fill did not land at 3082 ms)
+//
+// Only a power-on exercises the path under test; a debugger reset does not.
+
+h
+mem32 0x200067CC, 1
+g
+qc

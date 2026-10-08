@@ -1,0 +1,17 @@
+// TEMPORARY: the firmware's own minimum-free-stack tracker.
+//
+//   Ui_dbgSamples_  @ 0x20000564   how many times it has sampled
+//   Ui_dbgCount_    @ 0x20000568   tasks found
+//   Ui_dbgFreeMin_  @ 0x2000056C   8 words: smallest free stack seen, per task
+//   Ui_dbgName_     @ 0x2000058C   8 words: that task's name, first 4 chars
+//
+// Plus a direct scan of the three static stacks for a cross-check against
+// what the tracker reports.
+
+h
+mem32 0x20000564, 2
+mem32 0x2000056C, 16
+mem32 0x20000578, 2048
+mem32 0x200000C8, 256
+g
+qc

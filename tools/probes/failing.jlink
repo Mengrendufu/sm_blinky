@@ -1,0 +1,97 @@
+// Probe #6 -- THE FAILING STATE.
+//
+// The board was cold-started with no debugger attached, the panel went to
+// noise, and only then was the J-Link connected. The core is halted first so
+// the frame memory is frozen before anything can repaint it.
+//
+// Read order matters: uptime and reset cause first, so "this really is the
+// cold boot" is on the record before any of the frame memory is touched.
+// Setting a window and reading through RAMRD do not change GRAM contents.
+//
+// Rows sampled: 0, 112 (the square), 160, 204 (the label), 319.
+
+h
+
+// uptime in FreeRTOS ticks (100 Hz -> 10 ms each). A cold boot shows minutes,
+// a debugger-driven reset would show a handful.
+mem32 0x20007040, 1
+
+// Reset cause, untouched by the firmware: POR should be the only flag on a
+// cold start that nothing has reset since.
+mem32 0x40021024, 1
+
+// Where the core was when it stopped.
+Regs
+
+// --- row 0 -------------------------------------------------------------
+w2 0x6C0007FE, 0x002A
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x00EF
+w2 0x6C0007FE, 0x002B
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C0007FE, 0x002E
+mem16 0x6C000800, 241
+
+// --- row 112 (the square) ----------------------------------------------
+w2 0x6C0007FE, 0x002A
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x00EF
+w2 0x6C0007FE, 0x002B
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0070
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0070
+w2 0x6C0007FE, 0x002E
+mem16 0x6C000800, 241
+
+// --- row 160 -----------------------------------------------------------
+w2 0x6C0007FE, 0x002A
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x00EF
+w2 0x6C0007FE, 0x002B
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x00A0
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x00A0
+w2 0x6C0007FE, 0x002E
+mem16 0x6C000800, 241
+
+// --- row 204 (the label) -----------------------------------------------
+w2 0x6C0007FE, 0x002A
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x00EF
+w2 0x6C0007FE, 0x002B
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x00CC
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x00CC
+w2 0x6C0007FE, 0x002E
+mem16 0x6C000800, 241
+
+// --- row 319 -----------------------------------------------------------
+w2 0x6C0007FE, 0x002A
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x00EF
+w2 0x6C0007FE, 0x002B
+w2 0x6C000800, 0x0001
+w2 0x6C000800, 0x003F
+w2 0x6C000800, 0x0001
+w2 0x6C000800, 0x003F
+w2 0x6C0007FE, 0x002E
+mem16 0x6C000800, 241
+
+g
+qc

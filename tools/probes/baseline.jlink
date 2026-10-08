@@ -1,0 +1,60 @@
+// Probe #4 -- baseline of the healthy state, and a continuity check.
+//
+// Two jobs:
+//  1. xTickCount again, to prove attaching the debugger does NOT reset the
+//     target (probe #2 saw 0x0027FD10). Without that, reading the frame
+//     memory after a cold boot would just describe a fresh boot.
+//  2. A frame-memory fingerprint: the left 120 px of three rows. Black
+//     background reads 0, the demo widgets read non-zero, so the same sample
+//     taken in the failing state can be compared against it.
+
+h
+
+mem32 0x20007040, 1
+
+// row 0, x = 0..119
+w2 0x6C0007FE, 0x002A
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0077
+w2 0x6C000800, 0x0000
+w2 0x6C0007FE, 0x002B
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C0007FE, 0x002E
+mem16 0x6C000800, 121
+
+// row 160, x = 0..119
+w2 0x6C0007FE, 0x002A
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0077
+w2 0x6C000800, 0x0000
+w2 0x6C0007FE, 0x002B
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x00A0
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x00A0
+w2 0x6C0007FE, 0x002E
+mem16 0x6C000800, 121
+
+// row 319, x = 0..119
+w2 0x6C0007FE, 0x002A
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0077
+w2 0x6C000800, 0x0000
+w2 0x6C0007FE, 0x002B
+w2 0x6C000800, 0x0001
+w2 0x6C000800, 0x003F
+w2 0x6C000800, 0x0001
+w2 0x6C000800, 0x003F
+w2 0x6C0007FE, 0x002E
+mem16 0x6C000800, 121
+
+mem32 0x20007040, 1
+
+g
+qc

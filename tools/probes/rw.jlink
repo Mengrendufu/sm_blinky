@@ -1,0 +1,64 @@
+// Probe #3 -- the decisive one. Halt, write one pixel, read it back, restore.
+//
+// Question: is the panel's read path real? The black readback the firmware
+// trusts could equally be "the bus never drives anything and reads return 0",
+// in which case BSP_lcdFilled_() is always true and the retry loop is dead
+// code. A non-zero pixel separates the two cases.
+//
+// 0xF800 is RGB565 red. Written at (0,0) only, and set back to black before
+// the core is resumed, so the glass is left as it was found.
+
+h
+
+// --- 1. RDID control: the firmware's own known-good read (0x8552) --------
+// bsp_lcd.c reads four values after 04h: dummy, dummy, 0x85, 0x52.
+w2 0x6C0007FE, 0x0004
+mem16 0x6C000800, 6
+
+// --- 2. write red at (0,0) ----------------------------------------------
+// CASET 0..0
+w2 0x6C0007FE, 0x002A
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+// RASET 0..0
+w2 0x6C0007FE, 0x002B
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+// RAMWR + one pixel
+w2 0x6C0007FE, 0x002C
+w2 0x6C000800, 0xF800
+
+// --- 3. read it back ----------------------------------------------------
+w2 0x6C0007FE, 0x002A
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C0007FE, 0x002B
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C0007FE, 0x002E
+mem16 0x6C000800, 6
+
+// --- 4. put it back to black -------------------------------------------
+w2 0x6C0007FE, 0x002A
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C0007FE, 0x002B
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C000800, 0x0000
+w2 0x6C0007FE, 0x002C
+w2 0x6C000800, 0x0000
+
+g
+qc

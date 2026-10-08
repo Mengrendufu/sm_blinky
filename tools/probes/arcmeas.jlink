@@ -1,0 +1,19 @@
+// TEMPORARY measurement read-back.
+//
+//   Ui_dbgPoolTotal_    @ 0x20002618   LVGL pool size
+//   Ui_dbgPoolFree_     @ 0x20002614   free after the screen was built
+//   Ui_dbgPoolUsedPct_  @ 0x20002610   used %
+//   Ui_dbgMaxGapUs_     @ 0x2000260C   worst block render time seen
+//   Ui_dbgMaxGapW_      @ 0x20002608   that block's width
+//   Ui_dbgMaxGapH_      @ 0x20002604   that block's height
+//
+// Plus the three static stacks, to re-read the high-water marks with the arc
+// actually being drawn.
+
+h
+mem32 0x20002604, 6
+mem32 0x20000578, 2048
+mem32 0x200000C8, 256
+mem32 0x20006254, 256
+g
+qc

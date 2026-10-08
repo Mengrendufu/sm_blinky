@@ -1,0 +1,5 @@
+// Timing probe A: 1000 reads from internal SRAM (fast target, no FSMC).
+h
+mem32 0x20000000, 1000
+g
+qc

@@ -1,0 +1,14 @@
+// Cold-start readiness curve, dense-poll build.
+//
+// BSP_lcdTryOk_   @ 0x200067CC  forty words: did attempt N's fill land
+// BSP_lcdTryTick_ @ 0x2000686C  forty words: HAL_GetTick() after attempt N
+//
+// The loop starts at 120 ms and passes every ~107 ms, so the first 1 in the
+// ok array is the panel's real readiness time. Only a power-on exercises the
+// path under test: a debugger reset does not.
+
+h
+mem32 0x200067CC, 40
+mem32 0x2000686C, 40
+g
+qc

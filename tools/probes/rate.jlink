@@ -1,0 +1,10 @@
+// Tick-rate measurement: read the tick counter and the two things that set
+// its rate. Run twice with a known wall-clock gap between runs; the counter
+// cannot advance while the core is halted, so the gap must be measured
+// outside the session.
+h
+mem32 0x20007040, 1
+mem32 0x20000000, 1
+mem32 0xE000E010, 2
+g
+qc

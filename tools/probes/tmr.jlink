@@ -1,0 +1,19 @@
+// TEMPORARY: timer task stack breakdown.
+//
+//   SST_dbgCbSp_  @ 0x2000002C   SP captured when the tick callback is entered
+//   Ui_dbgSamples_/Count_  @ 0x20000564
+//   Ui_dbgFreeMin_ @ 0x2000056C   8 words, smallest free stack per task
+//   Ui_dbgName_    @ 0x2000058C   8 words, that task's name (4 chars packed)
+//   timerStack.0   @ 0x200069D8   256 words, top = 0x20006DD8
+//
+// Deepest point the high-water mark implies = top - (256 - free) * 4.
+// Comparing that with SST_dbgCbSp_ splits the cost into the timer task's own
+// frame and whatever SST_TimeEvt_tick() consumes.
+
+h
+mem32 0x2000002C, 1
+mem32 0x20000564, 2
+mem32 0x2000056C, 16
+mem32 0x200069D8, 256
+g
+qc

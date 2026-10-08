@@ -1,0 +1,15 @@
+// Decides whether the software fix is viable.
+//
+// The firmware's own retries (SWRESET + full re-init, four times over ~1.95 s)
+// cannot clear the bad panel state a cold power-on leaves behind, so the state
+// needs a real RESX low pulse. RESX is tied to NRST. The question is whether
+// the MCU's own reset path drives NRST low: if it does, the firmware can give
+// the panel that pulse itself by resetting once after a cold boot.
+//
+// This writes only AIRCR.SYSRESETREQ. The J-Link's own reset line is not used,
+// so anything the panel gets here comes from the MCU alone.
+//
+//   0x05FA0004 = VECTKEY(0x05FA) | SYSRESETREQ(bit 2)
+
+w4 0xE000ED0C, 0x05FA0004
+qc
