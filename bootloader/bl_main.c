@@ -63,6 +63,21 @@
 #define BL_ASSET_MAX   0x00040000U  // sanity bound on the length field
 #define BL_ASSET_BASE  0x00081000U  // NOR assets area (charter partition plan)
 
+// Block phase. Still no flash: the point of this step is the wire and the
+// retransmit path, and the final CRC over the whole image (the one checksum
+// this protocol insists on).
+//
+//   block    PC -> BL:  B1 | idx(2 BE) | len(2 BE) | crc32低16(2 BE)   7 B
+//                       then len bytes of payload
+//   final    PC -> BL:  C1 | total(4 BE) | crc32(4 BE)                  9 B
+//   answer   BL -> PC:  55 (taken) / 4E (rejected)
+#define BL_BLK_MAGIC   0xB1U
+#define BL_BLK_HDR     7U
+#define BL_FIN_MAGIC   0xC1U
+#define BL_FIN_LEN     9U
+#define BL_MAX_BLOCK   4096U
+#define BL_POLL_MS     20U          // how long to wait for the next byte
+
 // Written by J-Link, cleared here. Same address in both images (see the .ld).
 extern uint32_t _snoinit;
 
@@ -72,6 +87,16 @@ uint32_t Bl_frames_;    // frames that started with the marker byte
 uint32_t Bl_ok_;        // frames that passed the CRC
 uint32_t Bl_bad_;       // frames rejected: version, length or CRC
 uint32_t Bl_len_;       // length field of the last accepted frame
+uint32_t Bl_blocks_;    // blocks taken (payload CRC matched)
+uint32_t Bl_retry_;     // blocks rejected - the PC is expected to send again
+uint32_t Bl_bytes_;     // payload bytes folded into the running CRC
+uint32_t Bl_crcRun_;    // running CRC32 over the payload (folded per good block)
+uint32_t Bl_final_;     // 0 = no final frame yet, 1 = matched, 2 = mismatched
+uint32_t Bl_last_;      // index of the last block taken
+
+// Needed so a re-sent block does not get folded into the running CRC twice;
+// the flash step will want the bytes anyway.
+static uint8_t Bl_block_[BL_MAX_BLOCK];
 
 static UART_HandleTypeDef Bl_uart_;
 
@@ -83,10 +108,14 @@ static bool Bl_appSane_(void);
 static void Bl_burn_(void) __attribute__((noreturn));
 static void Bl_handOver_(void) __attribute__((noreturn));
 static uint32_t Bl_crc32_(uint8_t const *data, uint32_t len);
+static uint32_t Bl_crc32Update_(uint32_t crc, uint8_t const *data,
+                                uint32_t len);
 static uint32_t Bl_be32_(uint8_t const *p);
 static void Bl_putBe32_(uint8_t *p, uint32_t v);
 static bool Bl_frameOk_(uint8_t const *frame);
-static void Bl_ack_(void);
+static bool Bl_readExact_(uint8_t *dst, uint32_t len);
+static void Bl_ackFrame_(void);
+static void Bl_ack1_(void);
 static void Bl_nak_(void);
 
 //============================================================================
@@ -188,12 +217,15 @@ static void Bl_say_(char const *text) {
 }
 //............................................................................
 // CRC32, the same one zlib.crc32() computes (poly 0xEDB88320, init all ones,
-// final xor), so the PC side can use its standard library call.
-static uint32_t Bl_crc32_(uint8_t const *data, uint32_t len) {
-    uint32_t crc = 0xFFFFFFFFU;
+// final xor), so the PC side can use its standard library call. The update
+// form exists because the payload arrives in blocks and a re-sent block must
+// not be folded in twice.
+static uint32_t Bl_crc32Update_(uint32_t crc, uint8_t const *data,
+                                uint32_t len) {
     uint32_t i;
     uint8_t bit;
 
+    crc ^= 0xFFFFFFFFU;
     for (i = 0U; i < len; ++i) {
         crc ^= data[i];
         for (bit = 0U; bit < 8U; ++bit) {
@@ -203,6 +235,10 @@ static uint32_t Bl_crc32_(uint8_t const *data, uint32_t len) {
     }
 
     return crc ^ 0xFFFFFFFFU;
+}
+//............................................................................
+static uint32_t Bl_crc32_(uint8_t const *data, uint32_t len) {
+    return Bl_crc32Update_(0U, data, len);
 }
 //............................................................................
 static uint32_t Bl_be32_(uint8_t const *p) {
@@ -232,7 +268,8 @@ static bool Bl_frameOk_(uint8_t const *frame) {
     return crc == Bl_crc32_(&frame[1], 5U);
 }
 //............................................................................
-static void Bl_ack_(void) {
+// The handshake answer: 11 bytes with its own CRC.
+static void Bl_ackFrame_(void) {
     uint8_t out[BL_ACK_LEN];
 
     out[0] = BL_ACK_MAGIC;
@@ -244,50 +281,125 @@ static void Bl_ack_(void) {
     (void)HAL_UART_Transmit(&Bl_uart_, out, BL_ACK_LEN, 100U);
 }
 //............................................................................
+// Block and final answers are one byte. Mixing this up with the 11-byte
+// handshake frame leaves ten bytes of junk per block in the PC's input
+// buffer - which is exactly what the first run of the block test hit.
+static void Bl_ack1_(void) {
+    uint8_t n = BL_ACK_MAGIC;
+
+    (void)HAL_UART_Transmit(&Bl_uart_, &n, 1U, 100U);
+}
+//............................................................................
 static void Bl_nak_(void) {
     uint8_t n = BL_NAK_MAGIC;
 
     (void)HAL_UART_Transmit(&Bl_uart_, &n, 1U, 100U);
 }
 //............................................................................
-// Burn mode, handshake only: collect one request frame, check it, answer it.
-// Nothing touches the NOR here on purpose - the point of this step is the wire.
-static void Bl_burn_(void) {
-    uint8_t frame[BL_REQ_LEN];
-    uint8_t b;
-    uint32_t count = 0U;
+// Read exactly len bytes, one at a time. Returns false on the first gap: the
+// caller answers NAK and the PC sends the block again.
+static bool Bl_readExact_(uint8_t *dst, uint32_t len) {
+    uint32_t i;
 
-    Bl_say_("[bootloader] burn mode: waiting for a handshake\r\n");
+    for (i = 0U; i < len; ++i) {
+        if (HAL_UART_Receive(&Bl_uart_, &dst[i], 1U, BL_POLL_MS) != HAL_OK) {
+            return false;
+        }
+    }
+
+    return true;
+}
+//............................................................................
+// Burn mode. Three kinds of frame arrive here, told apart by their first byte:
+// the handshake (AA), a payload block (B1) and the final whole-image CRC (C1).
+// Nothing touches the NOR on purpose - the wire and the retransmit path are
+// what this step is about, plus the one checksum the protocol insists on.
+static void Bl_burn_(void) {
+    // One buffer for all three frame kinds: the handshake is the longest at
+    // BL_REQ_LEN, so a block header fits with room to spare. (Sizing this to
+    // BL_BLK_HDR instead overflowed the stack by three bytes - the handshake
+    // read 10 bytes into a 7-byte array.)
+    uint8_t hdr[BL_REQ_LEN];
+    uint8_t fin[BL_FIN_LEN];
+    uint8_t b;
+    uint32_t idx;
+    uint32_t len;
+    uint32_t lo16;
+
+    Bl_say_("[bootloader] burn mode: handshake, then blocks\r\n");
 
     for (;;) {
-        // Polling, 20 ms per byte: burn mode has nothing else to do and the
-        // app is not running, so a byte missed here is lost for good.
-        if (HAL_UART_Receive(&Bl_uart_, &b, 1U, 20U) != HAL_OK) {
+        // Polling: burn mode has nothing else to do and the app is not
+        // running, so a byte missed here is lost for good.
+        if (HAL_UART_Receive(&Bl_uart_, &b, 1U, BL_POLL_MS) != HAL_OK) {
             continue;
         }
 
-        if ((count == 0U) && (b != BL_REQ_MAGIC)) {
-            continue;               // resynchronise on the frame marker
-        }
-
-        frame[count] = b;
-        ++count;
-        if (count < BL_REQ_LEN) {
+        if (b == BL_REQ_MAGIC) {
+            hdr[0] = b;
+            if (!Bl_readExact_(&hdr[1], BL_REQ_LEN - 1U)) {
+                continue;
+            }
+            ++Bl_frames_;
+            if (!Bl_frameOk_(hdr)) {
+                ++Bl_bad_;
+                Bl_nak_();
+                continue;
+            }
+            ++Bl_ok_;
+            Bl_len_ = Bl_be32_(&hdr[2]);
+            Bl_ackFrame_();
             continue;
         }
 
-        count = 0U;
-        ++Bl_frames_;
+        if (b == BL_BLK_MAGIC) {
+            hdr[0] = b;
+            if (!Bl_readExact_(&hdr[1], BL_BLK_HDR - 1U)) {
+                continue;
+            }
+            idx = ((uint32_t)hdr[1] << 8) | (uint32_t)hdr[2];
+            len = ((uint32_t)hdr[3] << 8) | (uint32_t)hdr[4];
+            lo16 = ((uint32_t)hdr[5] << 8) | (uint32_t)hdr[6];
 
-        if (!Bl_frameOk_(frame)) {
-            ++Bl_bad_;
-            Bl_nak_();
+            if ((len == 0U) || (len > BL_MAX_BLOCK)
+                || !Bl_readExact_(Bl_block_, len)) {
+                ++Bl_retry_;
+                Bl_nak_();
+                continue;
+            }
+            if ((Bl_crc32_(Bl_block_, len) & 0xFFFFU) != lo16) {
+                ++Bl_retry_;
+                Bl_nak_();
+                continue;
+            }
+
+            // Folded in only now: a block that failed its CRC must not reach
+            // the running CRC, or the final check could never match.
+            Bl_crcRun_ = Bl_crc32Update_(Bl_crcRun_, Bl_block_, len);
+            Bl_bytes_ += len;
+            Bl_last_ = idx;
+            ++Bl_blocks_;
+            Bl_ack1_();
             continue;
         }
 
-        ++Bl_ok_;
-        Bl_len_ = Bl_be32_(&frame[2]);
-        Bl_ack_();
+        if (b == BL_FIN_MAGIC) {
+            fin[0] = b;
+            if (!Bl_readExact_(&fin[1], BL_FIN_LEN - 1U)) {
+                continue;
+            }
+            if ((Bl_be32_(&fin[1]) == Bl_bytes_)
+                && (Bl_be32_(&fin[5]) == Bl_crcRun_)) {
+                Bl_final_ = 1U;
+                Bl_ack1_();
+            } else {
+                Bl_final_ = 2U;
+                Bl_nak_();
+            }
+            continue;
+        }
+
+        // Anything else: noise between frames, drop it.
     }
 }
 //............................................................................

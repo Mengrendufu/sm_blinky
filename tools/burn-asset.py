@@ -29,6 +29,8 @@ CMD = "/mnt/c/Windows/System32/cmd.exe"
 REQ_MAGIC, ACK_MAGIC, NAK_MAGIC = 0xAA, 0x55, 0x4E
 PROTO_VER = 1
 REQ_LEN, ACK_LEN = 10, 11
+BLK_MAGIC, FIN_MAGIC = 0xB1, 0xC1
+BLK_HDR_LEN, FIN_LEN = 7, 9
 BLOCK = 4096
 HANDSHAKE_TIMEOUT_S = 5.0
 BLOCK_ACK_TIMEOUT_S = 2.0
@@ -116,28 +118,54 @@ def handshake(ser, img_len):
 
 
 
-def send_blocks(ser, img):
-    """④ 38 块停等 + NAK 重传。"""
+def send_blocks(ser, img, corrupt=None):
+    """④ 分块停等 + NAK 重传。--corrupt N 会故意把第 N 块的载荷改一个字节，用来验重传。"""
     total = len(img)
+    blocks = 0
+    retries = 0
     t0 = time.time()
     for idx, off in enumerate(range(0, total, BLOCK)):
-        blk = img[off:off + BLOCK]
-        hdr = struct.pack(">BHH H", 0xB1, idx, len(blk), zlib.crc32(blk) & 0xFFFF)  # TODO(协议)
+        blk = bytearray(img[off:off + BLOCK])
+        # 注意顺序：块头 CRC 按【好数据】算，然后才弄坏载荷 —— 这样块自校验才会
+        # 不过、目标机才会 NAK。若先弄坏再算 CRC，块自校验照样通过，只有最终
+        # 整张校验能发现（那验证的是另一件事）。
+        lo16 = zlib.crc32(bytes(blk)) & 0xFFFF
+        if corrupt is not None and idx == corrupt:
+            blk[0] ^= 0xFF
+            print(f"[burn] 故意弄坏第 {idx} 块的第一个字节（块头 CRC 仍是好数据的）")
+        hdr = struct.pack(">BHHH", BLK_MAGIC, idx, len(blk), lo16)
         for attempt in range(1, MAX_BLOCK_RETRY + 1):
             ser.reset_input_buffer()
-            ser.write(hdr + blk)
+            ser.write(hdr + bytes(blk))
             reply = ser.read(1)
-            if reply and reply[0] == MAGIC_ACK:
+            if reply and reply[0] == ACK_MAGIC:
+                blocks += 1
                 break
-            print(f"[burn] 块 {idx} 第 {attempt} 次失败，重传")
+            retries += 1
+            print(f"[burn] 块 {idx} 第 {attempt} 次被拒（目标机回 "
+                  f"{reply.hex() if reply else '无应答'}），重传")
+            if corrupt is not None and idx == corrupt and attempt == 1:
+                blk[0] ^= 0xFF      # 只有第一次是坏的，重传发正确的数据
+                print(f"[burn] 块 {idx} 改回正确数据")
         else:
             sys.exit(f"[burn] 块 {idx} 重传 {MAX_BLOCK_RETRY} 次仍失败")
-        if idx % 8 == 0 or off + BLOCK >= total:
+        if (idx % 8 == 0) or (off + BLOCK >= total):
             done = min(off + BLOCK, total)
-            print(f"[burn] {done*100//total:3d}%  ({done}/{total} B)")
+            print(f"[burn] {done * 100 // total:3d}%  ({done}/{total} B)")
     dt = time.time() - t0
-    print(f"[burn] 传输完成，用时 {dt:.1f} s（{total/1024:.0f} KiB，{total*8/18e6*1000:.0f} ms 是理论 SPI 时间，"
-          f"其余是串口 13.3 s 量级 + 擦写）")
+    print(f"[burn] 块传输完成：{blocks} 块、重传 {retries} 次、用时 {dt:.1f} s"
+          f"（{total / 1024:.0f} KiB；115200 的理论下限约 {total * 10 / 115200:.1f} s）")
+
+
+def send_final(ser, img):
+    """⑤ 最终校验：整张的字节数 + CRC32 —— 本协议唯一的硬要求。"""
+    crc = zlib.crc32(img) & 0xFFFFFFFF
+    fin = bytes([FIN_MAGIC]) + struct.pack(">I", len(img)) + struct.pack(">I", crc)
+    ser.write(fin)
+    r = ser.read(1)
+    if not (r and r[0] == ACK_MAGIC):
+        sys.exit(f"[burn] 最终校验没过（目标机回 {r.hex() if r else '无应答'}）")
+    print(f"[burn] 最终校验通过：{len(img)} B，CRC32 {crc:08X}")
 
 
 def main():
@@ -148,6 +176,9 @@ def main():
     ap.add_argument("--tpl", default=os.path.join(os.path.dirname(__file__), "enter-burn.jlink.tpl"))
     ap.add_argument("--no-jlink", action="store_true", help="跳过 J-Link（标志已置好时用，便于调协议）")
     ap.add_argument("--handshake-only", action="store_true", help="握上手就停（联调用，不碰 flash）")
+    ap.add_argument("--blocks-only", action="store_true", help="块 + 最终校验做完就停（不碰 flash）")
+    ap.add_argument("--corrupt-block", type=int, default=None, metavar="N",
+                    help="故意弄坏第 N 块，验重传路径")
     a = ap.parse_args()
 
     img = open(a.image, "rb").read()
@@ -163,9 +194,11 @@ def main():
         if a.handshake_only:
             print("[burn] --handshake-only：到此为止（不碰 flash）")
             return
-        send_blocks(ser, img)                            # ④ + ⑤
-        todo = ser.read(8)                               # TODO(协议): DONE 帧 + 回读 CRC 结果
-        print(f"[burn] 收尾回复：{todo.hex()}")
+        send_blocks(ser, img, a.corrupt_block)            # ④
+        send_final(ser, img)                             # ⑤
+        if a.blocks_only:
+            print("[burn] --blocks-only：到此为止（没碰 flash）")
+            return
     finally:
         ser.close()                                      # ⑥
         print("[burn] 串口已关闭")
