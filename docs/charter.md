@@ -127,7 +127,7 @@ flash 不只是 UI 的资产存储：它还要放**升级镜像**、**配置/KV*
 | # | 增量 | 验收 | 状态 |
 |---|---|---|---|
 | 1 | 时序规格化 + 启动顺序归位 + tracer 归 BSP + idle 去环 | 开机位置出 DISPON/RDID、LED 心跳照旧、无断言 | 完成 `2cb48c3` |
-| 2 | `application/ui/` 骨架：静态 TCB + 栈 2 KB + 收件箱 + 唤醒原语 + 单状态 HSM；`[MEM]` 按身份分（21 `[BLINKY]` / 24 `[UI]`） | 串口出 `[MEM][STACK][UI]` 且能读数；Blinky 不受影响 | 完成（上板验证） |
+| 2 | `application/ui/` 骨架：静态 TCB + 栈 2 KB（增量 2 当时；LVGL 接入后抬到 8 KB）+ 收件箱 + 唤醒原语 + 单状态 HSM；`[MEM]` 按身份分（21 `[BLINKY]` / 24 `[UI]`） | 串口出 `[MEM][STACK][UI]` 且能读数；Blinky 不受影响 | 完成（上板验证） |
 | 3 | LVGL 加载 + 显示适配：`lv_init` + `lv_display_create(240,320)` + PARTIAL 单缓冲 15 KB + flush + 心跳切 B，外加一个跟 LED 走的 demo 控件（标题 + 方块 + edges 计数） | 屏上出现 LVGL 画面且随 `Ui_postLedOn/Off` 变化；`[TIME]` 给出三个实测数 | 代码已落，**待上板验证** |
 | 4 | 状态页 + 事件：把 demo 控件换成真正的状态页字段，补事件语义 | 状态页随事件变化；整屏重绘耗时符合预算 | 待做（demo 控件是它的一次预演） |
 
@@ -135,11 +135,12 @@ flash 不只是 UI 的资产存储：它还要放**升级镜像**、**配置/KV*
 
 ## 6. 预算
 
-- 内存：内部 SRAM 64 KB（= 0x10000 = 65,536 B，口径同 ST 链接脚本）。现状（LVGL 接入后、上板通过）：**`bss 58,096 / data 16` ≈ 88.6%**（-O2）；其中 LVGL 池 24 KB、绘制缓冲 15 KB（240×32×2 = 15,360 B）、UI 栈 8 KB、其余任务栈与静态对象约 10 KB。UI 栈高水位（-O2）剩 **1320 words**，8 KB 很宽裕。扣掉链接脚本要求的 1.5 KB（heap 512 B + MSP 1 KB）后，真正可用的余量约 **5.9 KB**——够 flash 热路径那份 1~4 KB 的哑元缓冲，再要大件就得把池或绘制缓冲挪到外挂 SRAM。
+- 内存：内部 SRAM 64 KB（= 0x10000 = 65,536 B，口径同 ST 链接脚本）。现状（LVGL 接入后、上板通过；**`2297bb3` 的 -O2 测量**）：**`bss 58,096 / data 16` ≈ 88.6%**；**Arc 接入（`e5d17c5`，+5.8 KB flash）与启动顺序改动后待重测** —— 重测：`cmake --preset debug && cmake --build --preset build-debug` 后 `arm-none-eabi-size build/debug/sm_blinky.elf`；其中 LVGL 池 24 KB、绘制缓冲 15 KB（240×32×2 = 15,360 B）、UI 栈 8 KB、其余任务栈与静态对象约 10 KB。UI 栈高水位（-O2）剩 **1320 words**，8 KB 很宽裕。扣掉链接脚本要求的 1.5 KB（heap 512 B + MSP 1 KB）后，真正可用的余量约 **5.9 KB**——够 flash 热路径那份 1~4 KB 的哑元缓冲，再要大件就得把池或绘制缓冲挪到外挂 SRAM。
 - 刷屏：写单价 69.4 ns/字；一条 240×32 = 0.533 ms；整屏 76,800 字 = 5.33 ms（面板下界，DMA 也翻不过去），另加渲染时间。
 - 心跳：B 自适应，`LV_NO_TIMER_READY` 兜底 10 ms。一次全屏重绘会把 UI 线程独占 6~10 ms（≈ 一个心跳周期），这是知情代价。
 - 实测（-O2、72 MHz、240×32 条带，`[TIME]` 记录）：一次 LED 翻转引起的局部刷新 = **3 块 / 8 KiB**，`FRAME` 总计 **≈11.9 ms**：我们自己的 flush 1.35 ms，LVGL 渲染 ≈10.5 ms。按块看，方块那块（72×72）flush 0.80 ms；两行字那两块（72×24）各 flush ≈0.27 ms、渲染各 ≈2.2 ms。折算刷屏单价 ≈155 ns/像素（≈11 周期，接近 FSMC 5 HCLK 的下限）。**整屏重绘那一条还没测**（要构造整屏失效才有记录）。
 - 前提：构建必须带 `-O2`。同一个刷新在 `-O0` 下要 **29 ms**（渲染 21~25 ms），观感就是「一块一块刷」；`-O2` 后 11.9 ms，肉眼看不出过程。text 也从 257 KB 降到 166 KB。
+- 优化档评估（2026-10-07）：`-O3` / `-flto` **已评估、暂不采用**。盘子：单帧 11.9 ms 里 LVGL 渲染占 10.5 ms（88%），我们自己的 flush 1.35 ms 是总线/窗口主导、优化碰不到；`nm` 归集显示 text 168,828 B 里 LVGL 占 96.7 KB（66%），我们自己的 app+BSP+ports 只有 5.4 KB。预估（**未做 A/B**）：`-O3` 单帧 0~1.6 ms（中值 ≈0.8，≈7%）、`-O3+-flto` 0.3~2.0 ms（中值 ≈1.2，≈10%）；体积 `-O3` +5~17 KB，`-flto` 能回收大半。风险：F1 是 `FLASH_LATENCY_2`（2 等待周期）且 M3 **无 I-cache**（只有 prefetch buffer），代码膨胀会转成取指开销、可能净亏；M3 无 SIMD/FPU，`-O3` 也拿不到向量化收益。真正的杠杆是 DMA（省掉 1.35 ms flush + 给 idle 时间让 tracer 泵）与减少重绘面积，不是优化档。当前仍是 `-O2`（`toolchain_arm.cmake` 全局，含 LVGL）；`CMakePresets.json` 只有 `debug` preset，所以 `CMAKE_C_FLAGS_RELEASE` 里的 `-O3` 从未启用。
 
 ## 7. 刷屏阻塞点与 idle 的关系
 

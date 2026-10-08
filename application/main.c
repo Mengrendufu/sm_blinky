@@ -42,10 +42,16 @@ int main(void) {
     configASSERT(SST_sysTimer != NULL);
     configASSERT(xTimerStart(SST_sysTimer, 0U) == pdPASS);
 
+    // Bind before post: Ui_start()/Flash_start() build their task and point
+    // the channel's wake slot at it; AO_start() is what posts into those
+    // channels, from the initial transition of its first AO. A post into an
+    // unbound channel is accepted silently with the wake dropped - a flash
+    // caller would then park on a completion that can never arrive - so this
+    // order is the contract, not the timing luck that used to cover it.
     SST_init();
-    AO_start();
     Ui_start();
     Flash_start();
+    AO_start();
     SST_start();
 
     vTaskStartScheduler();
