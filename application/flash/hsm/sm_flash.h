@@ -19,10 +19,12 @@
 // One instance, owned by the flash thread and dispatched synchronously from
 // its inbox drain, so the thread is the only one that touches it.
 //
-// The handlers do the transfer inline. Blocking inside a handler is
-// deliberate here: this thread has no event queue behind it, so a slow
-// handler delays the next request and nothing else. Flash_ready is the only
-// state for now; the maintenance and upgrade modes grow off it later.
+// The handlers do the transfer inline. Waiting inside a handler is deliberate
+// here: this thread has no event queue behind it, so a slow handler delays
+// the next request and nothing else - and a wait costs no CPU, where the
+// blocking read it replaced spun for the whole transfer and starved the idle
+// task that drains the tracer. Flash_ready is the only state for now; the
+// maintenance and upgrade modes grow off it later.
 
 typedef struct {
     SM_Hsm sm_hsm_;

@@ -75,6 +75,7 @@ static StackType_t  Blinky_stack[BLINKY_STACK_WORDS];
 
 static uint16_t blinky_beats;
 
+
 // Class implementation ======================================================
 void Blinky_ctor(void) {
     SST_Task_ctor(AO_Blinky,
@@ -163,10 +164,32 @@ static void Blinky_maintenance_(void) {
         // The flash belongs to the flash thread at run time, so the probe
         // goes through its inbox like any other request.
         (void)Flash_probe();
+
+        // And the same bus again for the run time read, which is the only
+        // caller of the DMA path: the header of the image the bootloader
+        // wrote, read a chunk at a time into RAM and reported as identity.
+        // "AST1" is what the loader writes there, so the four bytes are the
+        // check - record 46 is [ok][A][S][T][1].
+        {
+            uint8_t head[4];
+
+            if (Flash_readBlock(ASSET_NOR_BASE, head, sizeof head)) {
+                SM_TRACE_BEGIN(46U, 5)
+                    SM_TRACE_PAYLOAD_BE(1U)
+                    SM_TRACE_PAYLOAD_BE(head[0])
+                    SM_TRACE_PAYLOAD_BE(head[1])
+                    SM_TRACE_PAYLOAD_BE(head[2])
+                    SM_TRACE_PAYLOAD_BE(head[3])
+                SM_TRACE_END()
+            } else {
+                SM_TRACE_BEGIN(46U, 1)
+                    SM_TRACE_PAYLOAD_BE(0U)
+                SM_TRACE_END()
+            }
+        }
         // The write self test still drives SPI2 from its own task. It is
         // scaffolding: once assets land it goes to FLASH_WT_OFF, and then the
         // flash thread is the only bus user.
         BSP_flashSelfTestStart();
     }
-
 }

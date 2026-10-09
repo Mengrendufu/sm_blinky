@@ -40,9 +40,10 @@ void BSP_flashProbe(void);
 // address itself, so len has no page boundary to respect - only the array
 // size.
 //
-// Byte wide for now (one HAL call per byte, the bottleneck the DMA path
-// removes later). Whoever calls this owns SPI2 for the duration: at run time
-// that is the flash thread, and nothing else may touch the bus meanwhile.
+// Block wise: the command and address stay byte at a time, the data goes out
+// through HAL_SPI_Receive() in blocks of FLASH_BLOCK_MAX. Whoever calls this
+// owns SPI2 for the duration: at run time that is the flash thread, and
+// nothing else may touch the bus meanwhile.
 bool BSP_flashRead(uint32_t address, uint8_t *dst, uint32_t len);
 
 // Erase one 4 KB sector. `address` must be sector aligned. Measured ~130 ms
@@ -58,5 +59,27 @@ bool BSP_flashProgramPage(uint32_t address, uint8_t const *data,
 // it back. Start it once - it spins up its own task, because a multi minute
 // sweep has no business running in an AO whose event queue holds 8 entries.
 void BSP_flashSelfTestStart(void);
+
+// Run time read, moved by DMA and finished in its interrupt: the caller is
+// not held on the bus, it is called back when the data has landed. The boot
+// path (BSP_flashRead above) stays the blocking one, because before the
+// scheduler interrupts are off and nothing interrupt driven can complete.
+//
+// One read at a time, and at most FLASH_DMA_CHUNK bytes: a longer read is the
+// caller's loop over chunks (which is where a yield between them belongs). A
+// second call while one is in flight, or an oversized one, is refused with
+// done(false). The callback runs in interrupt context - keep it short, and do
+// not call anything that blocks, and do not start another read from it.
+typedef void (*BSP_flashDoneCb)(bool ok);
+
+// One arm moves this much and no more. 32 KB is ~15 ms on the wire, which is
+// the window the caller gets between chunks; the size is here because the
+// caller is the one that loops.
+#define FLASH_DMA_CHUNK 32768UL
+
+void BSP_flashReadDma(uint32_t address, uint8_t *dst, uint32_t len,
+                      BSP_flashDoneCb done);
+bool BSP_flashDmaBusy(void);
+bool BSP_flashDmaFailed(void);
 
 #endif // BSP_FLASH_H_

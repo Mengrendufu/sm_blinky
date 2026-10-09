@@ -141,9 +141,50 @@ static StackType_t flashWtStack_[FLASH_WT_STACK_WORDS];
 static void BSP_flashSelfTestTask_(void *arg);
 
 //============================================================================
+// DMA read path, for the run time. The boot window cannot use it: before the
+// scheduler the tracer's critical section leaves interrupts disabled (see
+// AGENTS.md), so an interrupt driven transfer has no way to complete there.
+// Asset_load() therefore uses the blocking BSP_flashRead() above, and this
+// path serves the flash thread, which has a scheduler to block on.
+//
+// Shape: one call, one transaction - CS low, command and address from the
+// CPU, the data moved by the channel, CS raised and the caller called back
+// from the completion interrupt. A read longer than FLASH_DMA_CHUNK is the
+// caller's loop (each chunk is its own transaction, command and address
+// included; that costs a few microseconds against 14 ms of transfer).
+//
+// HAL_SPI_Receive_DMA() in master, two line mode is
+// HAL_SPI_TransmitReceive_DMA(hspi, pData, pData, Size) - the same in place
+// trick as the blocking call - so the transmit channel reads the very buffer
+// the receive channel fills. That is harmless here (the device ignores DI
+// while it shifts data out) and it keeps this path at zero extra RAM.
+// One arm moves one chunk and no more: the F1 HAL does not support starting
+// the next transfer from inside its own completion callback (its
+// SPI_DMAReceiveCplt keeps working with the handles after the callback
+// returns, so re-arming there writes through a stale pointer - found the hard
+// way, the fault stash named that function). Chunking is the caller's job,
+// which is also where the yield between chunks belongs.
+// 5 is configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY: the completion callback
+// wakes tasks, so a numerically lower priority would be illegal to call from.
+#define FLASH_DMA_IRQ_PRIO  5U
+
+static void BSP_flashDmaInit_(void);
+static void BSP_flashDmaChunk_(void);
+static void BSP_flashDmaFinish_(bool ok);
+
+static DMA_HandleTypeDef flashDmaRx_;   // DMA1_Channel4, SPI2_RX
+static DMA_HandleTypeDef flashDmaTx_;   // DMA1_Channel5, SPI2_TX
+static volatile bool flashDmaBusy_;
+static volatile bool flashDmaFailed_;
+static uint8_t *flashDmaDst_;
+static uint32_t flashDmaLeft_;
+static BSP_flashDoneCb flashDmaDone_;
+
+//============================================================================
 void BSP_flashInit(void) {
     BSP_flashGpioInit_();
     BSP_flashSpiInit_();
+    BSP_flashDmaInit_();
 
     // Throwaway read. The first transaction after power-up came back wrong on
     // every boot we measured (three boots, three answers) while every later
@@ -212,6 +253,149 @@ bool BSP_flashRead(uint32_t address, uint8_t *dst, uint32_t len) {
     // only bus user and every program or erase waits BUSY out before it
     // returns, so this call never races one.
     return BSP_flashExchange_(FLASH_READ_CMD, addr, 3U, dst, len);
+}
+
+//............................................................................
+static void BSP_flashDmaInit_(void) {
+    __HAL_RCC_DMA1_CLK_ENABLE();
+
+    flashDmaRx_.Instance = DMA1_Channel4;
+    flashDmaRx_.Init.Direction = DMA_PERIPH_TO_MEMORY;
+    flashDmaRx_.Init.PeriphInc = DMA_PINC_DISABLE;
+    flashDmaRx_.Init.MemInc = DMA_MINC_ENABLE;
+    flashDmaRx_.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+    flashDmaRx_.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+    flashDmaRx_.Init.Mode = DMA_NORMAL;
+    flashDmaRx_.Init.Priority = DMA_PRIORITY_HIGH;
+    if (HAL_DMA_Init(&flashDmaRx_) != HAL_OK) {
+        SM_onAssert("flash", __LINE__);
+    }
+
+    flashDmaTx_.Instance = DMA1_Channel5;
+    flashDmaTx_.Init.Direction = DMA_MEMORY_TO_PERIPH;
+    flashDmaTx_.Init.PeriphInc = DMA_PINC_DISABLE;
+    flashDmaTx_.Init.MemInc = DMA_MINC_ENABLE;
+    flashDmaTx_.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+    flashDmaTx_.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+    flashDmaTx_.Init.Mode = DMA_NORMAL;
+    flashDmaTx_.Init.Priority = DMA_PRIORITY_HIGH;
+    if (HAL_DMA_Init(&flashDmaTx_) != HAL_OK) {
+        SM_onAssert("flash", __LINE__);
+    }
+
+    // The SPI takes both: the receive channel carries the data, the transmit
+    // one only keeps the clock running while it does. __HAL_LINKDMA(), not a
+    // plain assignment: the HAL's completion callbacks look the SPI handle up
+    // through hdma->Parent, and the macro is the only thing that sets it.
+    // Without it Parent stays NULL, the callback reads ErrorCode through it
+    // and the board faults into erased flash (the fault stash named it).
+    __HAL_LINKDMA(&flash_spi_, hdmarx, flashDmaRx_);
+    __HAL_LINKDMA(&flash_spi_, hdmatx, flashDmaTx_);
+
+    HAL_NVIC_SetPriority(DMA1_Channel4_IRQn, FLASH_DMA_IRQ_PRIO, 0U);
+    HAL_NVIC_EnableIRQ(DMA1_Channel4_IRQn);
+    HAL_NVIC_SetPriority(DMA1_Channel5_IRQn, FLASH_DMA_IRQ_PRIO, 0U);
+    HAL_NVIC_EnableIRQ(DMA1_Channel5_IRQn);
+}
+//............................................................................
+// One chunk, armed and left alone. What happens next happens in the
+// completion interrupt.
+static void BSP_flashDmaChunk_(void) {
+    if (HAL_SPI_Receive_DMA(&flash_spi_, flashDmaDst_,
+                            (uint16_t)flashDmaLeft_) != HAL_OK) {
+        BSP_flashDmaFinish_(false);
+    }
+}
+//............................................................................
+// The end of the read, from interrupt context: CS high, the state cleared,
+// then the caller's callback. The callback is taken and cleared first, so a
+// callback that starts another read cannot have it overwritten.
+static void BSP_flashDmaFinish_(bool ok) {
+    BSP_flashDoneCb const cb = flashDmaDone_;
+
+    HAL_GPIO_WritePin(FLASH_CS_PORT, FLASH_CS_PIN, GPIO_PIN_SET);
+
+    flashDmaDone_ = (BSP_flashDoneCb)0;
+    flashDmaFailed_ = !ok;
+    flashDmaBusy_ = false;
+
+    if (cb != (BSP_flashDoneCb)0) {
+        cb(ok);
+    }
+}
+//............................................................................
+void BSP_flashReadDma(uint32_t address, uint8_t *dst, uint32_t len,
+                      BSP_flashDoneCb done) {
+    uint8_t const addr[3] = {
+        (uint8_t)(address >> 16),
+        (uint8_t)(address >> 8),
+        (uint8_t)address
+    };
+
+    if ((dst == (uint8_t *)0) || (len == 0U) || (len > FLASH_DMA_CHUNK)
+        || flashDmaBusy_ || (address >= FLASH_SIZE)
+        || (len > (FLASH_SIZE - address))) {
+        // A refusal is reported the way a failed transfer is, so a caller
+        // that waits on the callback always reads the truth out of
+        // BSP_flashDmaFailed().
+        flashDmaFailed_ = true;
+        if (done != (BSP_flashDoneCb)0) {
+            done(false);
+        }
+        return;
+    }
+
+    flashDmaDst_ = dst;
+    flashDmaLeft_ = len;
+    flashDmaDone_ = done;
+    flashDmaFailed_ = false;
+    flashDmaBusy_ = true;
+
+    HAL_GPIO_WritePin(FLASH_CS_PORT, FLASH_CS_PIN, GPIO_PIN_RESET);
+    (void)BSP_flashXfer_(FLASH_READ_CMD);
+    (void)BSP_flashWriteBlock_(addr, 3U);
+
+    BSP_flashDmaChunk_();
+}
+//............................................................................
+bool BSP_flashDmaBusy(void) {
+    return flashDmaBusy_;
+}
+//............................................................................
+bool BSP_flashDmaFailed(void) {
+    return flashDmaFailed_;
+}
+//............................................................................
+// HAL's callbacks, called from the channel interrupts. The name is the one
+// the HAL actually calls: HAL_SPI_Receive_DMA sets the handle to BUSY_RX
+// before it hands over to the transmit-receive routine, so the completion
+// goes to SPI_DMAReceiveCplt, which ends in HAL_SPI_RxCpltCallback. Both
+// channels report errors through the error callback.
+void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi) {
+    if (hspi != &flash_spi_) {
+        return;
+    }
+
+    BSP_flashDmaFinish_(true);   // one transaction per arm: never re-arm here
+}
+//............................................................................
+void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi) {
+    if (hspi == &flash_spi_) {
+        BSP_flashDmaFinish_(false);
+    }
+}
+//............................................................................
+// The two channel vectors, next to the channels they serve. Enabling the NVIC
+// line without them lands the interrupt in the startup file's default
+// handler, which is an infinite loop - the board goes quiet in the middle of
+// the read (found the hard way: the halt showed IPSR 15 with the task
+// registers still on the stack and the DMA flags set).
+void DMA1_Channel4_IRQHandler(void) {
+    HAL_DMA_IRQHandler(&flashDmaRx_);
+}
+//............................................................................
+void DMA1_Channel5_IRQHandler(void) {
+    HAL_DMA_IRQHandler(&flashDmaTx_);
 }
 //............................................................................
 static void BSP_flashGpioInit_(void) {

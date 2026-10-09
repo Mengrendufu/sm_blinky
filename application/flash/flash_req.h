@@ -21,7 +21,8 @@
 // Slot 0 belongs to a task's own entry wake: the SST AO pend, the UI inbox,
 // and the flash thread waiting for a request. Slot 1 is therefore where a
 // flash RPC is completed, on the caller's own task - same convention at both
-// ends, and no per-call object to create.
+// ends, and no per-call object to create. The flash thread reads its own slot
+// 1 the same way: its transfer's interrupt is what completes a chunk.
 #define FLASH_REQ_INDEX  0U
 #define FLASH_DONE_INDEX 1U
 

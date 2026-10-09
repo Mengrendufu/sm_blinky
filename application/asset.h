@@ -27,6 +27,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+// Where the image sits in the NOR: the bootloader's layout, in the one place
+// both the loader here and the run time read back agree on.
+#define ASSET_NOR_BASE 0x00081000U
+
 // One slot per background. The images are all the same size today, so the
 // payload is just slots laid end to end; a table with per-slot lengths is the
 // step after this one (it only earns its keep once they differ).

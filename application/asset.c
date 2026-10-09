@@ -16,7 +16,7 @@
 //============================================================================
 // Where the bootloader puts it (see bootloader/bl_main.c and the charter's
 // partition plan): a header sector, then the payload.
-#define ASSET_BASE   0x00081000U
+#define ASSET_BASE   ASSET_NOR_BASE
 #define ASSET_DATA   (ASSET_BASE + 0x1000U)
 #define ASSET_SRAM   0x68000000U    // external IS62WV51216, FSMC bank 3
 #define ASSET_MAGIC  0x41535431U    // "AST1", the word the bootloader writes
