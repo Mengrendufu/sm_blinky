@@ -18,6 +18,7 @@
 | `asset-burn-bootloader.html` / `.mmd` | **待落地**：烧写全程 | 单脚本管全程：开串口 → J-Link 置标志复位 → 握手 → 38 块 → DONE |
 | `serial-script-flow.html` / `.mmd` | **待落地**：脚本侧流程 | 脚本自己的步骤、外部输入、重试与诊断 |
 | `asset-load.html` / `.mmd` | **待落地**：app 运行期 | 启动期把背景资产一次性搬进外挂 SRAM |
+| `ui-flush.html` / `.mmd` | **现有固件**刷屏（对象级） | UI 线程一次刷屏的完整策略：渲染 → 开窗 → 起 DMA → 线程阻塞（idle 泵日志）→ 中断唤醒 → flush_ready，含超时/错误断言与"单缓冲不重叠"的说明 |
 
 `sketches/` 里是设计草图（非时序图）：`layout.html`（存储布局：NOR 分区 / 外挂 SRAM / 资产区）、
 `screen-layout.html`（现有 demo 画面）、`screen-anim.html`（动画型 v2）、`screen-ebike.html`（照 LVGL e-bike 改造的 v3）、

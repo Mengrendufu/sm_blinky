@@ -1,0 +1,68 @@
+sequenceDiagram
+    autonumber
+    participant ui as UI 线程<br/>ui.c（lv_timer_handler 的调用者）
+    participant lvgl as LVGL 9.5<br/>渲染 / 脏区 / 单缓冲
+    participant disp as 显示适配器<br/>ui_disp.c
+    participant bsp as BSP_lcd<br/>bsp_lcd.c
+    participant dma as DMA1_Ch6<br/>M2M 硬件
+    participant ch as 通道中断<br/>DMA1_Channel6_IRQHandler
+    participant sch as FreeRTOS 调度器
+    participant idle as idle 任务<br/>tracer 泵
+    participant panel as 面板 ST7789<br/>FSMC bank4
+
+    Note over ui,panel: 一个刷屏周期 = 一次 lv_timer_handler()（ui.c:84 → ui_disp.c:143）
+
+    ui->>lvgl: lv_timer_handler()
+    lvgl->>lvgl: 收集脏区，按 240x32 条带渲染进 Ui_strip_（内部 SRAM 15,360 B）
+    lvgl->>disp: flush_cb(area, px)   ui_disp.c:196
+
+    disp->>bsp: BSP_lcdSetWindow(x1,y1,x2,y2)   ui_disp.c:217
+    bsp->>panel: CASET / RASET / RAMWR（9 次 FSMC 写，CPU）
+    Note right of panel: 窗口开好后，面板地址计数器正好落在<br/>第一个像素该去的位置
+
+    disp->>disp: __DSB()    ui_disp.c:223
+    Note right of disp: 屏障把条带的存储对 DMA 主设备可见<br/>（DMA 从总线矩阵读，不走本核写缓冲）
+
+    disp->>bsp: BSP_lcdWritePixelsDma(px, 像素数)   ui_disp.c:224
+    bsp->>bsp: 断言：非空 / 偶数 ≤65535 / 半字对齐   bsp_lcd.c:341
+    bsp->>dma: HAL_DMA_Start_IT(源=strip, 目的=0x6C000800, 半字)   bsp_lcd.c:361
+    Note right of bsp: M2M：两端都内存映射，不需要请求线；<br/>FSMC 用自己的等待状态限速（charter §11）
+
+    disp->>disp: Ui_dmaWait_()   ui_disp.c:225
+    disp->>sch: ulTaskNotifyTakeIndexed(槽 1, 20 ms)   ui_disp.c:300
+    Note over sch,idle: 线程 Blocked ⇒ 让出 CPU。<br/>刷屏期间日志还转得动，就靠这一步（charter §7）
+
+    par 面板在搬的时候
+        dma->>panel: 每半字一次 AHB 访问 → FSMC → 8080 写（~167 ns/像素）
+    and CPU 落到 idle
+        sch->>idle: vApplicationIdleHook()   freertos_hooks.c:7
+        idle->>idle: SST_onIdle → SM_Tracer_idle 把环里的记录泵到 UART   bsp.c:227
+    end
+
+    dma->>ch: 传输完成（TC）
+    ch->>bsp: HAL_DMA_IRQHandler(&lcdDma_)   bsp_lcd.c:407
+    bsp->>disp: 完成钩子 lcdDmaDone_()   bsp_lcd.c:382
+    disp->>disp: Ui_flushDone_()（中断上下文，只做两件事）   ui_disp.c:290
+    disp->>sch: vTaskNotifyGiveIndexedFromISR(槽 1)
+    disp->>sch: portYIELD_FROM_ISR(woken)
+    Note right of disp: 这里**不**碰 lv_*：flush_ready 留给线程，<br/>"任何 lv_* 只在 UI 线程"因此仍然成立（charter §4.2）
+
+    sch->>ui: 中断返回时按优先级切回 UI 线程（23 > idle 0）
+    disp->>disp: 记一条 BLK 记录（间隙/时长/块尺寸）   ui_disp.c:239
+    disp->>lvgl: lv_display_flush_ready(disp)   ui_disp.c:249
+    Note right of lvgl: 单缓冲：这条 flush 完成了，<br/>LVGL 才允许复用同一块缓冲 → 渲染与搬运不重叠
+
+    alt 还有脏区
+        lvgl->>disp: 下一块 flush_cb（回到第 4 步）
+    else 一帧画完
+        lvgl-->>ui: lv_timer_handler() 返回下一次到期时间
+        ui->>ui: 记 FRAME / FLUSH 两条记录，算出 wait   ui_disp.c:153,162
+        ui->>sch: ulTaskNotifyTake(槽 0, wait)   ui.c:79
+        Note over ui,idle: 帧间的空档（LED 心跳 500 ms）里 idle 真正空闲，<br/>把这一帧的记录按 115200 的节拍泵出去（0.868 ms/条）
+    end
+
+    opt 超时或 DMA 报错
+        disp->>disp: signalled == 0 或 BSP_lcdDmaFailed()
+        disp->>disp: SM_onAssert("uidma", 行号)   ui_disp.c:304
+        Note right of disp: 断言 → 记一条记录 → 复位（不变量 7：<br/>丢日志可以，卡死不行）。断言在线程里，不在中断里
+    end
