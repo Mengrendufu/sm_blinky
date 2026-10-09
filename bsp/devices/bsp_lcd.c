@@ -38,6 +38,18 @@
 #define LCD_BL_PORT     GPIOB
 #define LCD_BL_PIN      GPIO_PIN_0
 
+// The strip push runs on DMA1 channel 6, which is what charter §3 reserved
+// for the flush: SPI2 owns channels 4/5 (the flash), channel 1 stays free for
+// ADC1, 2/3 are held for a second SPI, and 7 stays spare. M2M is not a
+// preference here, it is the only mode that fits - neither endpoint is a
+// handshake peripheral (bsp_lcd.h).
+#define LCD_DMA_CHANNEL  DMA1_Channel6
+#define LCD_DMA_IRQN     DMA1_Channel6_IRQn
+// 5 is configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY (FreeRTOSConfig.h:123).
+// This interrupt wakes a task, and a numerically lower priority would make
+// that call illegal in a way nothing reports at run time.
+#define LCD_DMA_IRQ_PRIO 5U
+
 // Panel waits. RST is tied to the board reset net (bsp_lcd.h), so the panel
 // has been in reset recovery since the MCU left reset: the datasheet wants no
 // command for the first 5 ms and no SLPOUT before 120 ms (Note 7, p.49). The
@@ -83,6 +95,9 @@ typedef struct {
     uint8_t args[14];
 } BSP_lcdInitStep_;
 
+static DMA_HandleTypeDef lcdDma_;
+static void (*lcdDmaDone_)(void);
+static volatile bool lcdDmaFailed_;
 static BSP_lcdInitStep_ const lcdInitSeq_[] = {
     // MADCTL: BGR bit set. Measured, not inherited: with 0x00 the panel swaps
     // red and blue (a red/green/blue/white/black bar test came back
@@ -112,6 +127,9 @@ static BSP_lcdInitStep_ const lcdInitSeq_[] = {
 //============================================================================
 static void BSP_lcdGpioInit_(void);
 static void BSP_lcdFsmcInit_(void);
+static void BSP_lcdDmaInit_(void);
+static void BSP_lcdDmaCplt_(DMA_HandleTypeDef *hdma);
+static void BSP_lcdDmaError_(DMA_HandleTypeDef *hdma);
 static void BSP_lcdWriteCmd_(uint16_t cmd);
 static void BSP_lcdWriteDat_(uint16_t dat);
 static uint16_t BSP_lcdReadDat_(void);
@@ -129,6 +147,10 @@ void BSP_lcdInit(void) {
 
     BSP_lcdGpioInit_();
     BSP_lcdFsmcInit_();
+    // The channel comes up with the bus it serves. Nothing is armed until the
+    // display layer asks, and the completion hook is registered later, by the
+    // UI thread that will do the waiting.
+    BSP_lcdDmaInit_();
 
     // The panel's RESX is tied to the board reset, so on a cold start it only
     // follows VDD up instead of being held low until the supply is stable.
@@ -243,19 +265,157 @@ static void BSP_lcdFill_(uint16_t colour) {
     }
 }
 //............................................................................
-// Push pixels into the window BSP_lcdSetWindow() just opened. Same bus write
-// as the fill above, so the per pixel cost is the same - the caller decides
-// how many. The display layer's flush callback is the only user today.
-void BSP_lcdWritePixels(uint16_t const *pixels, uint32_t count) {
-    uint32_t i;
+// DMA bring-up: clock, channel, callbacks, interrupt line. Channel flags
+// are cleared when a transfer is armed - DMA_SetConfig() does it
+// (stm32f1xx_hal_dma.c:861) - which is the "false completion" hazard charter
+// §3 calls out for the flash path; on the HAL path it is already covered.
+static void BSP_lcdDmaInit_(void) {
+    __HAL_RCC_DMA1_CLK_ENABLE();
 
-    for (i = 0U; i < count; ++i) {
-        LCD_DAT = pixels[i];
+    lcdDma_.Instance = LCD_DMA_CHANNEL;
+    // M2M puts the source in the peripheral address register and the
+    // destination in its memory register (stm32f1xx_hal_dma.c:858-884), so
+    // both sides walk: the strip, and the panel's window.
+    lcdDma_.Init.Direction = DMA_MEMORY_TO_MEMORY;
+    // M2M puts the source in CPAR and the destination in CMAR
+    // (stm32f1xx_hal_dma.c:858-884), so PINC walks the strip - and the
+    // destination must NOT walk: the panel's RS is FSMC_A10, which on a 16
+    // bit bank is HADDR[11], so an incrementing destination flips RS to a
+    // command
+    // every 0x800 bytes, that is every 1024 pixels. A strip is 7680 px, so
+    // the window registers get fed pixel values and the glass falls apart.
+    // Every access has to land on the same register, as the CPU loop did.
+    lcdDma_.Init.PeriphInc = DMA_PINC_ENABLE;
+    lcdDma_.Init.MemInc = DMA_MINC_DISABLE;
+    lcdDma_.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
+    lcdDma_.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
+    lcdDma_.Init.Mode = DMA_NORMAL;
+    // Above the flash's channel 4/5: the flush has a deadline on the glass,
+    // the flash read is bulk traffic (charter §3).
+    lcdDma_.Init.Priority = DMA_PRIORITY_HIGH;
+
+    if (HAL_DMA_Init(&lcdDma_) != HAL_OK) {
+        SM_onAssert("lcd", __LINE__);
+    }
+    if (HAL_DMA_RegisterCallback(&lcdDma_, HAL_DMA_XFER_CPLT_CB_ID,
+                                 BSP_lcdDmaCplt_) != HAL_OK) {
+        SM_onAssert("lcd", __LINE__);
+    }
+    if (HAL_DMA_RegisterCallback(&lcdDma_, HAL_DMA_XFER_ERROR_CB_ID,
+                                 BSP_lcdDmaError_) != HAL_OK) {
+        SM_onAssert("lcd", __LINE__);
+    }
+
+    HAL_NVIC_SetPriority(LCD_DMA_IRQN, LCD_DMA_IRQ_PRIO, 0U);
+    HAL_NVIC_EnableIRQ(LCD_DMA_IRQN);
+}
+//............................................................................
+// Push pixels into the window BSP_lcdSetWindow() just opened, by channel
+// instead of by CPU. That loop was retired with this path; charter §6 keeps
+// its 169 ns/px as the baseline the channel has to beat.
+//
+// The caller has already opened the window, so the panel's address counter
+// sits where the first pixel has to land: the transfer only has to push them
+// in order, which is what the incrementing destination does.
+void BSP_lcdWritePixelsDma(uint16_t const *pixels, uint32_t count) {
+    uint32_t transfers = count;
+    uint32_t size = DMA_PDATAALIGN_HALFWORD;
+
+    if ((pixels == (uint16_t const *)0) || (count == 0U)
+        || (((uint32_t)pixels & 1U) != 0U)) {
+        SM_onAssert("lcd", __LINE__);
+    }
+
+    // A word access carries two pixels, and what the frame memory charges for
+    // is the access, not the pixel: the retired record 49 bench measured a
+    // fixed ~8 HCLK per access plus ~4 HCLK per halfword moved, so 167 ns/px
+    // for halfwords against 112 ns/px for words. The pair order survives -
+    // the low halfword lands first - and the destination does not walk, so RS
+    // stays on the data register either way. Odd counts and sources that are
+    // not word aligned fall back to halfwords.
+    if (((count & 1U) == 0U) && (((uint32_t)pixels & 3U) == 0U)) {
+        size = DMA_PDATAALIGN_WORD;
+        transfers = count / 2U;
+    }
+    if (transfers > 0xFFFFU) {
+        SM_onAssert("lcd", __LINE__);
+    }
+    if (lcdDma_.State != HAL_DMA_STATE_READY) {
+        SM_onAssert("lcd", __LINE__);
+    }
+
+    lcdDmaFailed_ = false;
+
+    // The size lives in CCR, which HAL_DMA_Start_IT() does not reprogram: it
+    // sets the addresses, the length and the interrupt enables, and nothing
+    // else. PSIZE sits at bit 8 and MSIZE at bit 10, and both take the same
+    // value - which is how DMA_PDATAALIGN_* and DMA_MDATAALIGN_* are defined.
+    MODIFY_REG(lcdDma_.Instance->CCR, DMA_CCR_PSIZE | DMA_CCR_MSIZE,
+               size | (size << 2U));
+
+    // PINC walks the source. The destination (CMAR) is fixed, so every access
+    // lands on the same register - which keeps the panel's RS (FSMC_A10 =
+    // HADDR[11]) on "data" instead of flipping it to "command" every 1024
+    // pixels. HAL's DMA_SetConfig() clears the channel's flags before the
+    // interrupts are enabled, so no stale transfer-complete can fire the wake
+    // early (stm32f1xx_hal_dma.c:861).
+    if (HAL_DMA_Start_IT(&lcdDma_, (uint32_t)pixels,
+                         (uint32_t)LCD_DAT_ADDR, transfers) != HAL_OK) {
+        SM_onAssert("lcd", __LINE__);
     }
 }
+//............................................................................
+// Is the channel still moving pixels? Kept for the adapter's defensive wait
+// path; the ordinary wait is the transfer's interrupt (see charter §11 for
+// what is being tested and why).
+bool BSP_lcdDmaBusy(void) {
+    return (LCD_DMA_CHANNEL->CNDTR != 0U);
+}
+//............................................................................
+void BSP_lcdDmaSetDoneHook(void (*hook)(void)) {
+    lcdDmaDone_ = hook;
+}
+//............................................................................
+bool BSP_lcdDmaFailed(void) {
+    return lcdDmaFailed_;
+}
+//............................................................................
+// Transfer complete: HAL has already disabled the channel's interrupts and
+// cleared the flags (stm32f1xx_hal_dma.c:631-652). All this does is hand the
+// wait over to the thread that armed it.
+static void BSP_lcdDmaCplt_(DMA_HandleTypeDef *hdma) {
+    (void)hdma;
 
+    if (lcdDmaDone_ != (void (*)(void))0) {
+        lcdDmaDone_();
+    }
+}
 //............................................................................
+// Transfer error: HAL has disabled the interrupts, cleared every flag and put
+// the handle back to READY (stm32f1xx_hal_dma.c:655-680), so the thread can
+// arm the next transfer. Wake it either way and let it decide - the assertion
+// belongs on the thread, where pushing a record and resetting the board is
+// ordinary work instead of something done inside an interrupt.
+static void BSP_lcdDmaError_(DMA_HandleTypeDef *hdma) {
+    (void)hdma;
+
+    lcdDmaFailed_ = true;
+
+    if (lcdDmaDone_ != (void (*)(void))0) {
+        lcdDmaDone_();
+    }
+}
 //............................................................................
+// The channel's vector. It lives here, not in bsp/platform/stm32f1xx_it.c,
+// because that file is shared with the bootloader - which links no panel
+// driver, so a reference to this channel from there would not link at all.
+// The bootloader keeps the startup file's default handler on this line, and
+// nothing there ever arms a transfer.
+void DMA1_Channel6_IRQHandler(void) {
+    HAL_DMA_IRQHandler(&lcdDma_);
+}
+
+
 // Frame memory readback: narrow the window to one pixel, RAMRD, one dummy
 // read (the first value back is not the pixel), then the pixel itself.
 //............................................................................

@@ -10,6 +10,7 @@
 #ifndef BSP_LCD_H_
 #define BSP_LCD_H_
 
+#include <stdbool.h>
 #include <stdint.h>
 
 //============================================================================
@@ -45,12 +46,52 @@ void BSP_lcdInit(void);
 void BSP_lcdCheck(void);
 
 // Drawing API for the display layer: open a window, then push pixels into it.
-// Both write straight to the FSMC bus, so they belong to whoever owns the
-// panel at run time (the UI thread); there is no locking here.
+// The window writes go straight to the FSMC bus, so they belong to whoever
+// owns the panel at run time (the UI thread); there is no locking here.
 //
 // One 8080 16-bit transfer carries one RGB565 pixel, so the halfword goes out
 // as it is - no byte swapping on this path.
 void BSP_lcdSetWindow(uint16_t xs, uint16_t ys, uint16_t xe, uint16_t ye);
-void BSP_lcdWritePixels(uint16_t const *pixels, uint32_t count);
+
+// The pixel push runs on DMA1 channel 6: the caller arms the channel and
+// returns, and the transfer's completion runs the hook below from the
+// channel's interrupt.
+//
+// Both ends are memory mapped - the strip in SRAM, the panel window on
+// FSMC bank 4 - so this is a memory to memory transfer and no request line is
+// involved; the FSMC's own wait states pace the writes at the panel's timing.
+// That is what makes M2M legal here, and it is exactly why the flash read
+// cannot use it: the SPI data register is a handshake endpoint (charter §3).
+//
+// One shot, one strip at a time. The panel has one owner at run time (the
+// UI thread) and it is blocked while the transfer runs, so nothing else is on
+// this bus.
+//
+// count is in pixels; the channel moves two of them per access when the count
+// is even and the source is word aligned, one per access otherwise. The
+// ceiling is the 16-bit transfer counter, an assertion here and not a plan:
+// LVGL's partial buffer is 240x32 = 7680. The source has to be at least
+// halfword aligned, which the strip buffer is.
+void BSP_lcdWritePixelsDma(uint16_t const *pixels, uint32_t count);
+
+// Completion hook, run in the DMA interrupt. The display adapter wakes its
+// thread from here and calls lv_display_flush_ready(); keep it to that. No
+// blocking, no waiting, nothing that takes a lock.
+void BSP_lcdDmaSetDoneHook(void (*hook)(void));
+
+// True when the last transfer ended in a DMA error. The adapter reads it
+// after its wait, so the assertion and its record happen on the thread
+// instead of inside an interrupt.
+bool BSP_lcdDmaFailed(void);
+
+// Is the channel still moving pixels? The arm in BSP_lcdWritePixelsDma is a
+// register level one that enables no interrupts, so the caller waits by
+// polling this instead of by parking on the transfer's completion. See the
+// display adapter for why the wait is a poll and not a block (charter §11).
+bool BSP_lcdDmaBusy(void);
+
+// DMA1_Channel6_IRQHandler is defined in bsp_lcd.c, next to the channel it
+// serves. It is not in bsp/platform/stm32f1xx_it.c because that file is
+// shared with the bootloader, which links no panel driver.
 
 #endif // BSP_LCD_H_
