@@ -29,32 +29,82 @@ import serial
 
 ESC, MARK = 0x7D, 0x7E
 
+# 逐字节状态机，策略照抄 sm_tracer_tui 的 HdlcParser
+# （application/aos/sp_mngr/hdlc_parser.c）：任何 0x7E 都重开一帧、字段一个个
+# 收、**长度先验证再收载荷**、校验和决定这帧算不算数。
+#
+# 在这之前是"批量版"：找到 0x7E 就把到下一个 0x7E 之间的全当一帧 ✗ —— 长度字
+# 节一坏就把**跟在后面的好几帧**一起吞掉。同一份 294 条的好抓包、同种子打坏，
+# 记录存活率（旧 → 新）：丢 0.1% 字节 83% → 99%、丢 1% 48% → 90%、
+# 丢 5% 35% → 62%（已接近上限：5% 丢字节会碰到约一半的帧）；坏 5 个字节
+# 24% → 98%。
+HUNT, SEQ, RECID, LEN, PAYLOAD, CHK = 0, 1, 2, 3, 4, 5
+# 记录块一共 8 字节（recId + len + 载荷 + 校验），载荷最多 6。
+DEFAULT_MAX_PAYLOAD = 6
 
-def decode(buf):
-    """把原始字节流切成记录。返回 [(seq, recId, payload)]。"""
+
+def decode(buf, max_payload=DEFAULT_MAX_PAYLOAD, stats=None):
+    """把原始字节流切成记录。返回 [(seq, recId, payload)]。
+
+    stats 传 dict 时会被填上 frames / errors：一份日志解出 0 条时，
+    errors 比 frames 更能说明发生了什么。
+    """
     out = []
-    i = 0
-    while i < len(buf):
-        if buf[i] != MARK:
-            i += 1
+    errors = 0
+    state = HUNT
+    escaped = False
+    frame = bytearray()
+    left = 0
+
+    for b in buf:
+        if escaped:                  # 转义过的字节永远算数据
+            byte = b ^ 0x20
+            escaped = False
+        elif b == ESC:
+            escaped = True
             continue
-        # 帧体：直到下一个未转义的 0x7E
-        j = i + 1
-        body = bytearray()
-        while j < len(buf) and buf[j] != MARK:
-            if buf[j] == ESC and j + 1 < len(buf):
-                body.append(buf[j + 1] ^ 0x20)
-                j += 2
+        elif b == MARK:
+            frame = bytearray()      # 任何 flag 都重开一帧：坏帧只赔自己
+            state = SEQ
+            continue
+        else:
+            byte = b
+
+        if state == HUNT:
+            continue                 # 帧与帧之间的噪声
+
+        if state == SEQ:
+            frame.append(byte)
+            state = RECID
+        elif state == RECID:
+            frame.append(byte)
+            state = LEN
+        elif state == LEN:
+            frame.append(byte)
+            left = byte
+            if left > max_payload:
+                errors += 1          # 长度不可能：立刻丢，不吞后面的帧
+                state = HUNT
             else:
-                body.append(buf[j])
-                j += 1
-        if j < len(buf) and len(body) >= 3:
-            seq = body[0]
-            rec = body[1:-1]
-            chk = body[-1]
-            if (~(sum(rec) + seq)) & 0xFF == chk:
+                state = PAYLOAD if left else CHK
+        elif state == PAYLOAD:
+            frame.append(byte)
+            left -= 1
+            if left == 0:
+                state = CHK
+        else:                        # CHK
+            frame.append(byte)
+            seq = frame[0]
+            rec = bytes(frame[1:-1])
+            if (~(sum(rec) + seq)) & 0xFF == frame[-1]:
                 out.append((seq, rec[0], bytes(rec[2:2 + rec[1]])))
-        i = j + 1
+            else:
+                errors += 1
+            state = HUNT
+
+    if stats is not None:
+        stats["frames"] = len(out)
+        stats["errors"] = errors
     return out
 
 
@@ -66,6 +116,8 @@ def main():
     ap.add_argument("--gaps", action="store_true",
                     help="打印到达时刻与间隔（刷屏有没有饿死 idle 泵）")
     ap.add_argument("--raw", default=None, help="把原始字节存到这个路径")
+    ap.add_argument("--max-payload", type=int, default=DEFAULT_MAX_PAYLOAD,
+                    help="记录载荷上限（默认 6，见记录块的 8 字节上限）")
     a = ap.parse_args()
 
     ser = serial.Serial()
@@ -101,8 +153,10 @@ def main():
             f.write(bytes(buf))
         print(f"[trace] 原始字节 -> {a.raw}")
 
-    recs = decode(bytes(buf))
-    print(f"[trace] {len(buf)} B, {len(recs)} 条记录")
+    stats = {}
+    recs = decode(bytes(buf), a.max_payload, stats)
+    print(f"[trace] {len(buf)} B, {stats['frames']} 条记录, "
+          f"{stats['errors']} 帧被丢弃（长度/校验失败）")
     if a.rec is not None:
         recs = [r for r in recs if r[1] == a.rec]
         print(f"[trace] 其中 RecID {a.rec}: {len(recs)} 条")
