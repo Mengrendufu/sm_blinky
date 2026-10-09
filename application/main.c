@@ -41,6 +41,40 @@ int main(void) {
     // until the scheduler takes over - a delay in that window would hang.
     BSP_init();
 
+    // A fault from a previous life leaves its frame in the cross reset area
+    // (bsp/platform/stm32f1xx_it.c). Report it once on the way up: a fault
+    // is otherwise silent - two LED blinks, a reset, nothing on the wire.
+    {
+        extern uint32_t *BSP_faultStash(void);
+        uint32_t * const s = BSP_faultStash();
+
+        if ((s[0] | s[1] | s[3]) != 0U) {
+            // 66: the instruction that faulted, 4 bytes, then the fault's own
+            // report, 2 bytes. 67: where it was going (LR) and HFSR.
+            SM_TRACE_BEGIN(66U, 6)
+                SM_TRACE_PAYLOAD_BE((uint8_t)((s[0] >> 24) & 0xFFU))
+                SM_TRACE_PAYLOAD_BE((uint8_t)((s[0] >> 16) & 0xFFU))
+                SM_TRACE_PAYLOAD_BE((uint8_t)((s[0] >> 8) & 0xFFU))
+                SM_TRACE_PAYLOAD_BE((uint8_t)(s[0] & 0xFFU))
+                SM_TRACE_PAYLOAD_BE((uint8_t)((s[3] >> 8) & 0xFFU))
+                SM_TRACE_PAYLOAD_BE((uint8_t)(s[3] & 0xFFU))
+            SM_TRACE_END()
+
+            SM_TRACE_BEGIN(67U, 6)
+                SM_TRACE_PAYLOAD_BE((uint8_t)((s[1] >> 24) & 0xFFU))
+                SM_TRACE_PAYLOAD_BE((uint8_t)((s[1] >> 16) & 0xFFU))
+                SM_TRACE_PAYLOAD_BE((uint8_t)((s[1] >> 8) & 0xFFU))
+                SM_TRACE_PAYLOAD_BE((uint8_t)(s[1] & 0xFFU))
+                SM_TRACE_PAYLOAD_BE((uint8_t)((s[4] >> 8) & 0xFFU))
+                SM_TRACE_PAYLOAD_BE((uint8_t)(s[4] & 0xFFU))
+            SM_TRACE_END()
+
+            s[0] = 0U;
+            s[1] = 0U;
+            s[3] = 0U;
+        }
+    }
+
     // The asset the bootloader wrote, if it got that far. Read here on
     // purpose:
     // the NOR and the external SRAM are both up after BSP_init(), and this is

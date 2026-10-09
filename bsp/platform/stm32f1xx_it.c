@@ -22,6 +22,7 @@
 #include "stm32f1xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "bsp.h"   // SM_NORETURN, and the fault stash helpers below
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -57,6 +58,46 @@
 // (AGENTS.md invariant 7). So a fault blinks the LED twice - two pulses are
 // the signature, telling the bench "this was a fault, not an assert" - and
 // then resets too.
+// The fault stash lives in the cross reset area the linker script keeps at
+// the top of RAM: the bootloader owns the first word there (bl_main.c), the
+// startup code never clears it, and the MSP starts at its base and grows
+// down, so nothing overwrites it. A fault writes its frame here and resets;
+// the application's main() reports it on the way up (record 66). Without it a
+// fault is silent - two LED blinks and a reset, nothing on the wire.
+#define IT_FAULT_STASH_WORDS 6U
+
+static volatile uint32_t *IT_faultStash_(void)
+{
+  extern uint32_t _snoinit;
+
+  return (volatile uint32_t *)(void *)(((uintptr_t)&_snoinit) + 4U);
+}
+//............................................................................
+uint32_t *BSP_faultStash(void)
+{
+  return (uint32_t *)(void *)IT_faultStash_();
+}
+
+static void Fault_reset_(void);
+//............................................................................
+// Stacked frame: R0 R1 R2 R3 R12 LR PC xPSR, so the faulting PC is index 6.
+// Not static, and marked used: the only reference to it is the "bl" inside
+// the naked stub above, which the compiler cannot see - a static one gets
+// dropped and the link fails with an undefined reference.
+__attribute__((used)) void BSP_faultEntry_(uint32_t const *frame)
+{
+  volatile uint32_t * const s = IT_faultStash_();
+
+  s[0] = frame[6];
+  s[1] = frame[5];
+  s[2] = frame[7];
+  s[3] = SCB->CFSR;
+  s[4] = SCB->HFSR;
+  s[5] = SCB->BFAR;
+
+  Fault_reset_();
+}
+//............................................................................
 static void Fault_reset_(void)
 {
   volatile uint32_t spin;
@@ -106,62 +147,41 @@ void NMI_Handler(void)
 /**
   * @brief This function handles Hard fault interrupt.
   */
-void HardFault_Handler(void)
+// The entries are naked stubs: the frame the CPU pushed sits at the stack
+// pointer as it was at entry, and a plain C handler has already moved it by
+// the time it could read it. The stub takes MSP or PSP from EXC_RETURN's
+// bit 2 and hands the frame over before any prologue runs.
+__attribute__((naked, noreturn)) void HardFault_Handler(void)
 {
-  /* USER CODE BEGIN HardFault_IRQn 0 */
-  Fault_reset_();
-  /* USER CODE END HardFault_IRQn 0 */
-  while (1)
-  {
-    /* USER CODE BEGIN W1_HardFault_IRQn 0 */
-    /* USER CODE END W1_HardFault_IRQn 0 */
-  }
+  __ASM volatile ("tst lr, #4       \n\t"
+                  "ite eq           \n\t"
+                  "mrseq r0, msp    \n\t"
+                  "mrsne r0, psp    \n\t"
+                  "bl BSP_faultEntry_\n\t"
+                  "b .              \n\t");
 }
+
+__attribute__((alias("HardFault_Handler"), noreturn))
+void MemManage_Handler(void);
+__attribute__((alias("HardFault_Handler"), noreturn))
+void BusFault_Handler(void);
+__attribute__((alias("HardFault_Handler"), noreturn))
+void UsageFault_Handler(void);
 
 /**
   * @brief This function handles Memory management fault.
   */
-void MemManage_Handler(void)
-{
-  /* USER CODE BEGIN MemoryManagement_IRQn 0 */
-  Fault_reset_();
-  /* USER CODE END MemoryManagement_IRQn 0 */
-  while (1)
-  {
-    /* USER CODE BEGIN W1_MemoryManagement_IRQn 0 */
-    /* USER CODE END W1_MemoryManagement_IRQn 0 */
-  }
-}
+
 
 /**
   * @brief This function handles Prefetch fault, memory access fault.
   */
-void BusFault_Handler(void)
-{
-  /* USER CODE BEGIN BusFault_IRQn 0 */
-  Fault_reset_();
-  /* USER CODE END BusFault_IRQn 0 */
-  while (1)
-  {
-    /* USER CODE BEGIN W1_BusFault_IRQn 0 */
-    /* USER CODE END W1_BusFault_IRQn 0 */
-  }
-}
+
 
 /**
   * @brief This function handles Undefined instruction or illegal state.
   */
-void UsageFault_Handler(void)
-{
-  /* USER CODE BEGIN UsageFault_IRQn 0 */
-  Fault_reset_();
-  /* USER CODE END UsageFault_IRQn 0 */
-  while (1)
-  {
-    /* USER CODE BEGIN W1_UsageFault_IRQn 0 */
-    /* USER CODE END W1_UsageFault_IRQn 0 */
-  }
-}
+
 
 /**
   * @brief This function handles Debug monitor.
