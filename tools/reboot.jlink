@@ -1,0 +1,21 @@
+// Restart the target so a serial capture sees the boot from t = 0.
+// This is the "run it again and watch" probe of tools/trace_read.py: start the
+// capture first, then run this, and the records of bring-up and of the first
+// (full screen) refresh land on the wire instead of before the terminal is
+// attached. See docs/charter.md §11.
+//
+// Because the reset goes through the debugger's reset line and the panel's
+// RESX is tied to NRST, the panel gets a proper pulse here rather than the
+// slow supply ramp of a cold power-on - the one case it needs seconds to
+// recover from.
+//
+//   r   reset, stopping at the reset vector
+//   g   run it
+//   qc  close; the target is left running
+//
+// No flash write, no memory change. Connection parameters stay on the command
+// line, one fact in one place (see tools/flash.sh).
+
+r
+g
+qc
