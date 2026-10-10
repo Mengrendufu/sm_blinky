@@ -81,15 +81,28 @@ static bool Sm_Flash_readDma_(uint32_t address, uint8_t *dst, uint32_t len) {
 // the write path note in AGENTS.md).
 #define FLASH_DEVICE_WAIT_MS 3000U // one erase measures 130~160 ms
 
-static bool Sm_Flash_waitReady_(void) {
+// How long to sleep between two polls of the device's status register. The
+// step is per operation because the two are nothing alike: an erase is 130 to
+// 160 ms of device time and a rare event, so 10 ms costs it 6% of wall time
+// and drops the CPU it holds to a fifth; a page program is 0.7 to 3 ms, where
+// a 10 ms step would round every single page up and make a 4 KB write six
+// times slower. Short operation, short step.
+#define FLASH_ERASE_STEP_MS   10U
+#define FLASH_PROGRAM_STEP_MS 1U
+
+static bool Sm_Flash_waitReady_(uint32_t stepMs) {
     uint32_t const deadline = xTaskGetTickCount()
                               + pdMS_TO_TICKS(FLASH_DEVICE_WAIT_MS);
 
+    // Asked before the first sleep: an already finished device costs none.
     while (!BSP_flashIsReady()) {
         if ((int32_t)(xTaskGetTickCount() - deadline) >= 0) {
             return false;
         }
-        vTaskDelay(1U); // WAIT: the device's time, not the CPU's
+        // WAIT: the device's time, not the CPU's. Defaults are no accident -
+        // the sleep is long enough to be worth it and short enough not to
+        // round the operation up (see the two step constants above).
+        vTaskDelay(pdMS_TO_TICKS(stepMs));
     }
 
     return true;
@@ -100,7 +113,7 @@ static bool Sm_Flash_erase_(uint32_t address) {
         return false;
     }
 
-    return Sm_Flash_waitReady_();
+    return Sm_Flash_waitReady_(FLASH_ERASE_STEP_MS);
 }
 //............................................................................
 // One page per arm, out of the caller's buffer, with the device waited out
@@ -127,7 +140,8 @@ static bool Sm_Flash_writeDma_(uint32_t address, uint8_t const *src,
             break;
         }
 
-        ok = !BSP_flashDmaFailed() && Sm_Flash_waitReady_();
+        ok = !BSP_flashDmaFailed()
+             && Sm_Flash_waitReady_(FLASH_PROGRAM_STEP_MS);
         address += n;
         src += n;
         len -= n;
