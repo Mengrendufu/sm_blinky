@@ -118,6 +118,13 @@ python3 ~/.config/opencode/skills/sm/uml-sync/scripts/export_model_tree.py \
 - 要改 `sm_sst` 时：先在本地镜像 `C:\mengrendufu\workshop\local_prjs\sm_sst` 改并推送，再回本仓库同步 submodule 指针。
 - 优先级编码 `0xRRSS`：低字节是 SST 逻辑优先级（用 `SST_MAX_TASK` 校验），高字节是 FreeRTOS 任务优先级（用 `configMAX_PRIORITIES` 校验）。契约检查留在 SST 核心公共入口，port 只额外校验高字节。
 - 断言输出允许丢日志，但不允许卡死；复位优先于打印。
+- **探针的生命周期（2026-10-10 立）**：临时探针**拿到结论就拆** —— 结论（数字、口径、记录 id）先落进文档或 id 空档，代码随后清掉 ✓。**删代码不删结论** ✓。拆的时候按这张清单走（每一步这次都真踩过）：
+  ① 删函数与**所有**调用点；
+  ② 清**新出现的孤儿** —— 删掉 A 常让「只有 A 用的 B」变成 `-Wunused-function` ✗（`BSP_sramUs_` / `BSP_flashReadId_` / `BSP_flashReadArray_` 都是这么冒出来的）；**编译器的 unused 警告就是孤儿探测器** ✓，别把它当噪声；
+  ③ 扫**失效引用**：旧函数名、旧记录编号在文档/注释里残留 ✗（`grep -rn` 一次就好）；
+  ④ 记录 id **退休、不回收** ✓（在 AGENTS 的 id 清单里留痕）；
+  ⑤ 编译 + `python3 tools/check_line_width.py`；
+  ⑥ 上板确认：**没有串口时走 RAM 通道**（boot 标记 `BSP_dbgBootMs_` + `xTickCount` 是否跨过关键拍 ⇒ 有没有在第 N 拍复位 ✓）；探针自己的结果块也曾是这条通道 ✓。
 
 ## 当前状态与已知坑
 
