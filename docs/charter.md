@@ -218,6 +218,7 @@ tracer 的出口只有一个：idle 任务里的 `vApplicationIdleHook()` → `S
 （`SPI_DMATransmitCplt` 走 TX 分支，不是 Rx/TxRx），且 HAL 在双线模式下**自己清 OVR**（源码注释 "received data is not read"）⇒ 不需要假 RX 缓冲、也不需要读侧那个 in-place 技巧。
    **但 DMA 只拿掉这笔账的一小角**：一笔 4 KB 写入 = payload 搬运 16 × 114 µs ≈ **1.8 ms**（DMA 可全免），而擦除 130~160 ms（实测）+ 16 页 tPP 11~48 ms 是**器件时间**，DMA 一分不省；
 真正占住线程 99% 的是 `BSP_flashWaitReady_` 的**自旋**。两件事**都已落地（2026-10-10，已上板，见 §12 写侧）**：① payload 走 TX DMA（`BSP_flashProgramPageDma`）；② 擦除拆成 `BSP_flashEraseSectorStart()` + 轮询、应用侧 `Sm_Flash_waitReady_()` 让出式等器件（`vTaskDelay(1)`；BL 不链 FreeRTOS，所以等待策略留在应用层）。**实测**：擦除 167 ticks、跨页 300 字节写回读全对、擦除窗口内 idle 照跑（`nFree = 16`，夹进 4 条记录）。**剩下的**：AO_FLASH 的请求语义与状态机（记录格式、扇区归属、谁合并谁落盘）—— 那是下一轮设计。
+   **后台预擦的触发方式已定（2026-10-10）**：由 **AO 的 `TIMEOUT_SIG` 节拍泵动**（固定频率检查、需要就擦），形状与现有 beat 一致（`BLINKY_TIMEOUT_SIG` + `SST_TimeEvt_arm`）。**分工必须保住**：**检查在 AO**（RAM 水位比较、几微秒 ✓），**擦除在 flash 线程**（发一笔请求过去 ✓）——**不能在 AO handler 里直接擦** ✗：167 ms 的长活儿正是本仓记过的坑（AO 的 8 格队列堆积 ⇒ `sst` 断言复位；flash 自检当初就是因为这个才搬进独立任务）。粒度上 beat 500 ms 远超需要（32 B/s 时填满 4 KB 扇区要 ~128 s ⇒ 检查频率比需要勤两个数量级，成本是几条 RAM 指令 ✓；反应延迟 ≤500 ms）。**状态：暂不实现**（2026-10-10 决定）。
    另需一并定：新 op（`FLASH_OP_ERASE` / `FLASH_OP_WRITE`）走**同一条 RPC** 与同一条"缓冲借用"语义；boot/BL 侧继续用自旋版（BL 没有调度器，不能阻塞——与读侧"boot 自旋、运行期阻塞"同一个拆分理由）；
 **扇区归属**要先划（资产占 `0x00081000` 起的三槽区，约 460 KB，写者不得碰）。
 7. **绘制单价（2026-10-09 实测，已结案）**：同一 72×72 方块扫半径 —— `radius 0` 1,106 µs、`12` 3,673 µs、`LV_RADIUS_CIRCLE` 4,774 µs。两点解出：**简单行 ≈ 213 ns/px，掩码行 ≈ 920 ns/px（4.3×）**；两点模型对 `radius 12` 偏乐观（预测 2,329 µs vs 实测 3,673 µs），说明圆角并不只让上下 `rout` 行走掩码。
