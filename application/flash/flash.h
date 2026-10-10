@@ -46,7 +46,6 @@ void Flash_start(void);
 // JEDEC identity plus six bytes from address 0, both reported on the trace
 // channel. Called late (the AO asks for it 30 s in) so a terminal is attached
 // by then.
-bool Flash_dbgProbe(void);
 
 // Block read of len bytes from address into dst. Blocks the caller until the
 // data is in dst.

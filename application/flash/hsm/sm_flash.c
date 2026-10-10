@@ -194,11 +194,6 @@ static SM_RetState Sm_Flash_ready_(void * const me,
             req->ok = false;
 
             switch (req->op) {
-                case FLASH_OP_PROBE: {
-                    BSP_dbgFlashProbe();
-                    req->ok = true;
-                    break;
-                }
                 case FLASH_OP_READ: {
                     req->ok = Sm_Flash_readDma_(req->address,
                                                 (uint8_t *)req->dst,

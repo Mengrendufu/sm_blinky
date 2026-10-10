@@ -47,7 +47,6 @@
 // source for FLASH_OP_WRITE. Borrowed, never copied - the caller is blocked
 // until the flash thread is done with it (see Flash_submit_ below).
 typedef enum {
-    FLASH_OP_PROBE = 0,
     FLASH_OP_READ,
     FLASH_OP_WRITE,
     FLASH_OP_ERASE

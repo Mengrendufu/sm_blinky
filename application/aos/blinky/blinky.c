@@ -60,17 +60,18 @@ SST_Task * const AO_Blinky = &Blinky_inst.super;
 
 // Task storage. The AO owns its stack, so its size is visible here and in the
 // link map instead of hiding inside an RTOS heap. 128 words was enough when
-// this AO only blinked; the flash probe and its HAL SPI call depth run here
-// now, so the stack follows that and is re-measured from [MEM].
+// this AO only blinked, and the probes that once ran here needed the rest.
+// With them gone the number is generous: re-measure from [MEM] before
+// trimming it.
 #define BLINKY_STACK_WORDS 256U // 256 words = 1 KB
 static StaticTask_t Blinky_tcb;
 static StackType_t  Blinky_stack[BLINKY_STACK_WORDS];
 
-// Periodic maintenance beats. One beat is 500 ms, so the numbers below are a
-// stack report every 4 s and the bench probes 30 s in - late enough that a
-// terminal is attached by then, which is the point of running them late.
+// Periodic maintenance beats. One beat is 500 ms, so this is a stack report
+// every 4 s. The probe set that used to run 30 s in is gone: what bring-up
+// learns is reported from the first task (Application_dbgBootReport), and the
+// hardware probes went with it (see AGENTS.md).
 #define BLINKY_MEM_BEATS  8U
-#define BLINKY_DBG_PROBE_BEAT 60U
 
 static uint16_t blinky_beats;
 
@@ -160,35 +161,4 @@ static void Blinky_maintenance_(void) {
         BSP_dbgMemReport(BSP_TRACE_STACK_BLINKY);
     }
 
-    // == DEBUG: the probe set that runs 30 s in, once per boot ==
-    if (beat == BLINKY_DBG_PROBE_BEAT) {
-        BSP_dbgLcdCheck();
-        // The flash belongs to the flash thread at run time, so the probe
-        // goes through its inbox like any other request.
-        (void)Flash_dbgProbe();
-
-        // And the same bus again for the run time read, which is the only
-        // caller of the DMA path: the header of the image the bootloader
-        // wrote, read a chunk at a time into RAM and reported as identity.
-        // "AST1" is what the loader writes there, so the four bytes are the
-        // check - record 46 is [ok][A][S][T][1].
-        {
-            uint8_t head[4];
-
-            if (Flash_readBlock(ASSET_NOR_BASE, head, sizeof head)) {
-                SM_TRACE_BEGIN(46U, 5)
-                    SM_TRACE_PAYLOAD_BE(1U)
-                    SM_TRACE_PAYLOAD_BE(head[0])
-                    SM_TRACE_PAYLOAD_BE(head[1])
-                    SM_TRACE_PAYLOAD_BE(head[2])
-                    SM_TRACE_PAYLOAD_BE(head[3])
-                SM_TRACE_END()
-            } else {
-                SM_TRACE_BEGIN(46U, 1)
-                    SM_TRACE_PAYLOAD_BE(0U)
-                SM_TRACE_END()
-            }
-        }
-
-    }
 }

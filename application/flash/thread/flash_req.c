@@ -138,10 +138,6 @@ static bool Flash_call_(Flash_Op op, uint32_t address, void *buf,
     return Flash_submit_(&req) && req.ok;
 }
 //............................................................................
-bool Flash_dbgProbe(void) {
-    return Flash_call_(FLASH_OP_PROBE, 0U, (void *)0, 0U);
-}
-//............................................................................
 bool Flash_readBlock(uint32_t address, void *dst, uint32_t len) {
     return Flash_call_(FLASH_OP_READ, address, dst, len);
 }

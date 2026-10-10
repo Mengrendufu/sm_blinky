@@ -83,7 +83,6 @@
 #define LCD_TRACE_RDID_OK   12U
 #define LCD_TRACE_RDID_BAD  13U
 #define LCD_TRACE_DISP_ON   20U
-#define LCD_TRACE_GRAM      37U
 
 // The bring-up facts are kept here instead of pushed: the tracer comes up
 // with the first task, and a push before the scheduler enters a FreeRTOS
@@ -434,8 +433,8 @@ static uint16_t BSP_lcdReadGram_(uint16_t x, uint16_t y) {
     return BSP_lcdReadDat_();
 }
 //............................................................................
-// Did the clear actually land? The same four points BSP_dbgLcdCheck() reports
-// later, spread over both halves of the frame: a fill that only reached part
+// Did the clear actually land? Four points, spread over both halves of the
+// frame: a fill that only reached part
 // of the frame memory reads back as noise here, which is the cold start
 // symptom this loop exists to catch.
 static bool BSP_lcdFilled_(void) {
@@ -455,22 +454,6 @@ static bool BSP_lcdFilled_(void) {
 // landed in one of them these values say so, instead of leaving it to the
 // eye. The AO calls this, not bring-up: a boot-time record is not observable
 // from a terminal that cannot be attached until later (see AGENTS.md).
-void BSP_dbgLcdCheck(void) {
-    static uint16_t const ys[4] = {0U, 159U, 160U, 319U};
-    uint8_t i;
-
-    for (i = 0U; i < 4U; ++i) {
-        uint16_t const value = BSP_lcdReadGram_(0U, ys[i]);
-
-        SM_TRACE_BEGIN(LCD_TRACE_GRAM, 5)
-            SM_TRACE_PAYLOAD_BE(0U)
-            SM_TRACE_PAYLOAD_BE(ys[i] >> 8)
-            SM_TRACE_PAYLOAD_BE(ys[i])
-            SM_TRACE_PAYLOAD_BE(value >> 8)
-            SM_TRACE_PAYLOAD_BE(value)
-        SM_TRACE_END()
-    }
-}
 
 //............................................................................
 static void BSP_dbgLcdBootId_(void) {

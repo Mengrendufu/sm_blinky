@@ -16,13 +16,11 @@
 #define FLASH_CS_PORT   GPIOB
 #define FLASH_CS_PIN    GPIO_PIN_12
 
-#define FLASH_JEDEC_CMD     0x9FU
 #define FLASH_STATUS_CMD    0x05U
 #define FLASH_READ_CMD      0x03U
 #define FLASH_WREN_CMD      0x06U
 #define FLASH_PROGRAM_CMD   0x02U
 #define FLASH_SECTOR_CMD    0x20U
-#define FLASH_JEDEC_W25Q128 0xEF4018UL // EFh + device 4018h, spec 7.2.1
 #define FLASH_XFER_MS       100U
 
 // One HAL call carries this many bytes. The size argument is a uint16_t, so
@@ -64,9 +62,6 @@
 // Trace records: ==FLASH==[JEDEC][<mfr> <type> <cap>]==[W25Q128/??????]== and
 // ==FLASH==[ARRAY][<six bytes at address 0>]==. The second is the "this is
 // memory and it reads" line; the first one is identity only.
-#define FLASH_TRACE_ID_OK   25U
-#define FLASH_TRACE_ID_BAD  26U
-#define FLASH_TRACE_ARRAY   32U
 
 
 static SPI_HandleTypeDef flash_spi_;
@@ -86,16 +81,12 @@ static bool BSP_flashWriteBlock_(uint8_t const *tx, uint32_t len);
 static bool BSP_flashReadBlock_(uint8_t *rx, uint32_t len);
 static bool BSP_flashExchange_(uint8_t cmd, uint8_t const *tx, uint32_t txLen,
                                uint8_t *rx, uint32_t rxLen);
-static uint32_t BSP_flashReadId_(void);
 static uint8_t BSP_flashReadStatus_(void);
-static void BSP_flashReadArray_(uint8_t *out, uint8_t count,
-                                uint32_t address);
 static bool BSP_flashWriteEnable_(void);
 static bool BSP_flashWaitReady_(uint32_t timeoutMs);
 static bool BSP_flashEraseSector_(uint32_t address);
 static bool BSP_flashProgram_(uint32_t address, uint8_t const *data,
                               uint32_t len);
-static void BSP_flashTrace3_(uint8_t recId, uint32_t id);
 
 
 //============================================================================
@@ -148,26 +139,6 @@ void BSP_flashInit(void) {
     // every boot we measured (three boots, three answers) while every later
     // one matched, so the first one is spent here instead of on data.
     (void)BSP_flashReadStatus_();
-}
-//............................................................................
-void BSP_dbgFlashProbe(void) {
-    uint32_t const id = BSP_flashReadId_();
-    uint8_t array[6];
-
-    BSP_flashTrace3_((id == FLASH_JEDEC_W25Q128) ? FLASH_TRACE_ID_OK
-                                                 : FLASH_TRACE_ID_BAD, id);
-
-    // Read data from address 0: the functional check that this is memory, and
-    // six bytes so a boot sector's OEM name shows up.
-    BSP_flashReadArray_(array, 6U, 0U);
-    SM_TRACE_BEGIN(FLASH_TRACE_ARRAY, 6)
-        SM_TRACE_PAYLOAD_BE(array[0])
-        SM_TRACE_PAYLOAD_BE(array[1])
-        SM_TRACE_PAYLOAD_BE(array[2])
-        SM_TRACE_PAYLOAD_BE(array[3])
-        SM_TRACE_PAYLOAD_BE(array[4])
-        SM_TRACE_PAYLOAD_BE(array[5])
-    SM_TRACE_END()
 }
 //............................................................................
 // Read Data (03h) over an arbitrary length. The device increments the
@@ -491,15 +462,6 @@ static void BSP_flashAddr_(uint8_t out[3], uint32_t address) {
     out[2] = (uint8_t)address;
 }
 //............................................................................
-// Read Data (03h): three address bytes, then the array comes back.
-static void BSP_flashReadArray_(uint8_t *out, uint8_t count,
-                                uint32_t address) {
-    uint8_t addr[3];
-
-    BSP_flashAddr_(addr, address);
-
-    BSP_flashExchange_(FLASH_READ_CMD, addr, 3U, out, count);
-}
 //............................................................................
 // One command byte and however many bytes come back, with the chip select low
 // around the whole exchange: the datasheet wants it low for command and data
@@ -564,15 +526,6 @@ static bool BSP_flashExchange_(uint8_t cmd, uint8_t const *tx,
     return ok;
 }
 //............................................................................
-// JEDEC ID: manufacturer, memory type, capacity.
-static uint32_t BSP_flashReadId_(void) {
-    uint8_t id[3];
-
-    BSP_flashExchange_(FLASH_JEDEC_CMD, (uint8_t const *)0, 0U, id, 3U);
-
-    return ((uint32_t)id[0] << 16U) | ((uint32_t)id[1] << 8U)
-           | (uint32_t)id[2];
-}
 // Status register 1: a blank part reads 0x00, all ones means nothing at all
 // answered.
 static uint8_t BSP_flashReadStatus_(void) {
@@ -581,14 +534,6 @@ static uint8_t BSP_flashReadStatus_(void) {
     BSP_flashExchange_(FLASH_STATUS_CMD, (uint8_t const *)0, 0U, &status, 1U);
 
     return status;
-}
-//............................................................................
-static void BSP_flashTrace3_(uint8_t recId, uint32_t id) {
-    SM_TRACE_BEGIN(recId, 3)
-        SM_TRACE_PAYLOAD_BE(id >> 16)
-        SM_TRACE_PAYLOAD_BE(id >> 8)
-        SM_TRACE_PAYLOAD_BE(id)
-    SM_TRACE_END()
 }
 //............................................................................
 // One sector: erase it, confirm it reads blank, program a signature carrying

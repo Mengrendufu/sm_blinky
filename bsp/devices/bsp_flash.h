@@ -30,11 +30,6 @@
 
 void BSP_flashInit(void);
 
-// One JEDEC ID read plus six bytes from address 0, all reported on the trace
-// channel. The raw bytes go out, so a device that answers with something
-// unexpected is still readable on the wire.
-void BSP_dbgFlashProbe(void);
-
 // Block read (03h). One transaction: chip select stays low from the
 // command byte through the last data byte, and the device walks the
 // address itself, so len has no page boundary to respect - only the array
