@@ -30,7 +30,8 @@
 // 37 belongs to the panel's frame memory check (bsp_lcd.c), so the flash
 // thread's stack report takes 38.
 #define BSP_TRACE_STACK_FLASH  38U
-#define BSP_TRACE_STACK_FLASH_WT 44U
+// 44 was the write self test's stack report. The test is gone (see the note
+// in bsp_flash.c), and the id stays retired, not reused.
 
 //============================================================================
 void BSP_init(void);
