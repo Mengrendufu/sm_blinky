@@ -1,0 +1,33 @@
+sequenceDiagram
+    autonumber
+    participant Boot as main()<br/>调度器之前
+    participant Snap as RAM 权威快照<br/>唯一权威
+    participant AO as 其他 AO / UI 线程<br/>读者（也是改值方）
+    participant FA as AO_FLASH<br/>总线的唯一写者
+    participant NOR as W25Q128
+
+    Note over Boot,NOR: 一、启动：快照必须先于任何 AO 建立（与「绑定先于派发」同类问题）
+    Boot->>NOR: 直读配置扇区（阻塞、无调度器、不用 DMA）
+    Boot->>Snap: 填充快照 + 逐条 CRC；坏尾就退回上一个好版本
+    Note over Boot: 必须在 AO_start 之前完成：<br/>AO 的初始转移就会读快照
+
+    Note over AO,Snap: 二、读：不进总线、不投事件、不等谁
+    AO->>Snap: Snap_get(key, out) —— 内部最短临界区，只拷出要用的几个字节
+    Snap-->>AO: 值（**拷贝**，不是指针：快照随后可能被改）
+    Note over AO,Snap: 规则：只给任务读。ISR 要读就只能读单字，<br/>或改成"先填好新块、再临界区换指针"的发布式
+
+    Note over AO,NOR: 三、写：RAM 先改（立即生效），落盘异步
+    AO->>Snap: Snap_set(key, val) —— 改值 + 置脏，**在同一个临界区里**
+    Note over AO,Snap: 值与其脏标记必须同临界区，否则丢更新
+    AO->>FA: 投一个"有脏数据"事件（SST 事件 / 池），立刻返回
+    Note over AO: 写延迟 = 一次拷贝 + 一次投递，与擦除 130 ms 无关
+    FA->>Snap: 按脏集取当前值（临界区里拷走）
+    FA->>FA: 合并同一键的多次改动：只落最后一次
+    opt 该落盘了（满页 / commit 事件 / 空闲窗口）
+        FA->>NOR: 预擦备用扇区 + 页编程 + BUSY 等（阻塞在 FA，idle 顶上）
+        FA-->>AO: 成功/失败事件回程（可选）
+    end
+
+    Note over AO,NOR: 承诺要写清：干净重启恢复到**最后一次成功落盘**的版本，<br/>不是最后一次 RAM 改动；掉电丢的是最近的未落盘改动
+
+    Note over AO,FA: 边界：NOR 的写者**只有** FA（charter §3.2）；<br/>RAM 快照则允许任何任务在临界区里读写 —— 两件事不要混
