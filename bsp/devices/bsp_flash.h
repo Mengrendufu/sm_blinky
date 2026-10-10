@@ -88,7 +88,9 @@ typedef void (*BSP_flashDoneCb)(bool ok);
 
 // One arm moves this much and no more. 32 KB is ~15 ms on the wire, which is
 // the window the caller gets between chunks; the size is here because the
-// caller is the one that loops.
+// caller is the one that loops. Raising it to the channel's own 16 bit limit
+// (65,535) was tried against the boot asset load and moved nothing: the per
+// arm cost is not where that time goes.
 #define FLASH_DMA_CHUNK 32768UL
 
 void BSP_flashReadDma(uint32_t address, uint8_t *dst, uint32_t len,
