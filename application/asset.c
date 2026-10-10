@@ -54,7 +54,11 @@ Asset Asset_load(void) {
         return Asset_;
     }
 
-    if (!BSP_flashRead(ASSET_DATA, (uint8_t *)(uintptr_t)ASSET_SRAM, len)) {
+    // The payload is the big one: 153,600 B per slot, three slots. Read it
+    // through the channel instead of HAL's polled block path, which measured
+    // 0.43 MB/s against 2.28 at the wire - a third of a second per image.
+    if (!BSP_flashReadDmaWait(ASSET_DATA, (uint8_t *)(uintptr_t)ASSET_SRAM,
+                              len)) {
         return Asset_;
     }
 

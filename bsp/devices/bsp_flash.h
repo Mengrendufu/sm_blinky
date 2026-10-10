@@ -41,6 +41,12 @@ void BSP_flashInit(void);
 // nothing else may touch the bus meanwhile.
 bool BSP_flashRead(uint32_t address, uint8_t *dst, uint32_t len);
 
+// The same read moved by DMA, waited out by polling a flag instead of a task
+// notification: the boot path (Asset_load) has no task to notify, but it does
+// have interrupts now. Any length; it splits into FLASH_DMA_CHUNK pieces
+// itself. Blocking, so it is for the boot path only.
+bool BSP_flashReadDmaWait(uint32_t address, uint8_t *dst, uint32_t len);
+
 // Erase one 4 KB sector. `address` must be sector aligned (a misaligned one
 // would erase the sector around it), and this form spins on the device until
 // it is done - blockingly, for the bootloader and the self test. Measured

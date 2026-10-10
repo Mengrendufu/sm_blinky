@@ -117,6 +117,18 @@ static bool BSP_flashProgram_(uint32_t address, uint8_t const *data,
 // wakes tasks, so a numerically lower priority would be illegal to call from.
 #define FLASH_DMA_IRQ_PRIO  5U
 
+// How long one chunk may take before the boot path gives up on it. A 32 KB
+// chunk is 14.4 ms on the wire, so this is generous by an order of magnitude.
+#define FLASH_DMA_BOOT_MS 200U
+
+static volatile bool flashDmaFlag_;
+
+static void BSP_flashDmaFlagCb_(bool ok) {
+    (void)ok; // BSP_flashDmaFailed() carries the answer to the waiter
+
+    flashDmaFlag_ = true;
+}
+//............................................................................
 static void BSP_flashDmaInit_(void);
 static void BSP_flashDmaChunk_(void);
 static void BSP_flashDmaFinish_(bool ok);
@@ -342,6 +354,39 @@ void BSP_flashProgramPageDma(uint32_t address, uint8_t const *data,
                              (uint16_t)len) != HAL_OK) {
         BSP_flashDmaFinish_(false);
     }
+}
+//............................................................................
+// The run time path waits on a task notification. Before the scheduler there
+// is no task to notify, so this one polls a flag the completion interrupt
+// sets - the same interrupt, a different way of waiting. It is here for
+// Asset_load, which used to crawl at 0.43 MB/s through HAL's polled block
+// path and now runs at the wire limit. Safe before the scheduler because the
+// callback it installs does nothing but set that flag: no FreeRTOS call, no
+// task, nothing that needs a kernel.
+bool BSP_flashReadDmaWait(uint32_t address, uint8_t *dst, uint32_t len) {
+    bool ok = true;
+
+    while (ok && (len > 0U)) {
+        uint32_t const n = (len > FLASH_DMA_CHUNK) ? FLASH_DMA_CHUNK : len;
+        uint32_t const deadline = HAL_GetTick() + FLASH_DMA_BOOT_MS;
+
+        flashDmaFlag_ = false;
+        BSP_flashReadDma(address, dst, n, &BSP_flashDmaFlagCb_);
+
+        while (!flashDmaFlag_) {
+            if ((int32_t)(HAL_GetTick() - deadline) >= 0) {
+                ok = false;
+                break;
+            }
+        }
+
+        ok = ok && !BSP_flashDmaFailed();
+        address += n;
+        dst += n;
+        len -= n;
+    }
+
+    return ok;
 }
 //............................................................................
 // One poll of the status register: the caller owns how long to wait and
