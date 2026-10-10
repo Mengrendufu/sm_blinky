@@ -18,8 +18,10 @@
 #define LCD_DAT         (*(volatile uint16_t *)LCD_DAT_ADDR)
 
 #define LCD_RDID_CMD    0x04U
+#define LCD_RDDST_CMD   0x09U
 #define LCD_SWRESET_CMD 0x01U  // Stands in for the hardware reset this board
                                // cannot give the panel (see BSP_lcdInit).
+#define LCD_SLPOUT_CMD  0x11U
 #define LCD_SLPOUT_CMD  0x11U  // Frame memory is unreachable while asleep.
 #define LCD_COLMOD_16BIT 0x05U // MCU interface colour format: 16 bit/pixel.
 #define LCD_CASET_CMD   0x2AU
@@ -76,7 +78,11 @@
 // detached case is the one to size for. The budget below therefore covers the
 // slow end with margin rather than matching any single measurement, and a
 // board that is already up still leaves on the first pass.
-#define LCD_INIT_ATTEMPTS    100U
+// The readiness poll is four register reads, so passes can be dense and the
+// budget generous: 1100 passes at 10 ms is the same ~11 s the loop used to
+// spend, but almost none of it is bus work any more.
+#define LCD_INIT_ATTEMPTS    1100U
+#define LCD_READY_POLL_MS    10U
 #define LCD_RETRY_SETTLE_MS  100U
 // Trace records: ==LCD==[RDID][<hi> <lo>]==[ST7789/??????]==
 //                ==LCD==[DISPON]==
@@ -91,6 +97,7 @@
 // HAL_Delay in BSP_lcdInit).
 static bool lcd_dbgBootDispOn_;
 static uint16_t lcd_dbgBootId_;
+
 
 //============================================================================
 // Panel register sequence: the vendor table for this module (ALIENTEK
@@ -144,12 +151,14 @@ static uint16_t BSP_lcdReadId_(void);
 static void BSP_lcdPanelInit_(void);
 static void BSP_lcdFill_(uint16_t colour);
 static uint16_t BSP_lcdReadGram_(uint16_t x, uint16_t y);
+static void BSP_lcdReadRdst_(uint8_t out[4]);
+static bool BSP_lcdReady_(void);
 static bool BSP_lcdFilled_(void);
 static void BSP_dbgLcdBootId_(void);
 
 //============================================================================
 void BSP_lcdInit(void) {
-    uint8_t attempt;
+    uint16_t attempt;
     uint32_t const sinceReset = HAL_GetTick();
 
     BSP_lcdGpioInit_();
@@ -191,6 +200,15 @@ void BSP_lcdInit(void) {
         }
 
         BSP_lcdPanelInit_();
+
+        // Wait for the panel's own readiness bit first: a pass that is not
+        // ready yet costs four register reads and a sleep, nothing more. The
+        // fill and its read back then run once per pass that claims to be
+        // ready, as the safety net for a partial clear.
+        if (!BSP_lcdReady_()) {
+            HAL_Delay(LCD_READY_POLL_MS);
+            continue;
+        }
 
         // Frame memory first, display on second: the panel starts scanning
         // GRAM the moment DISPON lands, and until this clear it holds
@@ -588,6 +606,38 @@ static uint16_t BSP_lcdReadDat_(void) {
     return LCD_DAT;
 }
 
+//............................................................................
+// 09h RDDST: the display's own status after its sleep out sequence. Same read
+// shape as the identification above, four bytes instead of two.
+//
+// Measured on this panel (two boots, identical): asleep it answers
+// 00 61 00 00 and a frame memory fill does not land; once ready it answers
+// 00 53 00 20 and the fill lands. The bit that separates the two is byte 3,
+// bit 5 - so that is what the bring-up loop waits on. It costs four register
+// reads instead of a fill and a four point read back.
+static void BSP_lcdReadRdst_(uint8_t out[4]) {
+    uint16_t hi;
+    uint16_t lo;
+
+    BSP_lcdWriteCmd_(LCD_RDDST_CMD);
+    (void)BSP_lcdReadDat_();                          // dummy
+    (void)BSP_lcdReadDat_();                          // dummy
+    hi = BSP_lcdReadDat_();
+    lo = BSP_lcdReadDat_();
+    out[0] = (uint8_t)(hi >> 8);
+    out[1] = (uint8_t)hi;
+    out[2] = (uint8_t)(lo >> 8);
+    out[3] = (uint8_t)lo;
+}
+//............................................................................
+// True once the panel says its frame memory is reachable.
+static bool BSP_lcdReady_(void) {
+    uint8_t rdst[4];
+
+    BSP_lcdReadRdst_(rdst);
+
+    return ((rdst[3] & 0x20U) != 0U);
+}
 //............................................................................
 static uint16_t BSP_lcdReadId_(void) {
     uint16_t id;
