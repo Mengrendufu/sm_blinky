@@ -366,6 +366,69 @@ bool BSP_flashDmaFailed(void) {
     return flashDmaFailed_;
 }
 //............................................................................
+// One page, moved by DMA: the write side of BSP_flashReadDma above, for a run
+// time writer. One arm is one transaction (write enable, then command and
+// address from the CPU, the payload from the channel, chip select raised in
+// the completion interrupt).
+//
+// The device is still programming when that interrupt fires - tPP is 0.7 to
+// 3 ms - so the caller waits afterwards with BSP_flashIsReady(). That is
+// deliberate: polling the device from the interrupt would hold the CPU for
+// milliseconds inside an ISR, and the caller is where the yield belongs.
+void BSP_flashProgramPageDma(uint32_t address, uint8_t const *data,
+                             uint32_t len, BSP_flashDoneCb done) {
+    uint8_t const addr[3] = {
+        (uint8_t)(address >> 16),
+        (uint8_t)(address >> 8),
+        (uint8_t)address
+    };
+
+    // Same page guard as the blocking BSP_flashProgramPage: the device wraps
+    // inside a page and would silently program the start of it again.
+    if ((data == (uint8_t const *)0) || (len == 0U)
+        || (len > FLASH_DEV_PAGE)
+        || ((address % FLASH_DEV_PAGE) + len > FLASH_DEV_PAGE)
+        || flashDmaBusy_ || (address >= FLASH_SIZE)
+        || (len > (FLASH_SIZE - address))) {
+        flashDmaFailed_ = true;
+        if (done != (BSP_flashDoneCb)0) {
+            done(false);
+        }
+        return;
+    }
+
+    // Its own chip select cycle, so it goes before the one below is pulled
+    // low: the program command is ignored without a set write enable latch.
+    if (!BSP_flashWriteEnable_()) {
+        flashDmaFailed_ = true;
+        if (done != (BSP_flashDoneCb)0) {
+            done(false);
+        }
+        return;
+    }
+
+    flashDmaDone_ = done;
+    flashDmaFailed_ = false;
+    flashDmaBusy_ = true;
+
+    HAL_GPIO_WritePin(FLASH_CS_PORT, FLASH_CS_PIN, GPIO_PIN_RESET);
+    (void)BSP_flashXfer_(FLASH_PROGRAM_CMD);
+    (void)BSP_flashWriteBlock_(addr, 3U);
+
+    if (HAL_SPI_Transmit_DMA(&flash_spi_, (uint8_t *)(uintptr_t)data,
+                             (uint16_t)len) != HAL_OK) {
+        BSP_flashDmaFinish_(false);
+    }
+}
+//............................................................................
+// One poll of the status register: the caller owns how long to wait and
+// whether to yield while it does. The waiting policy stays out of this file
+// because the bootloader links it too, and the bootloader has no scheduler
+// (and no FreeRTOS) to delay on.
+bool BSP_flashIsReady(void) {
+    return ((BSP_flashReadStatus_() & 0x01U) == 0U);
+}
+//............................................................................
 // HAL's callbacks, called from the channel interrupts. The name is the one
 // the HAL actually calls: HAL_SPI_Receive_DMA sets the handle to BUSY_RX
 // before it hands over to the transmit-receive routine, so the completion
@@ -377,6 +440,20 @@ void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi) {
     }
 
     BSP_flashDmaFinish_(true);   // one transaction per arm: never re-arm here
+}
+//............................................................................
+// The transmit direction ends here: HAL_SPI_Transmit_DMA puts
+// SPI_DMATransmitCplt on the transmit channel unconditionally, without the
+// state trick the receive path has, and that routine waits for TXE and BSY
+// before it calls in - which is what makes raising chip select at this point
+// correct. It also clears the overrun flag in two line mode because the
+// received bytes are never read, so a write needs no dummy receive buffer.
+void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi) {
+    if (hspi != &flash_spi_) {
+        return;
+    }
+
+    BSP_flashDmaFinish_(true);
 }
 //............................................................................
 void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi) {

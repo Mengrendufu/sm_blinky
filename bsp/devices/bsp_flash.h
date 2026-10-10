@@ -79,6 +79,21 @@ typedef void (*BSP_flashDoneCb)(bool ok);
 
 void BSP_flashReadDma(uint32_t address, uint8_t *dst, uint32_t len,
                       BSP_flashDoneCb done);
+
+// One page at most, moved by DMA, for the run time writer. Same guard as the
+// blocking BSP_flashProgramPage (page aligned, never across a boundary), same
+// one-transaction-per-arm rule, same callback context. The device is still
+// programming when the callback fires, so the caller waits for
+// BSP_flashIsReady() afterwards - that wait is a spin here, and the caller is
+// the one that gets to block instead of spinning.
+void BSP_flashProgramPageDma(uint32_t address, uint8_t const *data,
+                             uint32_t len, BSP_flashDoneCb done);
+
+// One poll of the device's status register, true when it is done with its own
+// work (page program, sector erase). Nothing else: the waiting policy lives
+// above this layer, on purpose - see the note next to the implementation.
+bool BSP_flashIsReady(void);
+
 bool BSP_flashDmaBusy(void);
 bool BSP_flashDmaFailed(void);
 
