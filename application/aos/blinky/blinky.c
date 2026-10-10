@@ -197,9 +197,6 @@ static void Blinky_maintenance_(void) {
                 SM_TRACE_END()
             }
         }
-        // The write self test still drives SPI2 from its own task. It is
-        // scaffolding: once assets land it goes to FLASH_WT_OFF, and then the
-        // flash thread is the only bus user.
-        BSP_flashSelfTestStart();
+
     }
 }

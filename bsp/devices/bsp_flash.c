@@ -54,7 +54,6 @@
 // bytes landed, which is what catches an addressing fault (the SRAM line walk
 // did the same job). Sixteen bytes never cross a page on a 4 KB aligned
 // start.
-#define FLASH_MARK_BYTES    16U
 
 // Operating clock: PCLK1 / 2 = 18 MHz, the fastest the peripheral offers. A
 // sweep of all four dividers (2.25, 4.5, 9, 18 MHz) came back clean at every
@@ -69,41 +68,6 @@
 #define FLASH_TRACE_ID_BAD  26U
 #define FLASH_TRACE_ARRAY   32U
 
-// Write path self test: temporary, and destructive - it erases every sector.
-//   34 ==FLASH==[WRTEST][start][sectors <n>]==
-//   35 ==FLASH==[WRTEST][at <n>]==              progress, every 512 sectors
-//   36 ==FLASH==[WRTEST][done][ok][eraseBad][progBad]==
-#define FLASH_TRACE_WT_START 34U
-#define FLASH_TRACE_WT_AT    35U
-#define FLASH_TRACE_WT_DONE  36U
-#define FLASH_WT_REPORT_EVERY 512U
-// Each erase failure costs the full 2 s timeout, so a broken erase path would
-// turn the sweep into hours. Give up early instead and let the counts say so.
-#define FLASH_WT_MAX_ERASE_BAD 8U
-// The self test runs in its own task, not in the AO: time events go out every
-// period regardless of consumption (SST_TimeEvt_tick), so a handler slower
-// than the beat fills the AO's 8 slot queue and trips DBC_REQUIRE(300) in
-// SST_Task_post. A plain task has no such queue and may block, which is what
-// a multi minute flash sweep needs.
-#define FLASH_WT_STACK_WORDS   256U
-#define FLASH_WT_PRIORITY      20U // under Blinky (24) and the UI thread (23)
-
-// How much of the part to walk. Erase measures 130 to 160 ms per sector here
-// (datasheet: 30 ms typical, 200 ms max below 50k cycles - and erasing
-// sector by sector is the expensive way round, the part's own Chip Erase is
-// 25 s typical), so the full walk takes about eleven minutes and
-// the sample walk - every 64th sector, spread over the whole 16 MB - gives a
-// verdict in about ten seconds. Set this to OFF once the flash holds data
-// worth keeping: the walk erases whatever it touches. OFF since the flash was
-// signed off: it erases the part on every boot, and it drives SPI2 from its
-// own task while the flash thread does too - two writers on one bus is a
-// conflict this project already documents, and there is nothing left for it
-// to prove.
-#define FLASH_WT_OFF    0U
-#define FLASH_WT_SAMPLE 1U
-#define FLASH_WT_FULL   2U
-#define FLASH_WT_MODE   FLASH_WT_OFF
-#define FLASH_WT_STRIDE 64U
 
 static SPI_HandleTypeDef flash_spi_;
 
@@ -130,20 +94,8 @@ static bool BSP_flashWaitReady_(uint32_t timeoutMs);
 static bool BSP_flashEraseSector_(uint32_t address);
 static bool BSP_flashProgram_(uint32_t address, uint8_t const *data,
                               uint32_t len);
-static bool BSP_flashTestSector_(uint16_t sector);
-static uint16_t BSP_flashWtCount_(void);
 static void BSP_flashTrace3_(uint8_t recId, uint32_t id);
 
-// Self test state: it is stepped from the AO, a few sectors per beat.
-static uint16_t flashWtSector_;
-static uint16_t flashWtOk_;
-static uint16_t flashWtEraseBad_;
-static uint16_t flashWtProgBad_;
-static bool flashWtRunning_;
-static StaticTask_t flashWtTcb_;
-static StackType_t flashWtStack_[FLASH_WT_STACK_WORDS];
-
-static void BSP_flashSelfTestTask_(void *arg);
 
 //============================================================================
 // DMA read path, for the run time. The boot window cannot use it: before the
@@ -641,142 +593,15 @@ static void BSP_flashTrace3_(uint8_t recId, uint32_t id) {
 // the sector index, read that back and compare. The index makes the pattern
 // position dependent, which is what catches an addressing fault - the SRAM
 // line walk did the same job.
-static bool BSP_flashTestSector_(uint16_t sector) {
-    uint32_t const base = (uint32_t)sector * FLASH_SECTOR_SIZE;
-    uint8_t want[FLASH_MARK_BYTES];
-    uint8_t got[FLASH_MARK_BYTES];
-    uint8_t i;
-    bool erased;
+// The write path self test (records 34/35/36, its own "fwt" task) is gone as
+// of 2026-10-10. It was the second bus user this project documents as a
+// conflict, and with an asset in the part the sweep would erase it. What it
+// covered is covered elsewhere: the bootloader's burn reads every block back,
+// and the run time write path was verified byte for byte (68/69/74/75, ids
+// retired). Its shape - a static task, one step per pass, a yield between
+// steps, park at the end - is recorded in docs/charter.md, for the background
+// erase pacer when it comes.
 
-    want[0] = (uint8_t)(sector >> 8U);
-    want[1] = (uint8_t)sector;
-    want[2] = 0x5AU;
-    want[3] = 0xA5U;
-    for (i = 4U; i < FLASH_MARK_BYTES; ++i) {
-        want[i] = (uint8_t)(0x30U + i);
-    }
-
-    erased = BSP_flashEraseSector_(base);
-    if (erased) {
-        BSP_flashReadArray_(got, FLASH_MARK_BYTES, base);
-        for (i = 0U; i < FLASH_MARK_BYTES; ++i) {
-            if (got[i] != 0xFFU) {
-                erased = false;
-            }
-        }
-    }
-
-    if (!erased) {
-        ++flashWtEraseBad_;
-        return false;
-    }
-
-    if (!BSP_flashProgram_(base, want, FLASH_MARK_BYTES)) {
-        ++flashWtProgBad_;
-        return false;
-    }
-
-    BSP_flashReadArray_(got, FLASH_MARK_BYTES, base);
-    if (memcmp(want, got, FLASH_MARK_BYTES) == 0) {
-        ++flashWtOk_;
-        return true;
-    }
-
-    ++flashWtProgBad_;
-    return false;
-}
-//............................................................................
-// How many sectors this run touches: the start and done records count on it.
-static uint16_t BSP_flashWtCount_(void) {
-    uint16_t const stride = (FLASH_WT_MODE == FLASH_WT_FULL)
-                            ? 1U : FLASH_WT_STRIDE;
-
-    return (uint16_t)((FLASH_SECTORS + stride - 1U) / stride);
-}
-//............................................................................
-void BSP_flashSelfTestStart(void) {
-    if (flashWtRunning_ || (FLASH_WT_MODE == FLASH_WT_OFF)) {
-        return; // one sweep per boot
-    }
-
-    flashWtSector_ = 0U;
-    flashWtOk_ = 0U;
-    flashWtEraseBad_ = 0U;
-    flashWtProgBad_ = 0U;
-    flashWtRunning_ = true;
-
-    // Status register first: a set block protect bit would make every erase
-    // fail, and that is worth knowing before waiting eleven minutes.
-    {
-        uint16_t const count = BSP_flashWtCount_();
-
-        SM_TRACE_BEGIN(FLASH_TRACE_WT_START, 3)
-            SM_TRACE_PAYLOAD_BE(BSP_flashReadStatus_())
-            SM_TRACE_PAYLOAD_BE(count >> 8)
-            SM_TRACE_PAYLOAD_BE(count)
-        SM_TRACE_END()
-    }
-
-    (void)xTaskCreateStatic(BSP_flashSelfTestTask_, "fwt",
-                            FLASH_WT_STACK_WORDS, (void *)0,
-                            FLASH_WT_PRIORITY,
-                            flashWtStack_, &flashWtTcb_);
-}
-//............................................................................
-// Erase, check blank, program a signature, read it back: one sector per pass,
-// with a one tick delay between sectors so the idle task keeps draining the
-// tracer while this runs for minutes.
-static void BSP_flashSelfTestTask_(void *arg) {
-    uint16_t sector;
-
-    uint16_t const stride = (FLASH_WT_MODE == FLASH_WT_FULL)
-                            ? 1U : FLASH_WT_STRIDE;
-
-    (void)arg;
-
-    for (sector = 0U; sector < (uint16_t)FLASH_SECTORS; sector += stride) {
-        (void)BSP_flashTestSector_(sector);
-        flashWtSector_ = sector;
-
-        if ((sector % FLASH_WT_REPORT_EVERY) == 0U) {
-            SM_TRACE_BEGIN(FLASH_TRACE_WT_AT, 2)
-                SM_TRACE_PAYLOAD_BE(sector >> 8)
-                SM_TRACE_PAYLOAD_BE(sector)
-            SM_TRACE_END()
-        }
-
-        if (flashWtEraseBad_ >= FLASH_WT_MAX_ERASE_BAD) {
-            break;
-        }
-
-        // WAIT: one tick between sectors. The erase and program above spin on
-        // BUSY, so this is the only place the self test lets idle run - that
-        // is what keeps the tracer alive during a ten minute sweep.
-        vTaskDelay(1U);
-    }
-
-    SM_TRACE_BEGIN(FLASH_TRACE_WT_DONE, 6)
-        SM_TRACE_PAYLOAD_BE(flashWtOk_ >> 8)
-        SM_TRACE_PAYLOAD_BE(flashWtOk_)
-        SM_TRACE_PAYLOAD_BE(flashWtEraseBad_ >> 8)
-        SM_TRACE_PAYLOAD_BE(flashWtEraseBad_)
-        SM_TRACE_PAYLOAD_BE(flashWtProgBad_ >> 8)
-        SM_TRACE_PAYLOAD_BE(flashWtProgBad_)
-    SM_TRACE_END()
-
-    // This task only exists while FLASH_WT_MODE is not OFF, so this report is
-    // only reachable during a self test run: it is here so a re-enabled sweep
-    // measures its own stack instead of hiding it (the flash thread reports
-    // through BSP_TRACE_STACK_FLASH).
-    BSP_memReport(BSP_TRACE_STACK_FLASH_WT);
-
-    for (;;) { // static task: park instead of deleting
-        vTaskDelay(1000U);
-    }
-}
-//............................................................................
-// Write Enable (06h), confirmed by reading the status register back: WEL is
-// bit 1, and a write or erase is ignored without it.
 static bool BSP_flashWriteEnable_(void) {
     BSP_flashExchange_(FLASH_WREN_CMD, (uint8_t const *)0, 0U,
                        (uint8_t *)0, 0U);

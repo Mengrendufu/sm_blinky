@@ -65,7 +65,8 @@ bool BSP_flashProgramPage(uint32_t address, uint8_t const *data,
 // Read/write self test: it erases every sector, writes a signature and reads
 // it back. Start it once - it spins up its own task, because a multi minute
 // sweep has no business running in an AO whose event queue holds 8 entries.
-void BSP_flashSelfTestStart(void);
+// (the write path self test that used to live here was removed 2026-10-10:
+// it drove SPI2 from a second context; see the note in bsp_flash.c)
 
 // Run time read, moved by DMA and finished in its interrupt: the caller is
 // not held on the bus, it is called back when the data has landed. The boot
