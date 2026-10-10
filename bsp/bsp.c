@@ -18,10 +18,25 @@
 // #include "stm32f103xe.h"
 
 //============================================================================
-// Trace channel. It has to be alive before anything reports, and the
-// bring-up below reports through it, so it is the first thing BSP_init()
-// does. The pool and the queue are file statics here: no allocation.
-static void BSP_Tracer_init(void) {
+// Trace channel. It is built from the first task that runs (see Blinky_init)
+// and never before the scheduler: SM_Trace_push enters a critical section,
+// and FreeRTOS's critical sections are not usable before the scheduler exists
+// - the nesting counter still holds its sentinel, so interrupts stay masked
+// afterwards. That used to happen during the panel bring-up right below, and
+// it froze HAL_GetTick() for the whole boot and put the interrupt driven
+// flash path out of reach there. Records pushed before the tracer exists are
+// dropped, which is now by design: the boot phase keeps its own timeline
+// instead (BSP_bootMark / BSP_bootReport). Pool and queue are file statics:
+// no allocation.
+void BSP_Tracer_init(void) {
+    static bool done;
+
+    if (done) {
+        return;
+    }
+    done = true;
+
+    //........................................................................
     //........................................................................
     // SM_Trace initialization......
     struct SM_Tracer_Frame {
@@ -38,11 +53,75 @@ static void BSP_Tracer_init(void) {
         sizeof(SM_Tracer_qSto) / sizeof(SM_Tracer_qSto[0]));
 }
 //............................................................................
-void BSP_init(void) {
-    // The tracer first: a record pushed before it exists is dropped without a
-    // word, and the panel bring-up below reports.
-    BSP_Tracer_init();
+//============================================================================
+// Boot phase timing, the replacement for the records a deferred tracer cannot
+// push: four marks, three deltas, reported as one record once the tracer is
+// up. Before the move above the tick was frozen from the first record on, so
+// this is also the check that the boot clock works at all.
+#define BSP_BOOT_MARKS 4U
 
+static uint32_t BSP_bootMs_[BSP_BOOT_MARKS];
+static uint8_t BSP_bootMarkIdx_;
+
+void BSP_bootMark(void) {
+    if (BSP_bootMarkIdx_ < BSP_BOOT_MARKS) {
+        BSP_bootMs_[BSP_bootMarkIdx_] = HAL_GetTick();
+        ++BSP_bootMarkIdx_;
+    }
+}
+//............................................................................
+// The three deltas in milliseconds, two bytes each: panel bring-up, asset
+// load, and everything from there to the scheduler.
+void BSP_bootReport(void) {
+    uint32_t const panel = BSP_bootMs_[1] - BSP_bootMs_[0];
+    uint32_t const asset = BSP_bootMs_[2] - BSP_bootMs_[1];
+    uint32_t const rest = BSP_bootMs_[3] - BSP_bootMs_[2];
+
+    // A fault from a previous life leaves its frame in the cross reset area
+    // (bsp/platform/stm32f1xx_it.c). Reported here rather than on the way up:
+    // the tracer does not exist until a task runs, and a fault is otherwise
+    // silent - two LED blinks, a reset, nothing on the wire.
+    {
+        uint32_t * const s = BSP_faultStash();
+
+        if ((s[0] | s[1] | s[3]) != 0U) {
+            // 66: the instruction that faulted, 4 bytes, then the fault's own
+            // report, 2 bytes. 67: where it was going (LR) and HFSR.
+            SM_TRACE_BEGIN(66U, 6)
+                SM_TRACE_PAYLOAD_BE((uint8_t)((s[0] >> 24) & 0xFFU))
+                SM_TRACE_PAYLOAD_BE((uint8_t)((s[0] >> 16) & 0xFFU))
+                SM_TRACE_PAYLOAD_BE((uint8_t)((s[0] >> 8) & 0xFFU))
+                SM_TRACE_PAYLOAD_BE((uint8_t)(s[0] & 0xFFU))
+                SM_TRACE_PAYLOAD_BE((uint8_t)((s[3] >> 8) & 0xFFU))
+                SM_TRACE_PAYLOAD_BE((uint8_t)(s[3] & 0xFFU))
+            SM_TRACE_END()
+
+            SM_TRACE_BEGIN(67U, 6)
+                SM_TRACE_PAYLOAD_BE((uint8_t)((s[1] >> 24) & 0xFFU))
+                SM_TRACE_PAYLOAD_BE((uint8_t)((s[1] >> 16) & 0xFFU))
+                SM_TRACE_PAYLOAD_BE((uint8_t)((s[1] >> 8) & 0xFFU))
+                SM_TRACE_PAYLOAD_BE((uint8_t)(s[1] & 0xFFU))
+                SM_TRACE_PAYLOAD_BE((uint8_t)((s[4] >> 8) & 0xFFU))
+                SM_TRACE_PAYLOAD_BE((uint8_t)(s[4] & 0xFFU))
+            SM_TRACE_END()
+
+            s[0] = 0U;
+            s[1] = 0U;
+            s[3] = 0U;
+        }
+    }
+
+    SM_TRACE_BEGIN(79U, 6)
+        SM_TRACE_PAYLOAD_BE((uint8_t)((panel >> 8) & 0xFFU))
+        SM_TRACE_PAYLOAD_BE((uint8_t)(panel & 0xFFU))
+        SM_TRACE_PAYLOAD_BE((uint8_t)((asset >> 8) & 0xFFU))
+        SM_TRACE_PAYLOAD_BE((uint8_t)(asset & 0xFFU))
+        SM_TRACE_PAYLOAD_BE((uint8_t)((rest >> 8) & 0xFFU))
+        SM_TRACE_PAYLOAD_BE((uint8_t)(rest & 0xFFU))
+    SM_TRACE_END()
+}
+//............................................................................
+void BSP_init(void) {
     SystemCoreClockUpdate(); // Update SystemCoreClock
 
     // Board bring-up: everything has to be ready before a task touches it,

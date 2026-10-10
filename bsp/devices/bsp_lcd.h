@@ -45,6 +45,10 @@ void BSP_lcdInit(void);
 // after bring-up, so the records land on a terminal that is already attached.
 void BSP_lcdCheck(void);
 
+// The bring-up facts (display on, identification read) again, for the first
+// task to report: bring-up itself cannot push records (see bsp.c).
+void BSP_lcdBootReport(void);
+
 // Drawing API for the display layer: open a window, then push pixels into it.
 // The window writes go straight to the FSMC bus, so they belong to whoever
 // owns the panel at run time (the UI thread); there is no locking here.

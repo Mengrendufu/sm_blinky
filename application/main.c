@@ -33,47 +33,20 @@ int main(void) {
     MX_GPIO_Init();
     MX_USART1_UART_Init();
 
-    // BSP_init() opens the trace channel, then brings up the panel - which
-    // waits out the sleep-out time with HAL_Delay(), so it needs interrupts -
-    // and the SRAM. It has to run before the first FreeRTOS call below: the
-    // timer API enters a critical section, and with the scheduler not started
-    // uxCriticalNesting is 0xaaaaaaaa, so interrupts stay masked from there
-    // until the scheduler takes over - a delay in that window would hang.
+    BSP_bootMark();   // 0: the board is up, nothing brought up yet
+
+    // BSP_init() brings up the panel - which waits out the sleep-out time
+    // with HAL_Delay(), so it needs interrupts - then the SRAM and the SPI
+    // flash. Nothing here touches the trace channel: a push before the
+    // scheduler enters a FreeRTOS critical section whose nesting counter
+    // still holds its sentinel, and interrupts stay masked from there until
+    // the scheduler takes over (that used to freeze HAL_GetTick() mid
+    // bring-up, which would hang the panel's own retry delay). The boot facts
+    // are kept and reported once a task runs - see Blinky_init.
     BSP_init();
 
-    // A fault from a previous life leaves its frame in the cross reset area
-    // (bsp/platform/stm32f1xx_it.c). Report it once on the way up: a fault
-    // is otherwise silent - two LED blinks, a reset, nothing on the wire.
-    {
-        extern uint32_t *BSP_faultStash(void);
-        uint32_t * const s = BSP_faultStash();
+    BSP_bootMark();   // 1: panel out of sleep, SRAM and SPI flash ready
 
-        if ((s[0] | s[1] | s[3]) != 0U) {
-            // 66: the instruction that faulted, 4 bytes, then the fault's own
-            // report, 2 bytes. 67: where it was going (LR) and HFSR.
-            SM_TRACE_BEGIN(66U, 6)
-                SM_TRACE_PAYLOAD_BE((uint8_t)((s[0] >> 24) & 0xFFU))
-                SM_TRACE_PAYLOAD_BE((uint8_t)((s[0] >> 16) & 0xFFU))
-                SM_TRACE_PAYLOAD_BE((uint8_t)((s[0] >> 8) & 0xFFU))
-                SM_TRACE_PAYLOAD_BE((uint8_t)(s[0] & 0xFFU))
-                SM_TRACE_PAYLOAD_BE((uint8_t)((s[3] >> 8) & 0xFFU))
-                SM_TRACE_PAYLOAD_BE((uint8_t)(s[3] & 0xFFU))
-            SM_TRACE_END()
-
-            SM_TRACE_BEGIN(67U, 6)
-                SM_TRACE_PAYLOAD_BE((uint8_t)((s[1] >> 24) & 0xFFU))
-                SM_TRACE_PAYLOAD_BE((uint8_t)((s[1] >> 16) & 0xFFU))
-                SM_TRACE_PAYLOAD_BE((uint8_t)((s[1] >> 8) & 0xFFU))
-                SM_TRACE_PAYLOAD_BE((uint8_t)(s[1] & 0xFFU))
-                SM_TRACE_PAYLOAD_BE((uint8_t)((s[4] >> 8) & 0xFFU))
-                SM_TRACE_PAYLOAD_BE((uint8_t)(s[4] & 0xFFU))
-            SM_TRACE_END()
-
-            s[0] = 0U;
-            s[1] = 0U;
-            s[3] = 0U;
-        }
-    }
 
     // The asset the bootloader wrote, if it got that far. Read here on
     // purpose:
@@ -81,6 +54,8 @@ int main(void) {
     // still before the first FreeRTOS call. The UI thread picks the result up
     // when it builds its screen.
     (void)Asset_load();
+
+    BSP_bootMark();   // 2: the asset is in the external SRAM, CRC checked
 
     SST_sysTimer = xTimerCreateStatic(
         "sstTick",
@@ -103,6 +78,8 @@ int main(void) {
     Flash_start();
     AO_start();
     SST_start();
+
+    BSP_bootMark();   // 3: everything is created, the scheduler is next
 
     vTaskStartScheduler();
 

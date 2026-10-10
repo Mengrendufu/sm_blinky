@@ -85,6 +85,14 @@
 #define LCD_TRACE_DISP_ON   20U
 #define LCD_TRACE_GRAM      37U
 
+// The bring-up facts are kept here instead of pushed: the tracer comes up
+// with the first task, and a push before the scheduler enters a FreeRTOS
+// critical section whose nesting counter still holds its sentinel - which
+// masks interrupts for the rest of the boot (and would hang the retry loop's
+// HAL_Delay in BSP_lcdInit).
+static bool lcd_bootDispOn_;
+static uint16_t lcd_bootId_;
+
 //============================================================================
 // Panel register sequence: the vendor table for this module (ALIENTEK
 // atk_md0240_reg_init). SLPOUT is not part of it; BSP_lcdInit() sends that
@@ -138,7 +146,7 @@ static void BSP_lcdPanelInit_(void);
 static void BSP_lcdFill_(uint16_t colour);
 static uint16_t BSP_lcdReadGram_(uint16_t x, uint16_t y);
 static bool BSP_lcdFilled_(void);
-static void BSP_lcdTraceId_(void);
+static void BSP_lcdBootId_(void);
 
 //============================================================================
 void BSP_lcdInit(void) {
@@ -210,11 +218,10 @@ void BSP_lcdInit(void) {
     // drawing, and the UI thread paints its first frame onto this black.
     HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN, GPIO_PIN_SET);
 
-    SM_TRACE_BEGIN(LCD_TRACE_DISP_ON, 0)
-    SM_TRACE_END()
+    lcd_bootDispOn_ = true;
 
     // One identification read: the "panel is talking" line on the bench.
-    BSP_lcdTraceId_();
+    BSP_lcdBootId_();
 }
 
 //............................................................................
@@ -466,18 +473,27 @@ void BSP_lcdCheck(void) {
 }
 
 //............................................................................
-static void BSP_lcdTraceId_(void) {
-    uint16_t const id = BSP_lcdReadId_();
+static void BSP_lcdBootId_(void) {
+    lcd_bootId_ = BSP_lcdReadId_();
+}
+//............................................................................
+// The two bring-up lines, once a task is running: display on, and the
+// identification read the bench looks for.
+void BSP_lcdBootReport(void) {
+    if (lcd_bootDispOn_) {
+        SM_TRACE_BEGIN(LCD_TRACE_DISP_ON, 0)
+        SM_TRACE_END()
+    }
 
-    if (id == LCD_ID_ST7789) {
+    if (lcd_bootId_ == LCD_ID_ST7789) {
         SM_TRACE_BEGIN(LCD_TRACE_RDID_OK, 2)
-            SM_TRACE_PAYLOAD_BE(id >> 8)
-            SM_TRACE_PAYLOAD_BE(id)
+            SM_TRACE_PAYLOAD_BE(lcd_bootId_ >> 8)
+            SM_TRACE_PAYLOAD_BE(lcd_bootId_)
         SM_TRACE_END()
     } else {
         SM_TRACE_BEGIN(LCD_TRACE_RDID_BAD, 2)
-            SM_TRACE_PAYLOAD_BE(id >> 8)
-            SM_TRACE_PAYLOAD_BE(id)
+            SM_TRACE_PAYLOAD_BE(lcd_bootId_ >> 8)
+            SM_TRACE_PAYLOAD_BE(lcd_bootId_)
         SM_TRACE_END()
     }
 }

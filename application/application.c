@@ -11,8 +11,22 @@
 #include "sst_port.h"
 #include "static_pool.h"
 #include "application.h"
+#include "asset.h"
+#include "bsp.h"
+#include "bsp_lcd.h"
 
 //============================================================================
+// Everything that happened before the scheduler reports through here, called
+// from the first task that runs (Blinky_init). Bring-up cannot push records
+// itself: a push before the scheduler enters a FreeRTOS critical section
+// whose nesting counter still holds its sentinel, which leaves interrupts
+// masked for the rest of the boot (see bsp.c).
+void Application_bootReport(void) {
+    BSP_bootReport();
+    BSP_lcdBootReport();
+    Asset_bootReport();
+}
+//............................................................................
 void AO_start(void) {
     //........................................................................
     // AOs......

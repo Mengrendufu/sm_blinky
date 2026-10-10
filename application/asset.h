@@ -44,8 +44,12 @@ typedef struct {
     void const *pixels;         // RGB565, in the external SRAM
 } Asset;
 
-// Read and verify the asset. Call once, from main().
+// Read and verify the asset. Call once, from main(). The record it used to
+// push is deferred to Asset_bootReport(), called once the tracer is up.
 Asset Asset_load(void);
+
+// The load's result again, as a record, for the first task to report.
+void Asset_bootReport(void);
 
 // What Asset_load() found. Never NULL.
 Asset const *Asset_get(void);

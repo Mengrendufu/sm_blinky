@@ -34,6 +34,20 @@
 
 //============================================================================
 void BSP_init(void);
+
+// The tracer is constructed from the first task that runs, not from BSP_init:
+// a push before the scheduler masks interrupts for good (see bsp.c). Records
+// pushed before this are dropped by design.
+void BSP_Tracer_init(void);
+
+// Boot phase timing: mark at each phase boundary in main(), report once the
+// tracer is up. The marks themselves stay readable in RAM for a debugger.
+void BSP_bootMark(void);
+void BSP_bootReport(void);
+
+// The fault frame the reset handler left in the cross reset area, or zeroed
+// words when there was none (bsp/platform/stm32f1xx_it.c writes it).
+uint32_t *BSP_faultStash(void);
 void BSP_ledOn(void);
 void BSP_ledOff(void);
 

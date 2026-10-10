@@ -11,6 +11,10 @@
 #define APPLICATION_H_
 
 //============================================================================
+// The boot phase's records, including the timeline the tracer cannot push
+// itself: call once, from the first task to run.
+void Application_bootReport(void);
+
 void AO_start(void);
 
 //============================================================================

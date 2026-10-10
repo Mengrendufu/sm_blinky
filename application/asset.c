@@ -66,15 +66,20 @@ Asset Asset_load(void) {
                       == crc);
     Asset_.slots = len / ASSET_SLOT_BYTES;
 
+    return Asset_;
+}
+//............................................................................
+//............................................................................
+// The load runs before the scheduler, so its record waits for the tracer:
+// everything it needs is already in Asset_ by the time this is called.
+void Asset_bootReport(void) {
     SM_TRACE_BEGIN(ASSET_TRACE, 5)
         SM_TRACE_PAYLOAD_BE(Asset_.present ? 1U : 0U)
-        SM_TRACE_PAYLOAD_BE((crc >> 24) & 0xFFU)
-        SM_TRACE_PAYLOAD_BE((crc >> 16) & 0xFFU)
-        SM_TRACE_PAYLOAD_BE((crc >> 8) & 0xFFU)
-        SM_TRACE_PAYLOAD_BE(crc & 0xFFU)
+        SM_TRACE_PAYLOAD_BE((Asset_.crc32 >> 24) & 0xFFU)
+        SM_TRACE_PAYLOAD_BE((Asset_.crc32 >> 16) & 0xFFU)
+        SM_TRACE_PAYLOAD_BE((Asset_.crc32 >> 8) & 0xFFU)
+        SM_TRACE_PAYLOAD_BE(Asset_.crc32 & 0xFFU)
     SM_TRACE_END()
-
-    return Asset_;
 }
 //............................................................................
 Asset const *Asset_get(void) {
