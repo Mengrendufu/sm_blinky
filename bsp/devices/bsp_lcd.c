@@ -83,7 +83,13 @@
 // spend, but almost none of it is bus work any more.
 #define LCD_INIT_ATTEMPTS    1100U
 #define LCD_READY_POLL_MS    10U
-#define LCD_RETRY_SETTLE_MS  100U
+// The ready bit says only that the chip left sleep (measured: it comes up at
+// 383 ms warm and cold alike, while a cold power on needs 7.9 s before a fill
+// lands, and RDDST reads the same 00 53 00 20 the whole time). The fill and
+// its read back are therefore the authority, and this is the gap between two
+// of them: short enough not to add much to the panel's own readiness time,
+// long enough not to fill the bus with 5 ms clears.
+#define LCD_RETRY_SETTLE_MS  20U
 // Trace records: ==LCD==[RDID][<hi> <lo>]==[ST7789/??????]==
 //                ==LCD==[DISPON]==
 #define LCD_TRACE_RDID_OK   12U
@@ -98,17 +104,7 @@
 static bool lcd_dbgBootDispOn_;
 static uint16_t lcd_dbgBootId_;
 
-// == DEBUG: when does the ready bit come up, and when does the fill first
-// land? Four numbers and the status bytes behind them, in RAM for J-Link.
-// A warm reset answers both at the same moment (the panel is already up); a
-// cold power on is what tells whether the bit tracks the module's own supply
-// ramp or only the chip's sleep state. bitLied counts the passes where the
-// bit said ready and the fill still did not land - that count is the answer.
-static volatile uint16_t lcd_dbgReadyMs_;
-static volatile uint16_t lcd_dbgFillMs_;
-static volatile uint8_t lcd_dbgBitLied_;
-static volatile uint8_t lcd_dbgReadyRdst_[4];
-static volatile uint8_t lcd_dbgFillRdst_[4];
+
 
 
 //============================================================================
@@ -222,40 +218,14 @@ void BSP_lcdInit(void) {
             continue;
         }
 
-        // == DEBUG: the first time the bit is set, and what came with it ==
-        if (lcd_dbgReadyMs_ == 0U) {
-            uint8_t rdst[4];
-            uint8_t i;
-
-            BSP_lcdReadRdst_(rdst);
-            lcd_dbgReadyMs_ = (uint16_t)HAL_GetTick();
-            for (i = 0U; i < 4U; ++i) {
-                lcd_dbgReadyRdst_[i] = rdst[i];
-            }
-        }
-
         // Frame memory first, display on second: the panel starts scanning
         // GRAM the moment DISPON lands, and until this clear it holds
         // whatever the glass powered up with.
         BSP_lcdFill_(LCD_BLACK);
 
         if (BSP_lcdFilled_()) {
-            // == DEBUG: and the first time the fill lands ==
-            if (lcd_dbgFillMs_ == 0U) {
-                uint8_t rdst[4];
-                uint8_t i;
-
-                BSP_lcdReadRdst_(rdst);
-                lcd_dbgFillMs_ = (uint16_t)HAL_GetTick();
-                for (i = 0U; i < 4U; ++i) {
-                    lcd_dbgFillRdst_[i] = rdst[i];
-                }
-            }
             break;
         }
-
-        // == DEBUG: the bit said ready and the fill did not land ==
-        ++lcd_dbgBitLied_;
 
         // The fill did not land, so the panel is not out of reset yet. Keep
         // the passes close together: the window between "not yet" and "now"
