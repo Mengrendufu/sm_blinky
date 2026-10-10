@@ -36,8 +36,12 @@
 // 2.25 MB/s the bus carries at 18 MHz, so blocks land on the wire limit.
 #define FLASH_BLOCK_MAX     32768UL
 
-// Geometry and the two waits that matter: a 4 KB sector erase is 45 ms
-// typical and 400 ms worst case, a 256 byte page program 0.7 ms / 3 ms.
+// Geometry and the waits that matter, out of the part's own datasheet
+// (W25Q128BV Rev E, AC characteristics): a 4 KB sector erase is 30 ms
+// typical, 200 ms max below 50k erase cycles and 400 ms above it; a 256 byte
+// page program 0.7 ms typical / 3 ms max. This board measures 130 to 160 ms
+// per erase - slower than that typical, still inside the below-50k max, so
+// any budget here has to be 200 ms rather than 30.
 // (not FLASH_PAGE_SIZE: the HAL already uses that name for the internal
 //  flash page size, and redefining it would lie to the HAL's own driver)
 #define FLASH_SECTOR_SIZE   4096UL
@@ -84,8 +88,10 @@
 #define FLASH_WT_STACK_WORDS   256U
 #define FLASH_WT_PRIORITY      20U // under Blinky (24) and the UI thread (23)
 
-// How much of the part to walk. Erase is ~130 ms per sector here, against a
-// datasheet typical of 45 ms, so the full walk takes about ten minutes and
+// How much of the part to walk. Erase measures 130 to 160 ms per sector here
+// (datasheet: 30 ms typical, 200 ms max below 50k cycles - and erasing
+// sector by sector is the expensive way round, the part's own Chip Erase is
+// 25 s typical), so the full walk takes about eleven minutes and
 // the sample walk - every 64th sector, spread over the whole 16 MB - gives a
 // verdict in about ten seconds. Set this to OFF once the flash holds data
 // worth keeping: the walk erases whatever it touches. OFF since the flash was
