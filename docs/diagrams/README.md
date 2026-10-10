@@ -20,6 +20,7 @@
 | `asset-load.html` / `.mmd` | **待落地**：app 运行期 | 启动期把背景资产一次性搬进外挂 SRAM |
 | `ui-flush.html` / `.mmd` | **现有固件**刷屏（对象级） | UI 线程一次刷屏的完整策略：渲染 → 开窗 → 起 DMA → 线程阻塞（idle 泵日志）→ 中断唤醒 → flush_ready，含超时/错误断言与"单缓冲不重叠"的说明 |
 | `flash-log-write.html` / `.mmd` | **待落地（草案）**：运行期写 flash | 追加日志 + 小桶：生产者 → RAM 暂存环（不阻塞）→ flash 线程 → 256 B 页缓冲 → 预擦/编程/回读；擦除 130~160 ms 与 BUSY 等标了"阻塞等"的位置，DMA 写只标成将来那一步 |
+| `flash-ao-forms.html` / `.mmd` | **待拍板**：AO 与 flash 服务的交互形式 | 三种形式对照（B 同步 RPC / A 事件进事件回 / C 共享环+泵）+ boot 期直读；标了各自「谁等谁、谁拥有缓冲、能等多久」，附现有件的真实参数（池 16 块、队列 8 格、环 16 格） |
 | `flash-log-read.html` / `.mmd` | **待落地（草案）**：运行期读 flash | 桶读：RAM 索引 → 现有 RPC → `BSP_flashReadDma` → DMA1_Ch4 → 槽 1 唤醒；读路径已经是 DMA（§12），写侧接 DMA 不影响它 |
 
 `sketches/` 里是设计草图（非时序图）：`layout.html`（存储布局：NOR 分区 / 外挂 SRAM / 资产区）、

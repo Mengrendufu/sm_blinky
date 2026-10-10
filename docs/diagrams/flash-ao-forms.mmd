@@ -1,0 +1,33 @@
+sequenceDiagram
+    autonumber
+    participant AO as 生产者 AO<br/>SST AO（beat 500 ms / 队列 8 格）
+    participant UI as UI 线程<br/>每帧 12~14 ms
+    participant Svc as flash 服务<br/>普通任务 + HSM（唯一总线持有者）
+    participant Pool as 静态池 / 暂存环
+    participant NOR as W25Q128
+
+    Note over AO,NOR: 形式 B —— 同步 RPC（现有的 Flash_readBlock / Flash_probe）
+    AO->>Svc: 请求块就放在我自己栈上（借用）
+    AO->>AO: 阻塞在自己的槽 1（ulTaskNotifyTakeIndexed）
+    Svc->>NOR: 一次事务（读：DMA 分块；写：页编程 + BUSY）
+    Svc-->>AO: 槽 1 唤醒，读 req.ok
+    Note over AO,Svc: 能等多久 = 一次事务的长度。<br/>读约 200 µs 可接受；写若撞上擦除 130~160 ms 会把 beat 拖漂
+
+    Note over AO,NOR: 形式 A —— 事件进 / 事件回（AO 之间天然的形态，SST 事件）
+    AO->>Pool: SST_Evt_new(请求块大小) 并复制意图
+    Pool-->>AO: 块（池空 = 断言，不是 NULL）
+    AO->>Svc: SST_Task_post(请求) —— 立刻返回，不等
+    Note over AO: 生产者永不阻塞：擦除那 130~160 ms 与它无关
+    Svc->>NOR: 干活（可以慢，idle 顶上）
+    Svc->>AO: SST_Task_post(完成事件 + 结果)
+    AO->>AO: 下一个 beat 里处理结果
+    Note over AO,Svc: 代价：新开一个够大的池 + 复制；<br/>池按 blockSize 升序搜索（顺序错了会选错池或断言）；<br/>失败与掉电只能靠这个回程事件告知
+
+    Note over AO,NOR: 形式 C —— 共享静态环 + 低位泵（现有 tracer 的形态，日志专用）
+    AO->>Pool: 记录直接写进环槽（不复制，满则丢 + 计数）
+    Pool->>Svc: 唤醒（槽 0）
+    Svc->>Pool: 取出若干条，折进 256 B 页缓冲
+    Svc->>NOR: 空闲/满页时冲刷（预擦备用扇区把擦除挪出去）
+    Note over AO,Svc: 可丢、有界、顺序 —— 与 tracer 同语义，所以日志用它
+
+    Note over AO,NOR: 读的第四种：boot 期（调度器之前）<br/>没有 AO 也没有任务，Asset_load 式阻塞直读（现有）
