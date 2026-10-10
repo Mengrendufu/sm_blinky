@@ -118,6 +118,7 @@ python3 ~/.config/opencode/skills/sm/uml-sync/scripts/export_model_tree.py \
 - 要改 `sm_sst` 时：先在本地镜像 `C:\mengrendufu\workshop\local_prjs\sm_sst` 改并推送，再回本仓库同步 submodule 指针。
 - 优先级编码 `0xRRSS`：低字节是 SST 逻辑优先级（用 `SST_MAX_TASK` 校验），高字节是 FreeRTOS 任务优先级（用 `configMAX_PRIORITIES` 校验）。契约检查留在 SST 核心公共入口，port 只额外校验高字节。
 - 断言输出允许丢日志，但不允许卡死；复位优先于打印。
+- **面板「醒没醒」的判据（2026-10-10 调查）**：板上**没有**任何硬件就绪信号 —— 原理图（`STM32F103_CORE_BOARD_V1.3.pdf`，能读）的 LCD 连接器只有 `MT_CS` / `LCD_BL` / `T_CS` / `T_MISO` / `T_MOSI` / `T_PEN` / `RESET` / `FSMC_D0..15` / `NWE` / `NOE` / `NE4` / `A10`，**没有 TE 脚** ✗（那几处 TE 全是 ALIENTEK 里的字母）。器件侧本来有现成答案：ST7789V 手册里 **`RDDST (09h)` = the current status of the display self-diagnostic result **after sleep out** command** ✓ —— 面板自带「睡醒自检过没过」的状态寄存器 ✓，**但位定义拿不到** ✗：板子资料里的 ST7789VW 与裸屏规格书都是 **CID 子集字体且无 ToUnicode** ✗（纯 Python 提取只能拿到标题页那种简单字体），公开副本的抓取又只覆盖前 100 页 ✗（位表在 170+ 页）。**所以改成实测定位**：在重试环里逐次记 `(ms, RDDID, RDDST 四字节, 清屏回读结果)` 进 RAM 表，起来后 dump ⇒ 看哪个位在「清屏开始落地」那一刻翻转 ✓，用它替掉每轮「表+清屏+回读」的 ~10 ms 开销 ✓。
 - **探针的生命周期（2026-10-10 立）**：临时探针**拿到结论就拆** —— 结论（数字、口径、记录 id）先落进文档或 id 空档，代码随后清掉 ✓。**删代码不删结论** ✓。拆的时候按这张清单走（每一步这次都真踩过）：
   ① 删函数与**所有**调用点；
   ② 清**新出现的孤儿** —— 删掉 A 常让「只有 A 用的 B」变成 `-Wunused-function` ✗（`BSP_sramUs_` / `BSP_flashReadId_` / `BSP_flashReadArray_` 都是这么冒出来的）；**编译器的 unused 警告就是孤儿探测器** ✓，别把它当噪声；
