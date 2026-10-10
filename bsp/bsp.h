@@ -58,11 +58,5 @@ void BSP_ledOff(void);
 // a task every few ticks, to size the static stacks from measurements.
 void BSP_memReport(uint8_t selfRecId);
 
-// Debug aid: write a short line straight out of the UART instead of through
-// the tracer. The tracer is drained by the idle task, so a hang in a high
-// priority task takes the whole log down with it, and a record pushed from
-// here would never reach the wire. Use it with a *raw* terminal: the
-// sm_tracer_tui parses frames, so plain text like this is dropped there.
-void BSP_traceRaw(char const *text);
 
 #endif // BSP_H_

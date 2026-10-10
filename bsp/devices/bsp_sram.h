@@ -29,10 +29,5 @@
 // so it is safe to call from an AO init transition.
 void BSP_sramInit(void);
 
-// Temporary: write a 4 KB pattern, read it back, and report both times plus
-// the mismatch count on the trace channel. Called from the AO 30 s in, like
-// the panel and flash probes: a boot time record would be lost, because no
-// terminal can be attached that early.
-void BSP_sramBench(void);
 
 #endif // BSP_SRAM_H_

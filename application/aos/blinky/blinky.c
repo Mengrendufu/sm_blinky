@@ -11,7 +11,6 @@
 #include "asset.h"
 #include "bsp.h"
 #include "bsp_lcd.h"
-#include "bsp_sram.h"
 #include "bsp_flash.h"
 #include "application.h"
 #include "ui_evt.h"
@@ -163,14 +162,6 @@ static void Blinky_maintenance_(void) {
 
     if (beat == BLINKY_PROBE_BEAT) {
         BSP_lcdCheck();
-        // The bench writes a pattern across the whole external SRAM, which is
-        // exactly where the bootloader's asset lives. With an asset present
-        // the two cannot both have the memory, and the asset is the one that
-        // actually used - so the bench steps aside (it is a bring-up
-        // diagnostic, and it can come back when the asset is absent).
-        if (Asset_bytes() == 0U) {
-            BSP_sramBench();
-        }
         // The flash belongs to the flash thread at run time, so the probe
         // goes through its inbox like any other request.
         (void)Flash_probe();

@@ -160,18 +160,6 @@ void BSP_memReport(uint8_t selfRecId) {
                     (uint16_t)uxTaskGetStackHighWaterMark(timer));
 }
 //............................................................................
-void BSP_traceRaw(char const *text) {
-    // Straight to the peripheral, not through HAL: the tracer's writer and
-    // this one are different tasks, and HAL's handle would answer HAL_BUSY
-    // while the other is mid byte. Register writes cannot be busy, and a few
-    // interleaved bytes are fine when the question is which line got out.
-    while (*text != '\0') {
-        while ((USART1->SR & USART_SR_TXE) == 0U) {
-        }
-        USART1->DR = (uint16_t)(*text++);
-    }
-}
-//............................................................................
 void BSP_ledOn(void) {
     // FreeRTOS tick: the AO beat itself is driven by it, so it cannot freeze.
     uint32_t timeStamp = (uint32_t)xTaskGetTickCount();

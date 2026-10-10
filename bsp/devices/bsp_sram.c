@@ -11,14 +11,8 @@
 #include "bsp_sram.h"
 
 //============================================================================
-// Bank base and the benchmark's size. The bank is 1 MB, 512K x 16; 4 KB is
-// enough to average out the first-access effects and small enough to finish
-// in a couple of hundred microseconds.
+// Bank base. The bank is 1 MB, 512K x 16.
 #define SRAM_BANK_ADDR  0x68000000U
-#define SRAM_BENCH_WORDS 2048U
-
-// ==TIME==[SRAM][wr <us>][rd <us>][bad <n>]==
-#define SRAM_TRACE_BENCH 42U
 
 //============================================================================
 static void BSP_sramGpioInit_(void);
@@ -114,41 +108,3 @@ static void BSP_sramFsmcInit_(void) {
     HAL_SRAM_Init(&sram, &read_timing, &write_timing);
 }
 //............................................................................
-// Microseconds, for the benchmark below. Same trick as the display adapter's:
-// the HAL time base is TIM1 at 1 MHz, so the tick count carries milliseconds
-// and TIM1->CNT the rest of the millisecond.
-static uint32_t BSP_sramUs_(void) {
-    return ((uint32_t)HAL_GetTick() * 1000U) + (uint32_t)TIM1->CNT;
-}
-//............................................................................
-void BSP_sramBench(void) {
-    uint16_t * const base = (uint16_t *)SRAM_BANK_ADDR;
-    uint32_t i;
-    uint32_t t0;
-    uint32_t writeUs;
-    uint32_t readUs;
-    uint16_t bad = 0U;
-
-    t0 = BSP_sramUs_();
-    for (i = 0U; i < SRAM_BENCH_WORDS; ++i) {
-        base[i] = (uint16_t)(0xA5A5U ^ i);
-    }
-    writeUs = BSP_sramUs_() - t0;
-
-    t0 = BSP_sramUs_();
-    for (i = 0U; i < SRAM_BENCH_WORDS; ++i) {
-        if (base[i] != (uint16_t)(0xA5A5U ^ i)) {
-            ++bad;
-        }
-    }
-    readUs = BSP_sramUs_() - t0;
-
-    // ==TIME==[SRAM][wr <us>][rd <us>][bad <n>]==  (4 KB each way)
-    SM_TRACE_BEGIN(SRAM_TRACE_BENCH, 5)
-        SM_TRACE_PAYLOAD_BE((writeUs >> 8) & 0xFFU)
-        SM_TRACE_PAYLOAD_BE(writeUs & 0xFFU)
-        SM_TRACE_PAYLOAD_BE((readUs >> 8) & 0xFFU)
-        SM_TRACE_PAYLOAD_BE(readUs & 0xFFU)
-        SM_TRACE_PAYLOAD_BE((uint8_t)(bad > 255U ? 255U : bad))
-    SM_TRACE_END()
-}
