@@ -1,0 +1,47 @@
+sequenceDiagram
+    autonumber
+    participant App as 生产者<br/>AO / UI / 任意任务
+    participant Stage as RAM 暂存环<br/>静态 · 满则拒收
+    participant FThr as flash 线程<br/>运行期唯一总线持有者
+    participant SM as Sm_Flash HSM<br/>Flash_ready
+    participant BSP as bsp_flash<br/>页缓冲 + 编程
+    participant NOR as W25Q128<br/>256 B 页 / 4 KB 扇区
+
+    App->>Stage: Log_append(rec, len)  —— 定长桶或变长记录，带 type
+    Note over Stage: 临界区入环、立刻返回：<br/>生产者绝不因为擦除 130 ms 而卡住（与 tracer 的 push 同形）
+    alt 环满
+        Stage-->>App: false（拒收并计数，不阻塞）
+    else 有空间
+        Stage->>FThr: xTaskNotifyGiveIndexed(槽 0)
+        Note right of Stage: 槽约定沿用 flash_req.h：<br/>槽 0 = 收件箱唤醒，槽 1 = 完成
+    end
+
+    FThr->>SM: dispatch(FLASH_REQ_LOG)
+    SM->>BSP: BSP_flashLogAppend(rec, len)   —— 新增
+    Note over BSP: 记录按 len+seq+CRC 打包进 256 B 页缓冲；<br/>未满就返回 = 用落盘延迟换写放大
+
+    opt 页满，或空闲超时冲刷
+        BSP->>BSP: 下一个扇区是否已预擦？
+        opt 备用扇区已耗尽
+            BSP->>NOR: 擦除下一个扇区 0x20 —— BUSY 轮询 130~160 ms（本板实测）
+            Note over FThr: 这里是"阻塞等"不是自旋：<br/>线程睡着，idle 继续泵 tracer（charter §7 / §8.6）
+        end
+        BSP->>NOR: 0x06 WREN + 读 SR 确认 WEL
+        BSP->>NOR: 0x02 + 3 字节地址 + 256 B 载荷
+        Note over BSP,NOR: 今天：逐字节 HAL_SPI_TransmitReceive（bsp_flash.c:741）<br/>将来：DMA1_Ch5 TX + HAL_SPI_TxCpltCallback（§8.6）
+        BSP->>NOR: 读 SR 轮询 BUSY —— tPP 0.7~3 ms（将来改成 vTaskDelay 轮询）
+        opt 回读校验（可选，代价约 114 µs）
+            BSP->>NOR: 0x03 回读 256 B 与页缓冲比对
+        end
+        BSP->>BSP: 提交：写指针推进、页序号与 CRC 就位
+    end
+
+    BSP-->>SM: ok / fail
+    SM-->>FThr: req->ok（失败进计数，不打断生产者）
+    FThr->>Stage: 出队（暂存环读指针推进）
+
+    opt 空闲窗口
+        FThr->>NOR: 预擦下一个扇区 —— 把那 130~160 ms 挪出追加路径
+    end
+
+    Note over App,NOR: 掉电语义：一条记录必须落在同一页内；<br/>半写的页 = CRC 不符 ⇒ 扫描在该页止步、跳到下一页，代价最多 255 B；<br/>扇区头带世代号 ⇒ 轮转时可判新旧

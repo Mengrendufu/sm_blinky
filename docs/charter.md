@@ -213,7 +213,7 @@ tracer 的出口只有一个：idle 任务里的 `vApplicationIdleHook()` → `S
 3. **哪几个页面用整屏图**（背景形态本身已定，见下）：整屏图是"按需动用的例外"，包线 ≤ 3 张（250 ms 启动窗口 ÷ 68.27 ms/张）。
 4. **图标**：常驻外挂 SRAM（1 MB 装得下约 71 个 64×64）还是按需搬（3.64 ms/个）？
 5. ~~**flash 侧 DMA 读（`DMA1_Ch4/5`）是否降级**~~ —— **已定（2026-10-10）：保留，已上板**（§12）。运行期读走 DMA + 分块 + 块间阻塞在槽 1；`DMA1_Ch4/5` 归 flash 独占（tracer 继续逐字节轮询，不占 DMA）。
-6. **运行期往 flash 里存数据（未做，等真有写者再动）** —— 方向已定（2026-10-10）：写入也走 DMA 异步释放线程。管道现成：
+6. **运行期往 flash 里存数据（未做，等真有写者再动）** —— 方向已定（2026-10-10）：写入也走 DMA 异步释放线程。草案时序图：`docs/diagrams/flash-log-write.mmd`（写）与 `flash-log-read.mmd`（读）。管道现成：
 `flashDmaTx_`（Ch5 MEM→PERIPH，`__HAL_LINKDMA` + NVIC + `DMA1_Channel5_IRQHandler` 都已就位），钩子是 **`HAL_SPI_TxCpltCallback`**
 （`SPI_DMATransmitCplt` 走 TX 分支，不是 Rx/TxRx），且 HAL 在双线模式下**自己清 OVR**（源码注释 "received data is not read"）⇒ 不需要假 RX 缓冲、也不需要读侧那个 in-place 技巧。
    **但 DMA 只拿掉这笔账的一小角**：一笔 4 KB 写入 = payload 搬运 16 × 114 µs ≈ **1.8 ms**（DMA 可全免），而擦除 130~160 ms（实测）+ 16 页 tPP 11~48 ms 是**器件时间**，DMA 一分不省；
