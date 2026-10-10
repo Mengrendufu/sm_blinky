@@ -35,9 +35,11 @@
 //============================================================================
 void BSP_init(void);
 
-// The tracer is constructed from the first task that runs, not from BSP_init:
-// a push before the scheduler masks interrupts for good (see bsp.c). Records
-// pushed before this are dropped by design.
+// Builds the trace channel. Called first thing in BSP_init(): the constructor
+// is plain RAM writes, so it is safe before the scheduler. What must wait for
+// a task is *pushing* - SM_Trace_getBlock enters a FreeRTOS critical section,
+// and before the scheduler that masks interrupts for the rest of the boot
+// (see bsp.c). Records pushed before the first task would be dropped.
 void BSP_Tracer_init(void);
 
 // Boot phase timing: mark at each phase boundary in main(), report once the

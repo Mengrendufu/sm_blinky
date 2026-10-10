@@ -18,16 +18,16 @@
 // #include "stm32f103xe.h"
 
 //============================================================================
-// Trace channel. It is built from the first task that runs (see Blinky_init)
-// and never before the scheduler: SM_Trace_push enters a critical section,
-// and FreeRTOS's critical sections are not usable before the scheduler exists
-// - the nesting counter still holds its sentinel, so interrupts stay masked
-// afterwards. That used to happen during the panel bring-up right below, and
-// it froze HAL_GetTick() for the whole boot and put the interrupt driven
-// flash path out of reach there. Records pushed before the tracer exists are
-// dropped, which is now by design: the boot phase keeps its own timeline
-// instead (BSP_bootMark / BSP_bootReport). Pool and queue are file statics:
-// no allocation.
+// Trace channel. Building it here, before the scheduler, is safe and always
+// has been: SM_Tracer_ctor is plain RAM writes, no critical section anywhere.
+// *Pushing* is the part that cannot happen yet - SM_Trace_getBlock and
+// SM_Trace_push enter a FreeRTOS critical section (ports/sm_port.h), and
+// before the scheduler its nesting counter still holds the sentinel, so
+// interrupts stay masked from then on. That is why every record now waits for
+// a task (Application_bootReport, from Blinky_init) and bring-up keeps its
+// own facts instead (BSP_bootMark / BSP_bootReport, the panel's and the
+// asset's own deferred reports). Pool and queue are file statics: no
+// allocation.
 void BSP_Tracer_init(void) {
     static bool done;
 
@@ -122,6 +122,10 @@ void BSP_bootReport(void) {
 }
 //............................................................................
 void BSP_init(void) {
+    // The channel itself first, as it always was: the constructor touches no
+    // critical section. Using it is what waits for the scheduler.
+    BSP_Tracer_init();
+
     SystemCoreClockUpdate(); // Update SystemCoreClock
 
     // Board bring-up: everything has to be ready before a task touches it,

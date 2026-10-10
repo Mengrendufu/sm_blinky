@@ -88,15 +88,14 @@ void Blinky_ctor(void) {
 }
 //............................................................................
 static void Blinky_init(Blinky * const me, SST_Evt const * const ie) {
-    // The first task to run brings the trace channel up. It cannot happen in
-    // BSP_init(): a push before the scheduler enters a FreeRTOS critical
-    // section while the nesting counter still holds its sentinel, which masks
-    // interrupts for the rest of the boot - it used to freeze HAL_GetTick()
-    // from the middle of the panel bring-up on (so the panel's own retry
-    // loop would have hung instead of retrying) and it put the interrupt
-    // driven flash path out of reach for the asset load. The boot phase keeps
-    // its own timeline instead, and this is where that gets reported.
-    BSP_Tracer_init();
+    // What bring-up could not push, it kept, and this is where it reports:
+    // the panel's bring-up lines, the asset's, the fault stash and the boot
+    // timeline. Only the *pushes* wait for the scheduler - a push enters a
+    // FreeRTOS critical section (ports/sm_port.h), and before the scheduler
+    // that leaves interrupts masked for the rest of the boot, which used to
+    // freeze HAL_GetTick() from the middle of the panel bring-up on. The
+    // tracer itself is built, as it always was, first thing in BSP_init():
+    // its constructor is plain RAM writes.
     Application_bootReport();
 
     (void)ie;
