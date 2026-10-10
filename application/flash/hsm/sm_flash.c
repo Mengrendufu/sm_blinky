@@ -70,6 +70,74 @@ static bool Sm_Flash_readDma_(uint32_t address, uint8_t *dst, uint32_t len) {
     return ok;
 }
 //............................................................................
+//=== The other two thirds of a write: erase and program, waited out by
+//=== yielding
+//
+// The device does the work, and its time is 130 to 160 ms for a sector and
+// 0.7 to 3 ms for a page. A yield costs no CPU at all, and that is not a
+// nicety here: measured on this board, spinning through one erase filled the
+// whole trace pool in about a second and the tracer started dropping records
+// (a CPU bound flash operation starves the idle task the pump lives in - see
+// the write path note in AGENTS.md).
+#define FLASH_DEVICE_WAIT_MS 3000U // one erase measures 130~160 ms
+
+static bool Sm_Flash_waitReady_(void) {
+    uint32_t const deadline = xTaskGetTickCount()
+                              + pdMS_TO_TICKS(FLASH_DEVICE_WAIT_MS);
+
+    while (!BSP_flashIsReady()) {
+        if ((int32_t)(xTaskGetTickCount() - deadline) >= 0) {
+            return false;
+        }
+        vTaskDelay(1U); // WAIT: the device's time, not the CPU's
+    }
+
+    return true;
+}
+//............................................................................
+static bool Sm_Flash_erase_(uint32_t address) {
+    if (!BSP_flashEraseSectorStart(address)) {
+        return false;
+    }
+
+    return Sm_Flash_waitReady_();
+}
+//............................................................................
+// One page per arm, out of the caller's buffer, with the device waited out
+// between pages. A length that crosses pages is split right here: the caller
+// hands over an address and a buffer, not a page plan.
+static bool Sm_Flash_writeDma_(uint32_t address, uint8_t const *src,
+                              uint32_t len) {
+    bool ok = true;
+
+    Sm_Flash_dmaWaiter_ = xTaskGetCurrentTaskHandle();
+
+    while (ok && (len > 0U)) {
+        uint32_t const room = FLASH_DEV_PAGE - (address % FLASH_DEV_PAGE);
+        uint32_t const n = (len > room) ? room : len;
+
+        BSP_flashProgramPageDma(address, src, n, &Sm_Flash_dmaDone_);
+
+        // WAIT: slot 1, the same one the read waits on and the same one a
+        // flash RPC completes on - one thread, one bus, one caller at a time.
+        if (ulTaskNotifyTakeIndexed(FLASH_DONE_INDEX, pdTRUE,
+                                    pdMS_TO_TICKS(FLASH_DMA_WAIT_MS)) == 0U) {
+            SM_onAssert("fdma", __LINE__);
+            ok = false;
+            break;
+        }
+
+        ok = !BSP_flashDmaFailed() && Sm_Flash_waitReady_();
+        address += n;
+        src += n;
+        len -= n;
+    }
+
+    Sm_Flash_dmaWaiter_ = (TaskHandle_t)0;
+
+    return ok;
+}
+//............................................................................
 static SM_StatePtr Sm_Flash_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT;
 static SM_RetState Sm_Flash_ready_(void * const me,
                                    void const * const e) SM_HSM_RETT;
@@ -121,6 +189,16 @@ static SM_RetState Sm_Flash_ready_(void * const me,
                     req->ok = Sm_Flash_readDma_(req->address,
                                                 (uint8_t *)req->dst,
                                                 req->len);
+                    break;
+                }
+                case FLASH_OP_WRITE: {
+                    req->ok = Sm_Flash_writeDma_(req->address,
+                                                 (uint8_t const *)req->dst,
+                                                 req->len);
+                    break;
+                }
+                case FLASH_OP_ERASE: {
+                    req->ok = Sm_Flash_erase_(req->address);
                     break;
                 }
                 default: {

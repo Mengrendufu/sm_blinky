@@ -52,4 +52,13 @@ bool Flash_probe(void);
 // data is in dst.
 bool Flash_readBlock(uint32_t address, void *dst, uint32_t len);
 
+// Write len bytes from src, any length and any address: the flash thread
+// splits the range at page boundaries and waits the device out between
+// pages. The device's 0.7 to 3 ms per page and 130 to 160 ms per sector are
+// slept through, not spun - the CPU belongs to whatever else has work.
+bool Flash_writeBlock(uint32_t address, void const *src, uint32_t len);
+
+// Erase one 4 KB sector: what a write needs first. Same sleeping wait.
+bool Flash_eraseSector(uint32_t address);
+
 #endif // FLASH_H_

@@ -46,9 +46,16 @@ void BSP_flashProbe(void);
 // nothing else may touch the bus meanwhile.
 bool BSP_flashRead(uint32_t address, uint8_t *dst, uint32_t len);
 
-// Erase one 4 KB sector. `address` must be sector aligned. Measured ~130 ms
-// on this part (see the note next to FLASH_ERASE_MS in bsp_flash.c).
+// Erase one 4 KB sector. `address` must be sector aligned (a misaligned one
+// would erase the sector around it), and this form spins on the device until
+// it is done - blockingly, for the bootloader and the self test. Measured
+// ~130 to 160 ms on this part.
 bool BSP_flashEraseSector(uint32_t address);
+
+// The same erase without the wait: it starts the erase, and the caller polls
+// BSP_flashIsReady(). A run time caller uses this one, because the erase is
+// the device's time and a yielding wait costs no CPU at all.
+bool BSP_flashEraseSectorStart(uint32_t address);
 
 // Program up to one 256 B page: `address` must be page aligned and the range
 // must stay inside that page. Waits the device out before returning.
@@ -71,6 +78,11 @@ void BSP_flashSelfTestStart(void);
 // done(false). The callback runs in interrupt context - keep it short, and do
 // not call anything that blocks, and do not start another read from it.
 typedef void (*BSP_flashDoneCb)(bool ok);
+
+// The NOR program page: a write may be 1 to this many bytes, and it must not
+// cross one of these boundaries (the device wraps and reprograms the start of
+// the page). The page itself, datasheet 7.2.x.
+#define FLASH_DEV_PAGE 256UL
 
 // One arm moves this much and no more. 32 KB is ~15 ms on the wire, which is
 // the window the caller gets between chunks; the size is here because the

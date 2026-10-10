@@ -148,3 +148,32 @@ bool Flash_readBlock(uint32_t address, void *dst, uint32_t len) {
 
     return Flash_submit_(&req) && req.ok;
 }
+//............................................................................
+// Any length, from anywhere: the flash thread splits it at page boundaries
+// and waits the device out between them. The caller's buffer stays borrowed
+// for the whole call.
+bool Flash_writeBlock(uint32_t address, void const *src, uint32_t len) {
+    Flash_Req req;
+
+    req.op = FLASH_OP_WRITE;
+    req.address = address;
+    req.dst = (void *)(uintptr_t)src;
+    req.len = len;
+    Flash_initReq_(&req);
+
+    return Flash_submit_(&req) && req.ok;
+}
+//............................................................................
+// One 4 KB sector: the erase the write side needs and reads never do. The
+// 130~160 ms the device takes are slept through, not spun.
+bool Flash_eraseSector(uint32_t address) {
+    Flash_Req req;
+
+    req.op = FLASH_OP_ERASE;
+    req.address = address;
+    req.dst = (void *)0;
+    req.len = 0U;
+    Flash_initReq_(&req);
+
+    return Flash_submit_(&req) && req.ok;
+}

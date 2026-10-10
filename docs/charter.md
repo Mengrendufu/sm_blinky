@@ -217,7 +217,7 @@ tracer 的出口只有一个：idle 任务里的 `vApplicationIdleHook()` → `S
 `flashDmaTx_`（Ch5 MEM→PERIPH，`__HAL_LINKDMA` + NVIC + `DMA1_Channel5_IRQHandler` 都已就位），钩子是 **`HAL_SPI_TxCpltCallback`**
 （`SPI_DMATransmitCplt` 走 TX 分支，不是 Rx/TxRx），且 HAL 在双线模式下**自己清 OVR**（源码注释 "received data is not read"）⇒ 不需要假 RX 缓冲、也不需要读侧那个 in-place 技巧。
    **但 DMA 只拿掉这笔账的一小角**：一笔 4 KB 写入 = payload 搬运 16 × 114 µs ≈ **1.8 ms**（DMA 可全免），而擦除 130~160 ms（实测）+ 16 页 tPP 11~48 ms 是**器件时间**，DMA 一分不省；
-真正占住线程 99% 的是 `BSP_flashWaitReady_` 的**自旋**。两件事：① payload 走 TX DMA —— **已完成**（2026-10-10，见 §12 写侧）；② BUSY 等待改成让出式 —— **一半**：BSP 只提供 `BSP_flashIsReady()` 一次轮询，让出循环随写者一起落地（BL 不链 FreeRTOS，等待策略进不了 `bsp_flash.c`）。
+真正占住线程 99% 的是 `BSP_flashWaitReady_` 的**自旋**。两件事**都已落地（2026-10-10，已上板，见 §12 写侧）**：① payload 走 TX DMA（`BSP_flashProgramPageDma`）；② 擦除拆成 `BSP_flashEraseSectorStart()` + 轮询、应用侧 `Sm_Flash_waitReady_()` 让出式等器件（`vTaskDelay(1)`；BL 不链 FreeRTOS，所以等待策略留在应用层）。**实测**：擦除 167 ticks、跨页 300 字节写回读全对、擦除窗口内 idle 照跑（`nFree = 16`，夹进 4 条记录）。**剩下的**：AO_FLASH 的请求语义与状态机（记录格式、扇区归属、谁合并谁落盘）—— 那是下一轮设计。
    另需一并定：新 op（`FLASH_OP_ERASE` / `FLASH_OP_WRITE`）走**同一条 RPC** 与同一条"缓冲借用"语义；boot/BL 侧继续用自旋版（BL 没有调度器，不能阻塞——与读侧"boot 自旋、运行期阻塞"同一个拆分理由）；
 **扇区归属**要先划（资产占 `0x00081000` 起的三槽区，约 460 KB，写者不得碰）。
 7. **绘制单价（2026-10-09 实测，已结案）**：同一 72×72 方块扫半径 —— `radius 0` 1,106 µs、`12` 3,673 µs、`LV_RADIUS_CIRCLE` 4,774 µs。两点解出：**简单行 ≈ 213 ns/px，掩码行 ≈ 920 ns/px（4.3×）**；两点模型对 `radius 12` 偏乐观（预测 2,329 µs vs 实测 3,673 µs），说明圆角并不只让上下 `rout` 行走掩码。
@@ -315,7 +315,7 @@ SRAM 布局：背景槽只在资产表里存在"图片形态"条目时才占位�
 
 **数字**：命令/地址仍逐字节，数据段分块（步骤 A，已上板）—— 同址读 1024 B，**逐字节 458 ms → 分块 196 ms**（1.0 → **2.35 MB/s**；18 MHz 总线理论 2.25 MB/s，已到线速）。代价：text 174,136 → **176,844**（+2,708 B）、bss 57,104 → **57,264**（+160 B），含故障转存工具，未拆分。
 
-**验证**：① 临时探针逐字节比对 DMA 读与阻塞读（1024 B：不符 **0**、回调 **1** 次；探针已退休，id 65 不回收）；② 常态检查 = 第 60 拍经 `Flash_readBlock()` 读资产头，**记录 46 = `01 41 53 54 31`**（`AST1`）；③ 断言 0、故障 0、第 60 拍不再复位。**待补**：块间 15 ms 让 idle 泵 tracer 这条只有机制、没有实测。
+**验证**：① 临时探针逐字节比对 DMA 读与阻塞读（1024 B：不符 **0**、回调 **1** 次；探针已退休，id 65 不回收）；② 常态检查 = 第 60 拍经 `Flash_readBlock()` 读资产头，**记录 46 = `01 41 53 54 31`**（`AST1`）；③ 断言 0、故障 0、第 60 拍不再复位。**已实测（2026-10-10）**：擦除窗口里 idle 照跑 —— 两条标记之间夹进 **4 条记录**，且 tracer 的 `nFree = 16`（空闲块满着）；同一位置换成自旋则是 `nFree = 0`、记录被静默丢弃。所以「让出式等待换 CPU」这条现在有数字了。
 
 **写侧（2026-10-10，同一批）**：`BSP_flashProgramPageDma()` 一次 arm **一页**（≤256 B，页对齐、不跨页，护栏与阻塞版相同），一次事务 = WREN → 0x02 + 地址 → `HAL_SPI_Transmit_DMA` → 完成中断拉高 CS。钩子是 **`HAL_SPI_TxCpltCallback`**（`SPI_DMATransmitCplt` 调回调前等 TXE+BSY，所以此刻拉 CS 正确），且 HAL 在双线模式下**自己清 OVR** ⇒ **不需要假 RX 缓冲**。**等待策略不在 BSP**：只给 `BSP_flashIsReady()` 一次轮询，因为 `bsp_flash.c` 也被 bootloader 链、而 BL 没有 FreeRTOS。验证：探针（已退休，id 68/69/70/71 不回收）= 最后 4 KB 扇区上 擦 → DMA 写 → 让出式等就绪 → DMA 读回，两轮：**整页 256 B 不符 0/256**；**页内偏移 8 处写 5 字节、窗口其余保持 `FF`、跨页请求被拒**（`len` 1..256、任意页内偏移，上限是「不跨页」）。**副作用发现**：第二轮的收尾记录被 tracer 静默丢弃（读目标 RAM 得 `nFree = 0`）⇒ 探针式验证要另开 RAM 结果块给 J-Link 读；且 CPU-bound 的擦除自旋能把 idle 泵饿穿，这是 §8.6 ②「让出式等待」的实测理由。代价：**0 B** —— 探针拆掉后这三个入口（`BSP_flashProgramPageDma` / `BSP_flashIsReady` / `HAL_SPI_TxCpltCallback`）没有任何调用者，`--gc-sections` 把它们整段丢掉，text/bss 与改动前**逐字节一致**（176,844 / 57,264，实测）；写者落地时它们才会真正进镜像。
 

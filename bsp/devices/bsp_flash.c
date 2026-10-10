@@ -38,7 +38,6 @@
 
 // Geometry and the two waits that matter: a 4 KB sector erase is 45 ms
 // typical and 400 ms worst case, a 256 byte page program 0.7 ms / 3 ms.
-#define FLASH_DEV_PAGE      256UL   // NOR program page, datasheet 7.2.x
 // (not FLASH_PAGE_SIZE: the HAL already uses that name for the internal
 //  flash page size, and redefining it would lie to the HAL's own driver)
 #define FLASH_SECTOR_SIZE   4096UL
@@ -799,12 +798,25 @@ static bool BSP_flashWaitReady_(uint32_t timeoutMs) {
     }
 }
 //............................................................................
-static bool BSP_flashEraseSector_(uint32_t address) {
+// Start one sector erase and return: the device is erasing when this comes
+// back, so the caller polls BSP_flashIsReady() for as long as it likes. That
+// split is what lets a run time caller sleep through the device's time
+// instead of spinning in it (see sm_flash.c); the blocking form below is this
+// plus the spin, which is what the bootloader needs - it has no scheduler.
+//
+// The alignment guard is here and not in the old blocking path: a sector
+// erase command with any other address erases the sector that contains it,
+// which is a silent way to lose data next door.
+bool BSP_flashEraseSectorStart(uint32_t address) {
     uint8_t const addr[3] = {
         (uint8_t)(address >> 16),
         (uint8_t)(address >> 8),
         (uint8_t)address
     };
+
+    if ((address % FLASH_SECTOR_SIZE) != 0U) {
+        return false;
+    }
 
     if (!BSP_flashWriteEnable_()) {
         return false;
@@ -812,7 +824,12 @@ static bool BSP_flashEraseSector_(uint32_t address) {
 
     BSP_flashExchange_(FLASH_SECTOR_CMD, addr, 3U, (uint8_t *)0, 0U);
 
-    return BSP_flashWaitReady_(FLASH_ERASE_MS);
+    return true;
+}
+//............................................................................
+static bool BSP_flashEraseSector_(uint32_t address) {
+    return BSP_flashEraseSectorStart(address)
+           && BSP_flashWaitReady_(FLASH_ERASE_MS);
 }
 //............................................................................
 static bool BSP_flashProgram_(uint32_t address, uint8_t const *data,
