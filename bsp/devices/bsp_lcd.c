@@ -162,6 +162,8 @@ static uint16_t BSP_lcdReadGram_(uint16_t x, uint16_t y);
 static void BSP_lcdReadRdst_(uint8_t out[4]);
 static bool BSP_lcdReady_(void);
 static bool BSP_lcdFilled_(void);
+static void BSP_lcdWritePixel_(uint16_t x, uint16_t y, uint16_t colour);
+static bool BSP_lcdWritable_(void);
 static void BSP_dbgLcdBootId_(void);
 
 //============================================================================
@@ -218,19 +220,25 @@ void BSP_lcdInit(void) {
             continue;
         }
 
+        // Is the panel taking writes at all? Eight points, tens of
+        // microseconds. Only once that is true is the whole frame worth
+        // clearing.
+        if (!BSP_lcdWritable_()) {
+            HAL_Delay(LCD_RETRY_SETTLE_MS);
+            continue;
+        }
+
         // Frame memory first, display on second: the panel starts scanning
         // GRAM the moment DISPON lands, and until this clear it holds
-        // whatever the glass powered up with.
+        // whatever the glass powered up with. This runs once per pass that
+        // already proved it can take writes, and its own read back is what
+        // catches a clear that only reached part of the frame.
         BSP_lcdFill_(LCD_BLACK);
 
         if (BSP_lcdFilled_()) {
             break;
         }
 
-        // The fill did not land, so the panel is not out of reset yet. Keep
-        // the passes close together: the window between "not yet" and "now"
-        // is only ~112 ms wide, and waiting longer between passes would just
-        // miss it later.
         HAL_Delay(LCD_RETRY_SETTLE_MS);
     }
 
@@ -463,17 +471,53 @@ static uint16_t BSP_lcdReadGram_(uint16_t x, uint16_t y) {
 // frame: a fill that only reached part
 // of the frame memory reads back as noise here, which is the cold start
 // symptom this loop exists to catch.
+// The frame is black where these eight points are: both halves of the glass,
+// top and bottom. Eight and not four because the failure being hunted is a
+// clear that only reached part of the frame, and the old set - all of it down
+// the x = 0 column - could not see a right half that never took the write.
 static bool BSP_lcdFilled_(void) {
-    static uint16_t const ys[4] = {0U, 159U, 160U, 319U};
+    static uint16_t const xs[2] = {0U, LCD_WIDTH - 1U};
+    static uint16_t const ys[4] = {0U, 159U, 160U, LCD_HEIGHT - 1U};
     uint8_t i;
+    uint8_t j;
 
-    for (i = 0U; i < 4U; ++i) {
-        if (BSP_lcdReadGram_(0U, ys[i]) != LCD_BLACK) {
-            return false;
+    for (i = 0U; i < 2U; ++i) {
+        for (j = 0U; j < 4U; ++j) {
+            if (BSP_lcdReadGram_(xs[i], ys[j]) != LCD_BLACK) {
+                return false;
+            }
         }
     }
 
     return true;
+}
+//............................................................................
+// One pixel, as its own little window: the panel's frame memory is addressed
+// through CASET/RASET, so a single point is a window of one.
+static void BSP_lcdWritePixel_(uint16_t x, uint16_t y, uint16_t colour) {
+    BSP_lcdSetWindow(x, y, x, y);
+    BSP_lcdWriteDat_(colour);
+}
+//............................................................................
+// Can this panel take a write yet? The same eight points, written black and
+// read back. This is the authority, not the ready bit: measured on this panel
+// the bit comes up at 383 ms both warm and cold, while a cold power on needs
+// 7.9 s before writes land - and RDDST reads the same 00 53 00 20 the whole
+// time. Tens of microseconds against 13 ms for a full clear, which is what
+// lets the bring-up loop retry every 20 ms without loading the bus.
+static bool BSP_lcdWritable_(void) {
+    static uint16_t const xs[2] = {0U, LCD_WIDTH - 1U};
+    static uint16_t const ys[4] = {0U, 159U, 160U, LCD_HEIGHT - 1U};
+    uint8_t i;
+    uint8_t j;
+
+    for (i = 0U; i < 2U; ++i) {
+        for (j = 0U; j < 4U; ++j) {
+            BSP_lcdWritePixel_(xs[i], ys[j], LCD_BLACK);
+        }
+    }
+
+    return BSP_lcdFilled_();
 }
 //............................................................................
 // Sample both halves of the frame down the left edge. If the fill only
