@@ -104,14 +104,6 @@
 static bool lcd_dbgBootDispOn_;
 static uint16_t lcd_dbgBootId_;
 
-// == DEBUG: the readiness mask of the *first* refusing pass and the OR of
-// every refusing pass, plus how many refused. The last pass is the one that
-// succeeded, so its mask is always zero - which is what the first attempt at
-// this measured, and it said nothing.
-static volatile uint8_t lcd_dbgFirstMask_;
-static volatile uint8_t lcd_dbgOrMask_;
-static volatile uint8_t lcd_dbgBadPasses_;
-
 
 
 
@@ -203,33 +195,6 @@ void BSP_lcdInit(void) {
     if (sinceReset < LCD_RESET_SETTLE_MS) {
         HAL_Delay(LCD_RESET_SETTLE_MS - sinceReset);
     }
-
-    // == DEBUG: visual test, retire with the masks below. Three bus level
-    // changes (69 vs 97 ns write cycle, a gap after the write, a gap after
-    // the read) left the cold start mask at exactly 0x7F, only the last point
-    // passing. The eye answers what they cannot: light the glass, then paint
-    // it white over and over with no readiness logic at all. White means the
-    // writes land and the read back lies; noise means a cold panel really
-    // does refuse writes for seconds.
-    HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN, GPIO_PIN_SET);
-
-    // The full reset chain first, or the panel would still be asleep and
-    // nothing could land: sleep out and the register table exactly as the
-    // real path sends them, then the display on.
-    BSP_lcdWriteCmd_(LCD_SWRESET_CMD);
-    HAL_Delay(LCD_SWRESET_SETTLE_MS);
-    BSP_lcdWriteCmd_(LCD_SLPOUT_CMD);
-    HAL_Delay(LCD_SLPOUT_SETTLE_MS);
-    BSP_lcdPanelInit_();
-    BSP_lcdWriteCmd_(LCD_DISPON_CMD);
-
-    for (attempt = 0U; attempt < 30U; ++attempt) {
-        BSP_lcdFill_(0xFFFFU);
-        HAL_Delay(200U);
-    }
-
-    lcd_dbgBootDispOn_ = true;
-    return;
 
     for (attempt = 0U; attempt < LCD_INIT_ATTEMPTS; ++attempt) {
         // Sleep-out and the software reset go out once. Note 1 ties the NVM
@@ -501,22 +466,12 @@ void DMA1_Channel6_IRQHandler(void) {
 // read (the first value back is not the pixel), then the pixel itself.
 //............................................................................
 static uint16_t BSP_lcdReadGram_(uint16_t x, uint16_t y) {
-    volatile uint32_t spin;
     uint16_t value;
 
     BSP_lcdSetWindow(x, y, x, y);
     BSP_lcdWriteCmd_(LCD_RAMRD_CMD);
     (void)BSP_lcdReadDat_();
     value = BSP_lcdReadDat_();
-
-    // Same reason as BSP_lcdWritePixel_, and the same signature: with no gap
-    // here, a cold power on reports seven of the eight points as not
-    // black and keeps exactly the last one read - every time, through a bus
-    // cycle change and a write side gap alike. That is a sequence being cut
-    // short, and the read sequence is the one with no gap in it.
-    for (spin = 0U; spin < 200U; ++spin) {
-        __NOP();
-    }
 
     return value;
 }
@@ -549,21 +504,9 @@ static bool BSP_lcdFilled_(void) {
 // One pixel, as its own little window: the panel's frame memory is addressed
 // through CASET/RASET, so a single point is a window of one.
 static void BSP_lcdWritePixel_(uint16_t x, uint16_t y, uint16_t colour) {
-    volatile uint32_t spin;
-
     BSP_lcdSetWindow(x, y, x, y);
     BSP_lcdWriteDat_(colour);
 
-    // Let the write finish before the next window arrives. Measured symptom
-    // that asks for this: on a cold power on the eight point test refused
-    // seven points and kept exactly the last one written (mask 0x7F, every
-    // time, with both a 69 ns and a 97 ns bus cycle) - the signature of a new
-    // CASET aborting a write that has not landed yet, which a panel whose
-    // supply is still low cannot finish in time. A few microseconds here
-    // costs nothing: the test runs eight of these.
-    for (spin = 0U; spin < 200U; ++spin) {
-        __NOP();
-    }
 }
 //............................................................................
 // Can this panel take a write yet? The same eight points, written black and
@@ -575,7 +518,6 @@ static void BSP_lcdWritePixel_(uint16_t x, uint16_t y, uint16_t colour) {
 static bool BSP_lcdWritable_(void) {
     static uint16_t const xs[2] = {0U, LCD_WIDTH - 1U};
     static uint16_t const ys[4] = {0U, 159U, 160U, LCD_HEIGHT - 1U};
-    uint8_t mask = 0U;
     uint8_t i;
     uint8_t j;
 
@@ -585,25 +527,7 @@ static bool BSP_lcdWritable_(void) {
         }
     }
 
-    for (i = 0U; i < 2U; ++i) {
-        for (j = 0U; j < 4U; ++j) {
-            if (BSP_lcdReadGram_(xs[i], ys[j]) != LCD_BLACK) {
-                mask |= (uint8_t)(1U << ((i * 4U) + j));
-            }
-        }
-    }
-
-    // == DEBUG: 0xFF means nothing landed anywhere (a power story); a partial
-    // mask means the write itself is marginal. Retire once that is known.
-    if (mask != 0U) {
-        if (lcd_dbgBadPasses_ == 0U) {
-            lcd_dbgFirstMask_ = mask;
-        }
-        lcd_dbgOrMask_ |= mask;
-        ++lcd_dbgBadPasses_;
-    }
-
-    return (mask == 0U);
+    return BSP_lcdFilled_();
 }
 //............................................................................
 // Sample both halves of the frame down the left edge. If the fill only
@@ -716,17 +640,13 @@ static void BSP_lcdFsmcInit_(void) {
     // margin on the cycle, which is thin for a part whose own timing moves
     // with supply and temperature.
     //
-    // 1/4 is kept for now: 27.8 / 69.4 / 97.2 ns, 47% of margin. The cost is
-    // real - a full-screen flush goes from 5.33 ms to 7.46 ms - and it is
-    // being paid because the cold-start measurement changed: on a cold power
-    // on the eight point readiness test refused seven points and let the last
-    // one through (firstMask 0x7F, 155 refusing passes), which is a marginal
-    // write, not a panel that is simply not up yet. An earlier attempt at
-    // widening was written off as having moved nothing (3018 against 3194 ms)
-    // but it only compared readiness times with 100 ms spacing and never
-    // looked at which points failed; this run does.
+    // 1/2 it is: 27.8 / 41.7 / 69.4 ns, 5% of margin on the cycle. 1/4 was
+    // tried (97.2 ns, 47% of margin) against the cold start and changed
+    // nothing measurable - the readiness mask stayed at exactly 0x7F and the
+    // refusing pass count was 131 against 155 - so the thin margin is not the
+    // problem and the faster pair is kept.
     write_timing.AddressSetupTime = 0x01;
-    write_timing.DataSetupTime = 0x04;
+    write_timing.DataSetupTime = 0x02;
     write_timing.BusTurnAroundDuration = 0;
     write_timing.AccessMode = FSMC_ACCESS_MODE_A;
 

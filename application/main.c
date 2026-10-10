@@ -74,8 +74,7 @@ int main(void) {
     // caller would then park on a completion that can never arrive - so this
     // order is the contract, not the timing luck that used to cover it.
     SST_init();
-    // TEMPORARY: the UI would paint over the visual test in bsp_lcd.c
-    // Ui_start();
+    Ui_start();
     Flash_start();
     AO_start();
     SST_start();
