@@ -33,7 +33,7 @@ int main(void) {
     MX_GPIO_Init();
     MX_USART1_UART_Init();
 
-    BSP_bootMark();   // 0: the board is up, nothing brought up yet
+    BSP_dbgBootMark();   // 0: the board is up, nothing brought up yet
 
     // BSP_init() brings up the panel - which waits out the sleep-out time
     // with HAL_Delay(), so it needs interrupts - then the SRAM and the SPI
@@ -45,7 +45,7 @@ int main(void) {
     // are kept and reported once a task runs - see Blinky_init.
     BSP_init();
 
-    BSP_bootMark();   // 1: panel out of sleep, SRAM and SPI flash ready
+    BSP_dbgBootMark();   // 1: panel out of sleep, SRAM and SPI flash ready
 
 
     // The asset the bootloader wrote, if it got that far. Read here on
@@ -55,7 +55,7 @@ int main(void) {
     // when it builds its screen.
     (void)Asset_load();
 
-    BSP_bootMark();   // 2: the asset is in the external SRAM, CRC checked
+    BSP_dbgBootMark();   // 2: the asset is in the external SRAM, CRC checked
 
     SST_sysTimer = xTimerCreateStatic(
         "sstTick",
@@ -79,7 +79,7 @@ int main(void) {
     AO_start();
     SST_start();
 
-    BSP_bootMark();   // 3: everything is created, the scheduler is next
+    BSP_dbgBootMark();   // 3: everything is created, the scheduler is next
 
     vTaskStartScheduler();
 

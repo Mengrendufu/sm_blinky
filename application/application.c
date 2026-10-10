@@ -21,10 +21,10 @@
 // itself: a push before the scheduler enters a FreeRTOS critical section
 // whose nesting counter still holds its sentinel, which leaves interrupts
 // masked for the rest of the boot (see bsp.c).
-void Application_bootReport(void) {
-    BSP_bootReport();
-    BSP_lcdBootReport();
-    Asset_bootReport();
+void Application_dbgBootReport(void) {
+    BSP_dbgBootReport();
+    BSP_dbgLcdBootReport();
+    Asset_dbgBootReport();
 }
 //............................................................................
 void AO_start(void) {

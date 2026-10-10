@@ -45,19 +45,19 @@ void BSP_Tracer_init(void);
 
 // Boot phase timing: mark at each phase boundary in main(), report once the
 // tracer is up. The marks themselves stay readable in RAM for a debugger.
-void BSP_bootMark(void);
-void BSP_bootReport(void);
+void BSP_dbgBootMark(void);
+void BSP_dbgBootReport(void);
 
 // The fault frame the reset handler left in the cross reset area, or zeroed
 // words when there was none (bsp/platform/stm32f1xx_it.c writes it).
-uint32_t *BSP_faultStash(void);
+uint32_t *BSP_dbgFaultStash(void);
 void BSP_ledOn(void);
 void BSP_ledOff(void);
 
 // Periodic maintenance record: remaining stack (in words, 1 word = 4 B) of
 // the calling task, the idle task and the timer task. Meant to be called from
 // a task every few ticks, to size the static stacks from measurements.
-void BSP_memReport(uint8_t selfRecId);
+void BSP_dbgMemReport(uint8_t selfRecId);
 
 
 #endif // BSP_H_

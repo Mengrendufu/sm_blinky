@@ -81,6 +81,7 @@ static uint8_t flashTxStatus_ = 0xFFU;
 static uint8_t flashRxStatus_ = 0xFFU;
 
 static uint8_t BSP_flashXfer_(uint8_t out);
+static void BSP_flashAddr_(uint8_t out[3], uint32_t address);
 static bool BSP_flashWriteBlock_(uint8_t const *tx, uint32_t len);
 static bool BSP_flashReadBlock_(uint8_t *rx, uint32_t len);
 static bool BSP_flashExchange_(uint8_t cmd, uint8_t const *tx, uint32_t txLen,
@@ -149,7 +150,7 @@ void BSP_flashInit(void) {
     (void)BSP_flashReadStatus_();
 }
 //............................................................................
-void BSP_flashProbe(void) {
+void BSP_dbgFlashProbe(void) {
     uint32_t const id = BSP_flashReadId_();
     uint8_t array[6];
 
@@ -195,11 +196,9 @@ bool BSP_flashProgramPage(uint32_t address, uint8_t const *data,
 }
 //............................................................................
 bool BSP_flashRead(uint32_t address, uint8_t *dst, uint32_t len) {
-    uint8_t const addr[3] = {
-        (uint8_t)(address >> 16),
-        (uint8_t)(address >> 8),
-        (uint8_t)address
-    };
+    uint8_t addr[3];
+
+    BSP_flashAddr_(addr, address);
 
     if ((dst == (uint8_t *)0) || (len == 0U) || (address >= FLASH_SIZE)
         || (len > (FLASH_SIZE - address))) {
@@ -283,11 +282,9 @@ static void BSP_flashDmaFinish_(bool ok) {
 //............................................................................
 void BSP_flashReadDma(uint32_t address, uint8_t *dst, uint32_t len,
                       BSP_flashDoneCb done) {
-    uint8_t const addr[3] = {
-        (uint8_t)(address >> 16),
-        (uint8_t)(address >> 8),
-        (uint8_t)address
-    };
+    uint8_t addr[3];
+
+    BSP_flashAddr_(addr, address);
 
     if ((dst == (uint8_t *)0) || (len == 0U) || (len > FLASH_DMA_CHUNK)
         || flashDmaBusy_ || (address >= FLASH_SIZE)
@@ -334,11 +331,9 @@ bool BSP_flashDmaFailed(void) {
 // milliseconds inside an ISR, and the caller is where the yield belongs.
 void BSP_flashProgramPageDma(uint32_t address, uint8_t const *data,
                              uint32_t len, BSP_flashDoneCb done) {
-    uint8_t const addr[3] = {
-        (uint8_t)(address >> 16),
-        (uint8_t)(address >> 8),
-        (uint8_t)address
-    };
+    uint8_t addr[3];
+
+    BSP_flashAddr_(addr, address);
 
     // Same page guard as the blocking BSP_flashProgramPage: the device wraps
     // inside a page and would silently program the start of it again.
@@ -487,14 +482,21 @@ static uint8_t BSP_flashXfer_(uint8_t out) {
     return in;
 }
 //............................................................................
+// Three address bytes, most significant first. Every command takes the same
+// 24 bit address, and the byte order is not something to get wrong in six
+// different places.
+static void BSP_flashAddr_(uint8_t out[3], uint32_t address) {
+    out[0] = (uint8_t)(address >> 16);
+    out[1] = (uint8_t)(address >> 8);
+    out[2] = (uint8_t)address;
+}
+//............................................................................
 // Read Data (03h): three address bytes, then the array comes back.
 static void BSP_flashReadArray_(uint8_t *out, uint8_t count,
                                 uint32_t address) {
-    uint8_t const addr[3] = {
-        (uint8_t)(address >> 16),
-        (uint8_t)(address >> 8),
-        (uint8_t)address
-    };
+    uint8_t addr[3];
+
+    BSP_flashAddr_(addr, address);
 
     BSP_flashExchange_(FLASH_READ_CMD, addr, 3U, out, count);
 }
@@ -639,11 +641,9 @@ static bool BSP_flashWaitReady_(uint32_t timeoutMs) {
 // erase command with any other address erases the sector that contains it,
 // which is a silent way to lose data next door.
 bool BSP_flashEraseSectorStart(uint32_t address) {
-    uint8_t const addr[3] = {
-        (uint8_t)(address >> 16),
-        (uint8_t)(address >> 8),
-        (uint8_t)address
-    };
+    uint8_t addr[3];
+
+    BSP_flashAddr_(addr, address);
 
     if ((address % FLASH_SECTOR_SIZE) != 0U) {
         return false;
@@ -665,11 +665,9 @@ static bool BSP_flashEraseSector_(uint32_t address) {
 //............................................................................
 static bool BSP_flashProgram_(uint32_t address, uint8_t const *data,
                               uint32_t len) {
-    uint8_t const addr[3] = {
-        (uint8_t)(address >> 16),
-        (uint8_t)(address >> 8),
-        (uint8_t)address
-    };
+    uint8_t addr[3];
+
+    BSP_flashAddr_(addr, address);
     uint32_t i;
 
     if (!BSP_flashWriteEnable_()) {

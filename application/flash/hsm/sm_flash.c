@@ -195,7 +195,7 @@ static SM_RetState Sm_Flash_ready_(void * const me,
 
             switch (req->op) {
                 case FLASH_OP_PROBE: {
-                    BSP_flashProbe();
+                    BSP_dbgFlashProbe();
                     req->ok = true;
                     break;
                 }

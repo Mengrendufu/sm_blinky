@@ -98,6 +98,6 @@ static void Ui_report_(void) {
 
     if (batch != Ui_reported_) {
         Ui_reported_ = batch;
-        BSP_memReport(BSP_TRACE_STACK_UI);
+        BSP_dbgMemReport(BSP_TRACE_STACK_UI);
     }
 }

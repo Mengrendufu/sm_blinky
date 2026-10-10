@@ -11,6 +11,7 @@
 
 #include "bsp.h"
 #include "bsp_flash.h"
+#include "bsp_sram.h"
 #include "crc32.h"
 
 //============================================================================
@@ -18,7 +19,7 @@
 // partition plan): a header sector, then the payload.
 #define ASSET_BASE   ASSET_NOR_BASE
 #define ASSET_DATA   (ASSET_BASE + 0x1000U)
-#define ASSET_SRAM   0x68000000U    // external IS62WV51216, FSMC bank 3
+#define ASSET_SRAM   BSP_SRAM_BASE  // external IS62WV51216, FSMC bank 3
 #define ASSET_MAGIC  0x41535431U    // "AST1", the word the bootloader writes
 #define ASSET_MAX    0x00080000U    // 512 KB: three fixed-size slots today
 #define ASSET_TRACE  45U
@@ -72,7 +73,7 @@ Asset Asset_load(void) {
 //............................................................................
 // The load runs before the scheduler, so its record waits for the tracer:
 // everything it needs is already in Asset_ by the time this is called.
-void Asset_bootReport(void) {
+void Asset_dbgBootReport(void) {
     SM_TRACE_BEGIN(ASSET_TRACE, 5)
         SM_TRACE_PAYLOAD_BE(Asset_.present ? 1U : 0U)
         SM_TRACE_PAYLOAD_BE((Asset_.crc32 >> 24) & 0xFFU)

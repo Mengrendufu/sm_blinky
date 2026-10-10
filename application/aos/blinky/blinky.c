@@ -70,7 +70,7 @@ static StackType_t  Blinky_stack[BLINKY_STACK_WORDS];
 // stack report every 4 s and the bench probes 30 s in - late enough that a
 // terminal is attached by then, which is the point of running them late.
 #define BLINKY_MEM_BEATS  8U
-#define BLINKY_PROBE_BEAT 60U
+#define BLINKY_DBG_PROBE_BEAT 60U
 
 static uint16_t blinky_beats;
 
@@ -95,7 +95,7 @@ static void Blinky_init(Blinky * const me, SST_Evt const * const ie) {
     // freeze HAL_GetTick() from the middle of the panel bring-up on. The
     // tracer itself is built, as it always was, first thing in BSP_init():
     // its constructor is plain RAM writes.
-    Application_bootReport();
+    Application_dbgBootReport();
 
     (void)ie;
     SM_Hsm_init_(&me->sm_hsm_, (SM_InitHandler)Blinky_TOP_initial_);
@@ -157,14 +157,15 @@ static void Blinky_maintenance_(void) {
     uint16_t const beat = ++blinky_beats;
 
     if ((beat % BLINKY_MEM_BEATS) == 0U) {
-        BSP_memReport(BSP_TRACE_STACK_BLINKY);
+        BSP_dbgMemReport(BSP_TRACE_STACK_BLINKY);
     }
 
-    if (beat == BLINKY_PROBE_BEAT) {
-        BSP_lcdCheck();
+    // == DEBUG: the probe set that runs 30 s in, once per boot ==
+    if (beat == BLINKY_DBG_PROBE_BEAT) {
+        BSP_dbgLcdCheck();
         // The flash belongs to the flash thread at run time, so the probe
         // goes through its inbox like any other request.
-        (void)Flash_probe();
+        (void)Flash_dbgProbe();
 
         // And the same bus again for the run time read, which is the only
         // caller of the DMA path: the header of the image the bootloader

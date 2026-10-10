@@ -13,7 +13,7 @@
 //============================================================================
 // The boot phase's records, including the timeline the tracer cannot push
 // itself: call once, from the first task to run.
-void Application_bootReport(void);
+void Application_dbgBootReport(void);
 
 void AO_start(void);
 

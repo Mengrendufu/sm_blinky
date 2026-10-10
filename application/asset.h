@@ -45,11 +45,11 @@ typedef struct {
 } Asset;
 
 // Read and verify the asset. Call once, from main(). The record it used to
-// push is deferred to Asset_bootReport(), called once the tracer is up.
+// push is deferred to Asset_dbgBootReport(), called once the tracer is up.
 Asset Asset_load(void);
 
 // The load's result again, as a record, for the first task to report.
-void Asset_bootReport(void);
+void Asset_dbgBootReport(void);
 
 // What Asset_load() found. Never NULL.
 Asset const *Asset_get(void);

@@ -24,8 +24,8 @@
 // SM_Trace_push enter a FreeRTOS critical section (ports/sm_port.h), and
 // before the scheduler its nesting counter still holds the sentinel, so
 // interrupts stay masked from then on. That is why every record now waits for
-// a task (Application_bootReport, from Blinky_init) and bring-up keeps its
-// own facts instead (BSP_bootMark / BSP_bootReport, the panel's and the
+// a task (Application_dbgBootReport, from Blinky_init) and bring-up keeps its
+// own facts instead (BSP_dbgBootMark / BSP_dbgBootReport, the panel's and the
 // asset's own deferred reports). Pool and queue are file statics: no
 // allocation.
 void BSP_Tracer_init(void) {
@@ -54,35 +54,36 @@ void BSP_Tracer_init(void) {
 }
 //............................................................................
 //============================================================================
-// Boot phase timing, the replacement for the records a deferred tracer cannot
+// == DEBUG: boot phase timing ==
+// The replacement for the records a deferred tracer cannot
 // push: four marks, three deltas, reported as one record once the tracer is
 // up. Before the move above the tick was frozen from the first record on, so
 // this is also the check that the boot clock works at all.
-#define BSP_BOOT_MARKS 4U
+#define BSP_DBG_BOOT_MARKS 4U
 
-static uint32_t BSP_bootMs_[BSP_BOOT_MARKS];
-static uint8_t BSP_bootMarkIdx_;
+static uint32_t BSP_dbgBootMs_[BSP_DBG_BOOT_MARKS];
+static uint8_t BSP_dbgBootMarkIdx_;
 
-void BSP_bootMark(void) {
-    if (BSP_bootMarkIdx_ < BSP_BOOT_MARKS) {
-        BSP_bootMs_[BSP_bootMarkIdx_] = HAL_GetTick();
-        ++BSP_bootMarkIdx_;
+void BSP_dbgBootMark(void) {
+    if (BSP_dbgBootMarkIdx_ < BSP_DBG_BOOT_MARKS) {
+        BSP_dbgBootMs_[BSP_dbgBootMarkIdx_] = HAL_GetTick();
+        ++BSP_dbgBootMarkIdx_;
     }
 }
 //............................................................................
 // The three deltas in milliseconds, two bytes each: panel bring-up, asset
 // load, and everything from there to the scheduler.
-void BSP_bootReport(void) {
-    uint32_t const panel = BSP_bootMs_[1] - BSP_bootMs_[0];
-    uint32_t const asset = BSP_bootMs_[2] - BSP_bootMs_[1];
-    uint32_t const rest = BSP_bootMs_[3] - BSP_bootMs_[2];
+void BSP_dbgBootReport(void) {
+    uint32_t const panel = BSP_dbgBootMs_[1] - BSP_dbgBootMs_[0];
+    uint32_t const asset = BSP_dbgBootMs_[2] - BSP_dbgBootMs_[1];
+    uint32_t const rest = BSP_dbgBootMs_[3] - BSP_dbgBootMs_[2];
 
     // A fault from a previous life leaves its frame in the cross reset area
     // (bsp/platform/stm32f1xx_it.c). Reported here rather than on the way up:
     // the tracer does not exist until a task runs, and a fault is otherwise
     // silent - two LED blinks, a reset, nothing on the wire.
     {
-        uint32_t * const s = BSP_faultStash();
+        uint32_t * const s = BSP_dbgFaultStash();
 
         if ((s[0] | s[1] | s[3]) != 0U) {
             // 66: the instruction that faulted, 4 bytes, then the fault's own
@@ -141,22 +142,22 @@ void BSP_init(void) {
 // Stack headroom of the three tasks that always exist. The values are the
 // minimum free stack ever seen, in words (1 word = 4 B); they are the numbers
 // the static stack sizes get sized from.
-static void BSP_traceStack_(uint8_t recId, uint16_t words) {
+static void BSP_dbgTraceStack_(uint8_t recId, uint16_t words) {
     SM_TRACE_BEGIN(recId, 2)
         SM_TRACE_PAYLOAD_BE(words >> 8)
         SM_TRACE_PAYLOAD_BE(words)
     SM_TRACE_END()
 }
 //............................................................................
-void BSP_memReport(uint8_t selfRecId) {
+void BSP_dbgMemReport(uint8_t selfRecId) {
     TaskHandle_t const idle = xTaskGetIdleTaskHandle();
     TaskHandle_t const timer = xTimerGetTimerDaemonTaskHandle();
 
-    BSP_traceStack_(selfRecId,
+    BSP_dbgTraceStack_(selfRecId,
                     (uint16_t)uxTaskGetStackHighWaterMark((TaskHandle_t)0));
-    BSP_traceStack_(BSP_TRACE_STACK_IDLE,
+    BSP_dbgTraceStack_(BSP_TRACE_STACK_IDLE,
                     (uint16_t)uxTaskGetStackHighWaterMark(idle));
-    BSP_traceStack_(BSP_TRACE_STACK_TIMER,
+    BSP_dbgTraceStack_(BSP_TRACE_STACK_TIMER,
                     (uint16_t)uxTaskGetStackHighWaterMark(timer));
 }
 //............................................................................

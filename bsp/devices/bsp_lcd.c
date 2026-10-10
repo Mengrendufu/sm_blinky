@@ -90,8 +90,8 @@
 // critical section whose nesting counter still holds its sentinel - which
 // masks interrupts for the rest of the boot (and would hang the retry loop's
 // HAL_Delay in BSP_lcdInit).
-static bool lcd_bootDispOn_;
-static uint16_t lcd_bootId_;
+static bool lcd_dbgBootDispOn_;
+static uint16_t lcd_dbgBootId_;
 
 //============================================================================
 // Panel register sequence: the vendor table for this module (ALIENTEK
@@ -146,7 +146,7 @@ static void BSP_lcdPanelInit_(void);
 static void BSP_lcdFill_(uint16_t colour);
 static uint16_t BSP_lcdReadGram_(uint16_t x, uint16_t y);
 static bool BSP_lcdFilled_(void);
-static void BSP_lcdBootId_(void);
+static void BSP_dbgLcdBootId_(void);
 
 //============================================================================
 void BSP_lcdInit(void) {
@@ -218,10 +218,10 @@ void BSP_lcdInit(void) {
     // drawing, and the UI thread paints its first frame onto this black.
     HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN, GPIO_PIN_SET);
 
-    lcd_bootDispOn_ = true;
+    lcd_dbgBootDispOn_ = true;
 
     // One identification read: the "panel is talking" line on the bench.
-    BSP_lcdBootId_();
+    BSP_dbgLcdBootId_();
 }
 
 //............................................................................
@@ -434,7 +434,7 @@ static uint16_t BSP_lcdReadGram_(uint16_t x, uint16_t y) {
     return BSP_lcdReadDat_();
 }
 //............................................................................
-// Did the clear actually land? The same four points BSP_lcdCheck() reports
+// Did the clear actually land? The same four points BSP_dbgLcdCheck() reports
 // later, spread over both halves of the frame: a fill that only reached part
 // of the frame memory reads back as noise here, which is the cold start
 // symptom this loop exists to catch.
@@ -455,7 +455,7 @@ static bool BSP_lcdFilled_(void) {
 // landed in one of them these values say so, instead of leaving it to the
 // eye. The AO calls this, not bring-up: a boot-time record is not observable
 // from a terminal that cannot be attached until later (see AGENTS.md).
-void BSP_lcdCheck(void) {
+void BSP_dbgLcdCheck(void) {
     static uint16_t const ys[4] = {0U, 159U, 160U, 319U};
     uint8_t i;
 
@@ -473,27 +473,27 @@ void BSP_lcdCheck(void) {
 }
 
 //............................................................................
-static void BSP_lcdBootId_(void) {
-    lcd_bootId_ = BSP_lcdReadId_();
+static void BSP_dbgLcdBootId_(void) {
+    lcd_dbgBootId_ = BSP_lcdReadId_();
 }
 //............................................................................
 // The two bring-up lines, once a task is running: display on, and the
 // identification read the bench looks for.
-void BSP_lcdBootReport(void) {
-    if (lcd_bootDispOn_) {
+void BSP_dbgLcdBootReport(void) {
+    if (lcd_dbgBootDispOn_) {
         SM_TRACE_BEGIN(LCD_TRACE_DISP_ON, 0)
         SM_TRACE_END()
     }
 
-    if (lcd_bootId_ == LCD_ID_ST7789) {
+    if (lcd_dbgBootId_ == LCD_ID_ST7789) {
         SM_TRACE_BEGIN(LCD_TRACE_RDID_OK, 2)
-            SM_TRACE_PAYLOAD_BE(lcd_bootId_ >> 8)
-            SM_TRACE_PAYLOAD_BE(lcd_bootId_)
+            SM_TRACE_PAYLOAD_BE(lcd_dbgBootId_ >> 8)
+            SM_TRACE_PAYLOAD_BE(lcd_dbgBootId_)
         SM_TRACE_END()
     } else {
         SM_TRACE_BEGIN(LCD_TRACE_RDID_BAD, 2)
-            SM_TRACE_PAYLOAD_BE(lcd_bootId_ >> 8)
-            SM_TRACE_PAYLOAD_BE(lcd_bootId_)
+            SM_TRACE_PAYLOAD_BE(lcd_dbgBootId_ >> 8)
+            SM_TRACE_PAYLOAD_BE(lcd_dbgBootId_)
         SM_TRACE_END()
     }
 }

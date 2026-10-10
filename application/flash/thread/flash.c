@@ -86,6 +86,6 @@ static void Flash_drain_(void) {
 //............................................................................
 static void Flash_report_(void) {
     if ((Flash_done_ == 1U) || ((Flash_done_ % FLASH_REPORT_EVERY) == 0U)) {
-        BSP_memReport(BSP_TRACE_STACK_FLASH);
+        BSP_dbgMemReport(BSP_TRACE_STACK_FLASH);
     }
 }

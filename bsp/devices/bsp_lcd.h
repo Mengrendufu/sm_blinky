@@ -43,11 +43,11 @@ void BSP_lcdInit(void);
 // Read a few frame memory pixels back and report them: four points down the
 // left edge, spanning both halves of the panel. Called by the AO some time
 // after bring-up, so the records land on a terminal that is already attached.
-void BSP_lcdCheck(void);
+void BSP_dbgLcdCheck(void);
 
 // The bring-up facts (display on, identification read) again, for the first
 // task to report: bring-up itself cannot push records (see bsp.c).
-void BSP_lcdBootReport(void);
+void BSP_dbgLcdBootReport(void);
 
 // Drawing API for the display layer: open a window, then push pixels into it.
 // The window writes go straight to the FSMC bus, so they belong to whoever

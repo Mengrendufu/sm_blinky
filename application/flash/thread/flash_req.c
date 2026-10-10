@@ -125,55 +125,36 @@ static void Flash_initReq_(Flash_Req * const req) {
     configASSERT(req->waiter != (TaskHandle_t)0);
 }
 //............................................................................
-bool Flash_probe(void) {
+static bool Flash_call_(Flash_Op op, uint32_t address, void *buf,
+                        uint32_t len) {
     Flash_Req req;
 
-    req.op = FLASH_OP_PROBE;
-    req.address = 0U;
-    req.dst = (void *)0;
-    req.len = 0U;
+    req.op = op;
+    req.address = address;
+    req.dst = buf;
+    req.len = len;
     Flash_initReq_(&req);
 
     return Flash_submit_(&req) && req.ok;
 }
 //............................................................................
+bool Flash_dbgProbe(void) {
+    return Flash_call_(FLASH_OP_PROBE, 0U, (void *)0, 0U);
+}
+//............................................................................
 bool Flash_readBlock(uint32_t address, void *dst, uint32_t len) {
-    Flash_Req req;
-
-    req.op = FLASH_OP_READ;
-    req.address = address;
-    req.dst = dst;
-    req.len = len;
-    Flash_initReq_(&req);
-
-    return Flash_submit_(&req) && req.ok;
+    return Flash_call_(FLASH_OP_READ, address, dst, len);
 }
 //............................................................................
 // Any length, from anywhere: the flash thread splits it at page boundaries
 // and waits the device out between them. The caller's buffer stays borrowed
 // for the whole call.
 bool Flash_writeBlock(uint32_t address, void const *src, uint32_t len) {
-    Flash_Req req;
-
-    req.op = FLASH_OP_WRITE;
-    req.address = address;
-    req.dst = (void *)(uintptr_t)src;
-    req.len = len;
-    Flash_initReq_(&req);
-
-    return Flash_submit_(&req) && req.ok;
+    return Flash_call_(FLASH_OP_WRITE, address, (void *)(uintptr_t)src, len);
 }
 //............................................................................
 // One 4 KB sector: the erase the write side needs and reads never do. The
 // 130~160 ms the device takes are slept through, not spun.
 bool Flash_eraseSector(uint32_t address) {
-    Flash_Req req;
-
-    req.op = FLASH_OP_ERASE;
-    req.address = address;
-    req.dst = (void *)0;
-    req.len = 0U;
-    Flash_initReq_(&req);
-
-    return Flash_submit_(&req) && req.ok;
+    return Flash_call_(FLASH_OP_ERASE, address, (void *)0, 0U);
 }

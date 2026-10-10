@@ -10,9 +10,15 @@
 #ifndef BSP_SRAM_H_
 #define BSP_SRAM_H_
 
+// The bank's base, and with it the one place that says what lives where: the
+// asset takes the first 450 KB (the bootloader writes it into the NOR from
+// 0x00081000 and Asset_load copies it here), the rest of the bank is free.
+// Both the SRAM driver and the asset loader take their base from here.
+#define BSP_SRAM_BASE 0x68000000U
+
 //============================================================================
 // IS62WV51216 (512K x 16, 1 MB) on FSMC Bank1 NOR/SRAM3:
-//   CS    = FSMC_NE3 (PG10)          -> bank base 0x68000000
+//   CS    = FSMC_NE3 (PG10)
 //   WE    = FSMC_NWE (PD5)           } shared with the LCD
 //   OE    = FSMC_NOE (PD4)           }
 //   D0..D15 = FSMC_D0..D15           } shared with the LCD

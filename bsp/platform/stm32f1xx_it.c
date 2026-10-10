@@ -73,7 +73,7 @@ static volatile uint32_t *IT_faultStash_(void)
   return (volatile uint32_t *)(void *)(((uintptr_t)&_snoinit) + 4U);
 }
 //............................................................................
-uint32_t *BSP_faultStash(void)
+uint32_t *BSP_dbgFaultStash(void)
 {
   return (uint32_t *)(void *)IT_faultStash_();
 }
