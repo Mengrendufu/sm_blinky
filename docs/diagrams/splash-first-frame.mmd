@@ -52,7 +52,7 @@ sequenceDiagram
             lvgl->>disp: flush_cb(area, px)
             disp->>panel: 开窗（CASET/RASET/RAMWR）
             disp->>dma: 起 DMA（源 = 条带，目的地址固定 MINC=0）
-            disp->>rtos: ulTaskNotifyTakeIndexed(槽 1)：真阻塞等完成（整屏超时 UI_DMA_FRAME_MS = 100 ms）
+            disp->>rtos: ulTaskNotifyTakeIndexed(槽 1)：真阻塞等完成（一条带 240x32 ≈ 1 ms，超时 UI_DMA_TIMEOUT_MS = 20 ms）
         end
         disp->>ui: lv_display_flush_is_last() ⇒ 整屏落定：清 Ui_framePending_，**点亮背光**（只一次）
     end

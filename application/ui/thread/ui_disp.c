@@ -60,12 +60,6 @@
 // 112 ns/px. The timeout catches a wedged channel, not a slow one.
 #define UI_DMA_TIMEOUT_MS 20U
 
-// A whole frame is 76,800 pixels, and the boot image comes from the external
-// SRAM: every pixel is a read there and a write to the panel, so the measured
-// cost is about 20 ms - the same order as this timeout, which is why the
-// whole-frame push cannot share the strip's.
-#define UI_DMA_FRAME_MS 100U
-
 // The panel's *display* path is not part of the proof the pages are drawn
 // under: it comes up on its own schedule (measured 3 to 8 s on a cold start,
 // worst case past 11), and until it does the glass holds whatever was last
