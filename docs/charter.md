@@ -12,9 +12,9 @@
 
 ## 2. 范围
 
-做：UI 线程骨架（普通线程 + 内嵌 HSM）、显示适配层（tick / flush / buffer）、LCD 绘制 API（`set_window` / `push_pixels` / `backlight`）、事件契约与收件箱。
+做：UI 线程骨架（普通线程 + 内嵌 HSM）、显示适配层（tick / flush / buffer）、LCD 绘制 API（规划名 `set_window` / `push_pixels` / `backlight` ⇒ **落地名 = `BSP_lcdSetWindow` / `BSP_lcdWritePixelsDma` / `BSP_lcdBacklight`** ✓）、事件契约与收件箱。
 
-本阶段不做：触摸与输入设备（`flush_wait_cb` 的位置与**阻塞语义**已在增量 5 落地，见 §11）；多状态菜单（先 `Ui_running` + 一个状态页）；LVGL 池往外挂 SRAM 迁（与 DMA 一起定）；图片/字体资源管理。
+本阶段不做：触摸与输入设备（`flush_wait_cb` 的位置与**阻塞语义**已在增量 5 落地，见 §11）；多状态菜单（先 `Ui_running` —— **落地成了 `Sm_Ui` 的 Demo 页** ✓ + 一个状态页）；LVGL 池往外挂 SRAM 迁（与 DMA 一起定）；图片/字体资源管理。
 
 ## 3. 所有权与边界
 
@@ -137,7 +137,7 @@ flash 不只是 UI 的资产存储：它还要放**升级镜像**、**配置/KV*
 
 ## 6. 预算
 
-- 内存：内部 SRAM 64 KB（= 0x10000 = 65,536 B，口径同 ST 链接脚本）。现状（2026-10-08 构建、上板通过；bootloader 落地后 app 从 `0x08004000` 起）：**`bss 56,968 / data 16` ≈ 86.9%**，text 168,844（`arm-none-eabi-size build/debug/sm_blinky.elf`；`_ebss` = `0x2000D894`）；其中 LVGL 池 24 KB、绘制缓冲 15 KB（240×32×2 = 15,360 B）、UI 栈 8 KB、其余任务栈与静态对象约 10 KB。UI 栈高水位（-O2）剩 **1320 words**，8 KB 很宽裕。扣掉链接脚本要求的 1.5 KB（heap 512 B + MSP 1 KB）后，真正可用的余量约 **8.4 KB**（`_ebss` 到 RAM 顶 10,092 B，扣掉 1.5 KB 保留）——够 flash 热路径那份 1~4 KB 的哑元缓冲，再要大件就得把池或绘制缓冲挪到外挂 SRAM。
+- 内存：内部 SRAM 64 KB（= 0x10000 = 65,536 B，口径同 ST 链接脚本）。现状（2026-10-12 构建、上板通过；bootloader 落地后 app 从 `0x08004000` 起）：**`bss 57,280 / data 12` ≈ 87.4%**（`_ebss` = 0x2000D9CC，到 RAM 顶 9,748 B），text 179,980（`arm-none-eabi-size build/debug/sm_blinky.elf`；`_ebss` = `0x2000D894`）；其中 LVGL 池 24 KB、绘制缓冲 15 KB（240×32×2 = 15,360 B）、UI 栈 8 KB、其余任务栈与静态对象约 10 KB。UI 栈高水位（-O2）剩 **1320 words**，8 KB 很宽裕。扣掉链接脚本要求的 1.5 KB（heap 512 B + MSP 1 KB）后，真正可用的余量约 **8.4 KB**（`_ebss` 到 RAM 顶 10,092 B，扣掉 1.5 KB 保留）——够 flash 热路径那份 1~4 KB 的哑元缓冲，再要大件就得把池或绘制缓冲挪到外挂 SRAM。
 - 刷屏（2026-10-09 上板实测，DMA 落地后）：**111.8 ns/像素**（整屏 76,800 px = 8,587 µs）／局部帧中位 **115.8 ns/像素**（8,448 px = 979 µs），另加渲染时间。原来的 155 ns/像素是 **CPU 搬运循环自己的极限**，不是总线价：同一批数据 CPU 搬到内部 SRAM 也要 152 ns/字 —— 而 DMA 搬到内部 SRAM 只要 84 ns/字。详情与七路量具表见 §11。
 - FSMC 写访问的**价目结构**（record 49 量具，已退休）：每条访问 ≈ **8 HCLK 固定开销** + 每半字 ≈ **4 HCLK**。于是半字 167 ns/px、**字 112 ns/px**（一次访问两个像素）。原来那条"整屏 5.33 ms 面板下界（69.4 ns/字）"因此**不可达**：那是纯总线周期，FSMC 的 AHB 侧固定开销压在它上面。**杠杆是访问宽度，不是谁在搬。**
 - 心跳：B 自适应，`LV_NO_TIMER_READY` 兜底 10 ms。一次全屏重绘会把 UI 线程独占 6~10 ms（≈ 一个心跳周期），这是知情代价。
@@ -158,7 +158,7 @@ flash 不只是 UI 的资产存储：它还要放**升级镜像**、**配置/KV*
   展开/对齐是净亏（+69 KB 且更慢）—— 正是 F1 两个等待周期加无 I-cache 时，代码膨胀转成取指开销的实证。
   `-O3 -flto` 最快（−16.5%）但要 +34 KB，留给 flash 不再紧张的时候。
   剩下的旋钮都在地板上：FSMC 写 5 HCLK = 69.4 ns 贴着面板 66 ns 规格；外挂 SRAM 读 DATAST 已是下限 1；
-  总线已是字（2 px/次访问）；flash 预取已开（`FLASH_ACR = 0x32`）；M3 无 SIMD；更大的绘制缓冲受 8.2 KB 余量所限，
+  总线已是字（2 px/次访问）；flash 预取已开（`FLASH_ACR = 0x32`）；M3 无 SIMD；更大的绘制缓冲受 8.0 KB 余量所限（2026-10-12 值），
   而 flush 本来只占 7%。⇒ **渲染侧的配置红利已经吃完**：再往下要么动 LVGL 绘制路径，要么动画面本身。
 
 ## 7. 刷屏阻塞点与 idle 的关系
