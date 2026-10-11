@@ -45,16 +45,6 @@
 // has no timer pending, and as the ceiling for what it does ask for.
 #define UI_FALLBACK_MS 10U
 
-// How many repaints the first frame's coverage check may ask for. Running out
-// leaves the glass in whatever state it is in - the counter says so - rather
-// than resetting a board that is otherwise running, the same shape as the
-// bring-up loop's budget.
-// Attempts for one whole-frame write, same reasoning as LCD_FRAME_TRIES:
-// with the sentinel now proven before every write, a failure means the panel
-// is not taking writes yet, so the only correct answer is to try again.
-// ~10 ms each, spanning roughly five seconds.
-#define UI_FRAME_TRIES 500U
-
 // How long the flush wait may spin before it calls the channel wedged: a
 // 240x32 strip is 7,680 pixels, about 1.3 ms at the measured 169 ns/px, which
 // leaves this bound two orders of magnitude of headroom.
@@ -138,20 +128,23 @@ static uint32_t Ui_flushPx_;
 static uint32_t Ui_flushUs_;
 static uint32_t Ui_lastFlushEnd_;
 
-// The first frame is a whole screen, so it is drawn under the same contract
-// as the splash: cleared first, sentinel down, and not counted as drawn until
-// the sentinel is gone (see BSP_lcdClearFrame). Until then the UI asks for
-// another repaint.
-static bool Ui_frameArmed_;
-static bool Ui_frameDone_;
+// A page's entry action sets this, and the first frame that answers it
+// clears it: it asks for one whole-screen repaint, and it is what holds the
+// glass dark until a whole picture is on it. There is no coverage proof
+// around that frame any more - the sentinel is a bring-up instrument now
+// (bsp_lcd.h) and the panel's writability was proven before the light came
+// on.
+static bool Ui_framePending_;
+// The glass stays dark until the first whole frame is on the frame memory:
+// bring-up leaves the backlight off (BSP_lcdInit) and this is where it comes
+// on. The same schedule keeps bring-up's sentinel off the user's eye.
+static bool Ui_backlightOn_;
 // The widget tree is built once, by the demo page's entry action - never
 // earlier. While the splash holds the glass there is nothing to draw, so a
 // flag and a state disagreeing can no longer put widget pixels on the panel.
 static bool Ui_built_;
 
-// == DEBUG: how many repaints that check needed, and whether the boot image
-// covered the frame; read over J-Link. ==
-volatile uint16_t Ui_dbgFrameTries_;
+// == DEBUG: whether the boot image holds the glass; read over J-Link. ==
 volatile uint8_t Ui_dbgSplashOk_;
 //============================================================================
 static void Ui_buildWidgets_(void);
@@ -246,8 +239,7 @@ bool Ui_dispSplash(void) {
     lv_obj_align(img, LV_ALIGN_CENTER, 0, 0);
     lv_obj_remove_flag(img, LV_OBJ_FLAG_CLICKABLE);
 
-    Ui_frameArmed_ = false;   // ask for the clear and its proof
-    Ui_frameDone_ = false;
+    Ui_framePending_ = true;   // this page starts with a whole screen
     Ui_dbgSplashOk_ = 1U;
 
     return true;
@@ -267,10 +259,9 @@ void Ui_dispDemo(void) {
 
     Ui_buildWidgets_();
 
-    // A whole screen, under the same contract: cleared and proven before
-    // anything is counted as drawn.
-    Ui_frameArmed_ = false;
-    Ui_frameDone_ = false;
+    // This page too starts with a whole screen: ask for one, and let the
+    // model be written out again on the next render.
+    Ui_framePending_ = true;
     Ui_shownValid_ = false;
 }
 //............................................................................
@@ -299,40 +290,16 @@ TickType_t Ui_dispHeartbeat(void) {
     // tree exists (each entry action rebuilds from a clean screen). There is
     // nothing to hold back.
 
-    // The first frame of a page is a whole screen, and it is drawn under the
-    // same contract the boot image was: cleared first, and the clear proven -
-    // a frame landing in part would leave the page before it showing in the
-    // part it missed, which is the ghost. Forcing the invalidation says out
-    // loud that this frame is a whole screen, instead of relying on an
-    // invalidation that happened while LVGL was held off.
-    if (!Ui_frameArmed_) {
-        if (!BSP_lcdClearFrame()) {
-            return pdMS_TO_TICKS(1U);   // the clear did not cover the frame
-        }
-
-        if (!BSP_lcdFrameArm()) {
-            return pdMS_TO_TICKS(1U);   // sentinel did not land; retry
-        }
-
+    // A page's first frame is a whole screen, so ask for the whole screen
+    // once, out loud, instead of trusting the invalidations the entry action
+    // happened to leave behind. Nothing is proven about it: see the flag's
+    // own note above.
+    if (Ui_framePending_) {
         lv_obj_invalidate(lv_screen_active());
-        Ui_frameArmed_ = true;
     }
 
     uint32_t const next = lv_timer_handler();
     uint32_t const took = Ui_us_() - before;
-
-    if (Ui_frameArmed_ && !Ui_frameDone_) {
-        if (BSP_lcdFrameCovered()) {
-            Ui_frameDone_ = true;
-        }
-        else if (++Ui_dbgFrameTries_ < UI_FRAME_TRIES) {
-            lv_obj_invalidate(lv_screen_active());
-            return pdMS_TO_TICKS(1U);   // repaint, and check again
-        }
-        else {
-            Ui_frameDone_ = true;       // out of tries: the counter says so
-        }
-    }
 
     if (Ui_flushes_ > 0U) {
         uint32_t const flushes = Ui_flushes_;
@@ -408,6 +375,19 @@ static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
     __DSB();
     BSP_lcdWritePixelsDma((uint16_t const *)(void const *)px, width * height);
     Ui_dmaWait_(UI_DMA_TIMEOUT_MS);
+
+    // The page's first frame is complete once its last dirty area is on the
+    // glass. That is the moment the light can come on - bring-up left the
+    // backlight off so the first picture is seen whole instead of seen being
+    // drawn - and the moment the pending whole-screen repaint is answered.
+    if (Ui_framePending_ && lv_display_flush_is_last(disp)) {
+        Ui_framePending_ = false;
+
+        if (!Ui_backlightOn_) {
+            Ui_backlightOn_ = true;
+            BSP_lcdBacklight(true);
+        }
+    }
 
     ++Ui_flushes_;
     Ui_flushPx_ += width * height;

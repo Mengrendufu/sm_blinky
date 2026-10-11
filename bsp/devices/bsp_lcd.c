@@ -35,18 +35,6 @@
 #define LCD_ID_ST7789   0x8552U
 
 // Panel geometry; the display layer will address the panel through these.
-// A whole-frame write that did not cover the frame is repeated this many
-// times. A try is the sentinel (about 1.5 ms) plus the frame (8.6 ms), so the
-// budget is small on purpose: this covers a frame the panel takes in part,
-// not a panel that is not up yet - BSP_lcdInit() proved the frame takes
-// writes.
-// Attempts for one whole-frame write, now that every attempt also proves the
-// sentinel landed. An attempt costs about 10 ms (two grid walks plus the
-// fill), so this spans roughly five seconds: the panel's own readiness can
-// take seconds after a reset, and a frame that cannot be proven must be
-// retried, never pushed.
-#define LCD_FRAME_TRIES 500U
-
 #define LCD_WIDTH       240U
 #define LCD_HEIGHT      320U
 
@@ -178,7 +166,6 @@ static bool BSP_lcdCleared_(void);
 static void BSP_lcdWritePixel_(uint16_t x, uint16_t y, uint16_t colour);
 static void BSP_lcdSentinelWrite_(void);
 static bool BSP_lcdSentinelAll_(void);
-static bool BSP_lcdNoSentinel_(void);
 static bool BSP_lcdWritable_(void);
 static void BSP_dbgLcdBootId_(void);
 
@@ -307,19 +294,26 @@ void BSP_lcdInit(void) {
 
     BSP_lcdWriteCmd_(LCD_DISPON_CMD);
 
-    // Backlight last, and only now: the frame memory is black and the panel
-    // is out of its sleep sequence, so the glass comes on in a defined state.
-    // The panel's own power-up noise, the retries above and the supply ramp
-    // all happened behind a dark glass. From here the display layer owns the
-    // drawing, and the UI thread paints its first frame onto this black.
-    HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN, GPIO_PIN_SET);
-
+    // The backlight is not lit here. It belongs to the display layer now
+    // (BSP_lcdBacklight) and goes on once a whole frame is on the frame
+    // memory and proven covered, so the panel's own power-up noise, the
+    // retries above, the coverage sentinel and the strips of the first frame
+    // all happen behind a dark glass: what the user sees first is one
+    // picture, not the drawing of it. The pin itself is initialised above,
+    // idle off (2026-10-12: proving a page's frame on a lit glass put the
+    // sentinel on show as a set of bright lines).
     lcd_dbgBootDispOn_ = true;
 
     // One identification read: the "panel is talking" line on the bench.
     BSP_dbgLcdBootId_();
 }
 
+//............................................................................
+// The light, on the display layer's schedule. Idempotent, one GPIO write.
+void BSP_lcdBacklight(bool on) {
+    HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN,
+                      on ? GPIO_PIN_SET : GPIO_PIN_RESET);
+}
 //............................................................................
 static void BSP_lcdPanelInit_(void) {
     uint8_t step;
@@ -355,53 +349,15 @@ void BSP_lcdReassert(void) {
     BSP_lcdWriteCmd_(LCD_INVON_CMD);
 }
 //............................................................................
-// Clear the frame, and prove the clear covered the whole of it: the sentinel
-// goes down first, so a point that still reads sentinel after the fill is a
-// point the fill never reached. The display layer gets the same guarantee the
-// splash has, because its first frame is a whole screen too: a frame that
-// lands in part keeps showing whatever the part it missed held, and after a
-// splash that is the splash.
-bool BSP_lcdClearFrame(void) {
-    uint16_t attempt;
-
-    for (attempt = 0U; attempt < LCD_FRAME_TRIES; ++attempt) {
-        // The sentinel has to be *proven present* before the clear is
-        // trusted. If the panel is not taking writes yet the sentinel never
-        // lands, and "no point reads the sentinel" is then true for the
-        // wrong reason: the glass still holds the previous frame, and the
-        // clear would be called covered. The bring-up loop guards its own
-        // clear exactly this way, with BSP_lcdWritable_().
-        BSP_lcdSentinelWrite_();
-
-        if (!BSP_lcdSentinelAll_()) {
-            continue;
-        }
-
-        BSP_lcdFill_(LCD_BLACK);
-
-        if (BSP_lcdNoSentinel_()) {
-            return true;
-        }
-    }
-
-    return false;
-}
-//............................................................................
-// Lay the coverage sentinel for the next full-frame write, and say whether it
-// landed. BSP_lcdFrameCovered answers whether the write that follows reached
-// every point of it: the proof, not the hope, that the frame on the glass is
-// the drawn one. A false return means the panel is not taking writes yet, so
-// the caller must not push the frame - and must not read "no sentinel left"
-// as coverage either.
-bool BSP_lcdFrameArm(void) {
-    BSP_lcdSentinelWrite_();
-
-    return BSP_lcdSentinelAll_();
-}
-//............................................................................
-bool BSP_lcdFrameCovered(void) {
-    return BSP_lcdNoSentinel_();
-}
+// The run-time coverage proof used to live here: clear the frame and prove
+// it, lay the sentinel, draw, then ask whether the drawing covered the frame
+// (BSP_lcdClearFrame / BSP_lcdFrameArm / BSP_lcdFrameCovered). It is gone as
+// of 2026-10-12. A sentinel is a picture on the glass, and proving a page's
+// frame that way drew six bright lines across the screen at every page
+// change, on a lit panel. The sentinel stays a bring-up instrument now, in
+// BSP_lcdWritable_ and BSP_lcdCleared_ below, where the backlight is still
+// off. Run-time frames are trusted: BSP_lcdInit() proved, before it returned,
+// that this panel takes writes over the whole frame.
 //............................................................................
 void BSP_lcdSetWindow(uint16_t xs, uint16_t ys,
                       uint16_t xe, uint16_t ye) {
@@ -669,26 +625,6 @@ static bool BSP_lcdSentinelAll_(void) {
 
     return true;
 }
-//............................................................................
-// No point reads the sentinel any more: whatever was written last covered
-// the whole frame.
-static bool BSP_lcdNoSentinel_(void) {
-    uint16_t i;
-    uint16_t j;
-
-    for (j = 0U; j < LCD_GRID_Y; ++j) {
-        for (i = 0U; i < LCD_GRID_X; ++i) {
-            uint16_t const v = BSP_lcdReadGram_(lcdGridX_(i), lcdGridY_(j));
-
-            if (lcdSentinelSame_(v, lcdSentinelRef_)) {
-                return false;
-            }
-        }
-    }
-
-    return true;
-}
-//............................................................................
 // One pixel, as its own little window: the panel's frame memory is addressed
 // through CASET/RASET, so a single point is a window of one.
 static void BSP_lcdWritePixel_(uint16_t x, uint16_t y, uint16_t colour) {

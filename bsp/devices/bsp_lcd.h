@@ -29,16 +29,30 @@
 //============================================================================
 // One-time panel bring-up: bus setup (GPIO + FSMC), the panel's own waits
 // around SLPOUT and the vendor register sequence, then the frame memory
-// cleared to black and display on, and the backlight last. Bring-up ends with
-// the glass showing a frame memory that is entirely black - every retry and
-// every unstable state above happens behind a dark glass, and the light comes
-// on only once the panel is in a defined state. It blocks for the better
-// part of 250 ms, so it
+// cleared to black and display on. The backlight stays off at this point:
+// bring-up leaves the glass dark on purpose, and the display layer lights it
+// through BSP_lcdBacklight() once a whole frame is on the frame memory and
+// proven covered. Every retry above, the coverage sentinel and the drawing of
+// that first frame therefore happen behind a dark glass (2026-10-12: on a lit
+// glass the sentinel showed as a set of bright lines, and the first frame as
+// the drawing of itself). It blocks for the better part of 250 ms, so it
 // belongs to BSP_init() - before the scheduler exists, never inside a task -
 // and it is the only writer on this bus until the display layer takes over.
 // On the trace channel it reports DISPON plus one RDID read, the cheap
 // "panel is talking" line on the bench.
 void BSP_lcdInit(void);
+
+// Backlight (PB0, active high). Bring-up leaves it off and the display layer
+// turns it on, after the first whole frame is on the frame memory and proven.
+void BSP_lcdBacklight(bool on);
+
+// The coverage sentinel belongs to bring-up alone: mark the frame, write over
+// it, ask whether the mark survived. The run-time version of that proof is
+// gone (2026-10-12): a mark is a picture on the glass, so proving a page's
+// frame with one drew bright lines across the screen on every page change.
+// The display layer draws under no proof at all - it is the panel's
+// writability, proven here before the light comes on, that the run-time path
+// leans on.
 
 // Read a few frame memory pixels back and report them: four points down the
 // left edge, spanning both halves of the panel. Called by the AO some time
@@ -81,20 +95,11 @@ void BSP_lcdWritePixelsDma(uint16_t const *pixels, uint32_t count);
 // blocking, no waiting, nothing that takes a lock.
 void BSP_lcdDmaSetDoneHook(void (*hook)(void));
 
-// The same coverage contract for any other whole-screen picture, which for
-// this firmware is the display layer's first frame: clear the frame and prove
-// the clear covered it, lay the sentinel, draw, then ask whether the drawing
-// covered the frame. A caller that gets false for either half knows the glass
-// is showing two pictures at once - the ghost - and repaints instead of
-// accepting it.
 // Re-send the panel's own register table and display-on. A cold power-up can
 // brown the panel out mid-way, which resets those registers and leaves the
 // frame memory alone - a picture that survives with the wrong polarity. Cheap
 // and idempotent: the display layer calls it for a while after bring-up.
 void BSP_lcdReassert(void);
-bool BSP_lcdClearFrame(void);
-bool BSP_lcdFrameArm(void);
-bool BSP_lcdFrameCovered(void);
 
 // True when the last transfer ended in a DMA error. The adapter reads it
 // after its wait, so the assertion and its record happen on the thread

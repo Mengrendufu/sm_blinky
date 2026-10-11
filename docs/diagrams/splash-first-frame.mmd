@@ -19,7 +19,7 @@ sequenceDiagram
         participant dma as DMA1_Ch6
     end
 
-    Note over main,panel: 阶段 A · 调度器之前：面板起来 + 资产就位，不画任何画面（实测 0 → 411 → 892 ms）
+    Note over main,panel: 阶段 A · 调度器之前：面板起来 + 资产就位，不画任何画面（实测 0 → 411 → 892 ms）· 背光全程关着
 
     main->>panel: BSP_lcdInit()
     Note right of main: 首次：SWRESET(+130 ms) → SLPOUT(+130 ms) → 厂商寄存器表
@@ -27,15 +27,16 @@ sequenceDiagram
         panel-->>main: BSP_lcdReady_()：RDDST 就绪位（只排除睡眠态；冷热读回同值）
         main->>panel: BSP_lcdWritable_()：信标 0xF81F 铺**逐行**栅格（320 行 × 6 列 = 1,920 点），逐点读回信标
     end
+    Note right of panel: 信标此刻在暗屏上 ⇒ 不可见 ✓（它从此只属于 bring-up）
     main->>panel: 寄存器表**再写一遍**（面板自己的上电序列收尾会载 NVM，早写的表会被顶掉）
     main->>panel: 整屏清黑，逐点读回**必须是黑**（不是"无信标"）
     Note right of main: 实测面板段 411 ms（BSP_dbgBootMs_ = [2,411,892,892]）
-    main->>panel: DISPON（0x29）→ 点背光：玻璃最后一步才亮
+    main->>panel: DISPON（0x29）—— **不点背光**：留到首帧整屏落定（见阶段 B）
     main->>sram: Asset_load()：NOR（0x00081000）→ 三槽 460,800 B + CRC32
     Note right of main: 实测资产段 481 ms（411 → 892 ms）
     main->>rtos: Ui_start/Flash_start/AO_start/SST_start → vTaskStartScheduler()
 
-    Note over rtos,disp: 阶段 B · 屏幕归 UI HSM：Splash 页（展示页也是 LVGL 画的）
+    Note over rtos,disp: 阶段 B · 屏幕归 UI HSM：Splash 页（展示页也是 LVGL 画的）· 玻璃仍是暗的
 
     rtos->>ui: Ui_thread_()
     ui->>disp: Ui_dispInit()：LVGL 起来，**不建任何控件**
@@ -44,20 +45,18 @@ sequenceDiagram
     Note right of disp: 面板上只有一个写者：LVGL 的 flush（条带缓冲 + DMA）
 
     rect rgb(246,238,255)
-        Note over disp,panel: 每页首帧同一套契约：清空（并证明）→ 铺信标 → 画 → 复核
-        disp->>panel: ① BSP_lcdClearFrame()：铺信标 → 清黑 → 逐点读回必须是黑（不过就重来）
-        disp->>panel: ② BSP_lcdFrameArm()：铺信标（这一帧必须把它全盖掉）
-        disp->>lvgl: ③ lv_obj_invalidate(整屏)：明说这一帧是整屏
-        ui->>lvgl: ④ lv_timer_handler() ⇒ 10 个 240x32 子区
+        Note over disp,panel: 页首帧 = 整屏重画，**不带任何证明**（信标只留给 bring-up）
+        disp->>lvgl: ① Ui_framePending_ ⇒ lv_obj_invalidate(整屏)：明说这一帧是整屏
+        ui->>lvgl: ② lv_timer_handler() ⇒ 10 个 240x32 子区
         loop 每个子区
             lvgl->>disp: flush_cb(area, px)
             disp->>panel: 开窗（CASET/RASET/RAMWR）
             disp->>dma: 起 DMA（源 = 条带，目的地址固定 MINC=0）
             disp->>rtos: ulTaskNotifyTakeIndexed(槽 1)：真阻塞等完成（整屏超时 UI_DMA_FRAME_MS = 100 ms）
         end
-        disp->>panel: ⑤ BSP_lcdFrameCovered()：逐点读回不许有信标残留（不过就重画）
+        disp->>ui: lv_display_flush_is_last() ⇒ 整屏落定：清 Ui_framePending_，**点亮背光**（只一次）
     end
-    Note over ui,panel: 实测：Splash 首帧 74 ms / 10 flushes / 75 KiB；Ui_dbgSplashOk_=1、Ui_dbgFrameTries_=0
+    Note over ui,panel: 实测（2026-10-12 拆净证明后）：Splash 首帧 34.8 ms / 10 flushes / 75 KiB（拆之前同口径 74 ms）；Ui_dbgSplashOk_=1
 
     par 极性保活（面板自己的上电序列可能把极性顶掉：黑↔亮）
         ui->>panel: 每 500 ms 重发显示反转 0x21（持续 15 s；唯一能在扫描期安全改写的寄存器）
@@ -67,7 +66,7 @@ sequenceDiagram
 
     ui->>hsm: hold 到期（UI_SPLASH_MS = 1500）⇒ 派发 UI_SPLASH_DONE_SIG
     hsm->>disp: Ui_dispDemo()：lv_obj_clean + 重建 demo 控件树（**每页从干净屏幕重建**）
-    Note over disp,lvgl: Demo 页首帧走**同一套**覆盖证明；实测 85 ms / 10 flushes / 75 KiB
+    Note over disp,lvgl: Demo 页首帧走同一条路（整屏重画、无证明）；实测 46.3 ms / 10 flushes / 75 KiB（拆之前同口径 85 ms）
 
     loop 此后每 ~500 ms
         blinky->>ui: LED 边沿
@@ -75,4 +74,4 @@ sequenceDiagram
         lvgl->>disp: 局部帧：实测 3 flushes / 8 KiB、约 12.5 ms
     end
 
-    Note over main,disp: 重影的根因不在写入（GRAM 一直是对的），在"翻页早于面板显示链路就绪"（冷上电 3~8 s，最坏 >11 s）；<br/>修法 = 清屏与每页首帧都带覆盖证明 + 资产按仓库现状重拼；<br/>曾用的"12 s 内每 250 ms 整屏重刷"经 2026-10-12 拆掉对照（用户冷插拔确认为正确）判定冗余、已删。
+    Note over main,disp: 重影的根因不在写入（GRAM 一直是对的），在"翻页早于面板显示链路就绪"（冷上电 3~8 s，最坏 >11 s）；<br/>修法 = 资产按仓库现状重拼（当时那道"清屏 + 每页首帧覆盖证明"已于 2026-10-12 拆掉：蜡封画在亮屏上就是那 6 条品红竖线 ✗）；<br/>"12 s 内每 250 ms 整屏重刷"经拆掉对照（用户冷插拔确认为正确）判定冗余、已删；信标从此只在 bring-up 用 ✓
