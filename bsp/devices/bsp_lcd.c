@@ -29,7 +29,6 @@
 #define LCD_RAMWR_CMD   0x2CU
 #define LCD_RAMRD_CMD   0x2EU
 #define LCD_DISPON_CMD  0x29U  // Sent once the frame memory is cleared.
-#define LCD_INVON_CMD   0x21U  // Display inversion: the black level polarity.
 #define LCD_BLACK       0x0000U
 
 #define LCD_ID_ST7789   0x8552U
@@ -142,7 +141,7 @@ static BSP_lcdInitStep_ const lcdInitSeq_[] = {
                   0x44U, 0x42U, 0x06U, 0x0EU, 0x12U, 0x14U, 0x17U}},
     {0xE1U, 14U, {0xD0U, 0x00U, 0x02U, 0x07U, 0x0AU, 0x28U, 0x31U,
                   0x54U, 0x47U, 0x0EU, 0x1CU, 0x17U, 0x1BU, 0x1EU}},
-    {0x21U,  0U, {0x00U}}                                 // inversion on
+    {0x21U,  0U, {0x00U}}                  // inversion on (black polarity)
     // Display on is not in here: BSP_lcdInit() clears the frame memory in
     // between, so the panel never scans an uninitialised GRAM (BSP_lcdFill_).
 };
