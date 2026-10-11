@@ -55,6 +55,11 @@ void BSP_dbgLcdBootReport(void);
 // as it is - no byte swapping on this path.
 void BSP_lcdSetWindow(uint16_t xs, uint16_t ys, uint16_t xe, uint16_t ye);
 
+// One whole frame, straight to the panel, waited out by polling the channel:
+// for the boot splash, which runs before there is a task to notify. count is
+// in pixels, 240 x 320 of them for a full screen.
+bool BSP_lcdShowImage(uint16_t const *pixels, uint32_t count);
+
 // The pixel push runs on DMA1 channel 6: the caller arms the channel and
 // returns, and the transfer's completion runs the hook below from the
 // channel's interrupt.

@@ -2,6 +2,7 @@
 #include "sst.h"
 #include "asset.h"
 #include "bsp.h"
+#include "bsp_lcd.h"   // the boot splash goes straight to the panel
 #include "application.h"
 #include "ui.h"
 #include "flash.h"
@@ -54,6 +55,19 @@ int main(void) {
     // still before the first FreeRTOS call. The UI thread picks the result up
     // when it builds its screen.
     (void)Asset_load();
+
+    // The boot splash: one whole frame pushed straight from the external SRAM
+    // to the panel, no LVGL and no buffer copy in the way. Slot 2 is the one
+    // that reads as a photograph. The UI thread holds its first frame for a
+    // moment (UI_SPLASH_MS) so this is actually seen.
+    {
+        Asset const * const asset = Asset_get();
+
+        if (asset->present && (asset->slots >= 3U)) {
+            (void)BSP_lcdShowImage(Asset_slot(asset, 2U),
+                                   ASSET_SLOT_BYTES / 2U);
+        }
+    }
 
     BSP_dbgBootMark();   // 2: the asset is in the external SRAM, CRC checked
 

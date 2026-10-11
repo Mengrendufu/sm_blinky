@@ -45,6 +45,12 @@
 // has no timer pending, and as the ceiling for what it does ask for.
 #define UI_FALLBACK_MS 10U
 
+// The boot splash (main.c) is a whole frame pushed straight to the panel, and
+// it is worth looking at: LVGL is held off for this long so it stays up. The
+// inbox keeps being drained meanwhile, so no event is lost - they just land
+// together in the first real frame.
+#define UI_SPLASH_MS 1500U
+
 // How long the flush wait may spin before it calls the channel wedged: a
 // 240x32 strip is 7,680 pixels, about 1.3 ms at the measured 169 ns/px, which
 // leaves this bound two orders of magnitude of headroom.
@@ -133,7 +139,19 @@ void Ui_dispInit(void) {
 }
 //............................................................................
 TickType_t Ui_dispHeartbeat(void) {
+    static TickType_t Ui_splashUntil_;
     uint32_t const before = Ui_us_();
+
+    // Hold LVGL off while the boot splash is up. The deadline starts on the
+    // first call, which is the loop's first pass - right after the widgets
+    // were built, so the splash has the screen to itself.
+    if (Ui_splashUntil_ == 0U) {
+        Ui_splashUntil_ = xTaskGetTickCount() + pdMS_TO_TICKS(UI_SPLASH_MS);
+    }
+    if ((int32_t)(xTaskGetTickCount() - Ui_splashUntil_) < 0) {
+        return pdMS_TO_TICKS(UI_SPLASH_MS);
+    }
+
     uint32_t const next = lv_timer_handler();
     uint32_t const took = Ui_us_() - before;
 

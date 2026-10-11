@@ -34,6 +34,10 @@
 #define LCD_ID_ST7789   0x8552U
 
 // Panel geometry; the display layer will address the panel through these.
+// How long a whole frame may take before the boot splash gives up: 8.6 ms on
+// the wire, so this is an order of magnitude of headroom.
+#define BSP_LCD_IMAGE_MS 100U
+
 #define LCD_WIDTH       240U
 #define LCD_HEIGHT      320U
 
@@ -282,6 +286,24 @@ static void BSP_lcdPanelInit_(void) {
 //............................................................................
 // Window set: CASET + RASET + RAMWR. Parameters go out 8 bit on the low byte,
 // which is what the panel expects in the 16-bit 8080 mode.
+// A whole frame, straight from memory to the panel, waited out by polling
+// the channel: the boot splash runs before the scheduler, so there is no task
+// to notify. One screen is 8.6 ms of bus.
+bool BSP_lcdShowImage(uint16_t const *pixels, uint32_t count) {
+    uint32_t const deadline = HAL_GetTick() + BSP_LCD_IMAGE_MS;
+
+    BSP_lcdSetWindow(0U, 0U, LCD_WIDTH - 1U, LCD_HEIGHT - 1U);
+    BSP_lcdWritePixelsDma(pixels, count);
+
+    while (BSP_lcdDmaBusy()) {
+        if ((int32_t)(HAL_GetTick() - deadline) >= 0) {
+            return false;
+        }
+    }
+
+    return true;
+}
+//............................................................................
 void BSP_lcdSetWindow(uint16_t xs, uint16_t ys,
                       uint16_t xe, uint16_t ye) {
     BSP_lcdWriteCmd_(LCD_CASET_CMD);
