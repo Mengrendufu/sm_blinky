@@ -24,7 +24,11 @@ typedef struct {
 enum {
     UI_NULL_SIG = 0,
     UI_LED_ON_SIG,
-    UI_LED_OFF_SIG
+    UI_LED_OFF_SIG,
+    // Delivered by the UI thread, not by the inbox: the splash page's hold is
+    // over, so the page that owns the glass changes. It is the thread's clock
+    // that raises it, and the state machine's decision that acts on it.
+    UI_SPLASH_DONE_SIG
 };
 
 #endif // SM_UI_EVT_H_

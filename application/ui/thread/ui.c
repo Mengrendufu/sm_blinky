@@ -48,8 +48,9 @@ static void Ui_report_(void);
 
 //============================================================================
 void Ui_start(void) {
-    Sm_Ui_init(&Ui_sm_);
-
+    // The state machine is initialized on its own thread, not here: its
+    // initial transition is the splash page, whose entry action pushes the
+    // boot image - a panel transfer to wait out, so it belongs on the thread.
     Ui_handle_ = xTaskCreateStatic(Ui_thread_, "ui", UI_STACK_WORDS,
                                    (void *)0, UI_PRIORITY,
                                    Ui_stack_, &Ui_tcb_);
@@ -71,8 +72,10 @@ static void Ui_thread_(void *arg) {
     // touches lv_*.
     Ui_dispInit();
 
-    // First frame right away, then let LVGL set the pace of the loop.
-    Ui_dispRender(Ui_sm_.ledOn, Ui_sm_.ledEdges);
+    // The initial transition is the splash page: its entry action pushes the
+    // boot image and arms the hold, and until the hold is over this loop runs
+    // no LVGL at all.
+    Sm_Ui_init(&Ui_sm_);
     wait = Ui_dispHeartbeat();
 
     for (;;) {
@@ -80,7 +83,23 @@ static void Ui_thread_(void *arg) {
 
         Ui_drain_();
         Ui_report_();
-        Ui_dispRender(Ui_sm_.ledOn, Ui_sm_.ledEdges);
+
+        // The hold is the state machine's; the thread only delivers its
+        // deadline as an event, and the transition that follows starts the
+        // demo page (clear the frame, prove it, draw it whole).
+        if (Ui_sm_.splashUp && (Sm_Ui_splashLeft(&Ui_sm_) == 0U)) {
+            Ui_Evt evt;
+
+            evt.sig = UI_SPLASH_DONE_SIG;
+            Sm_Ui_dispatch(&Ui_sm_, &evt);
+        }
+
+        // Nothing here touches the widgets while the boot image owns the
+        // glass: a widget drawn then would be a widget on top of the image.
+        if (!Ui_sm_.splashUp) {
+            Ui_dispRender(Ui_sm_.ledOn, Ui_sm_.ledEdges);
+        }
+
         wait = Ui_dispHeartbeat();
     }
 }

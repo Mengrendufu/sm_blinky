@@ -35,7 +35,7 @@ def c565(r, g, b):
     return ((r >> 3) << 3, (g >> 2) << 2, (b >> 3) << 3)
 
 
-INK = c565(8, 16, 24)          # 底
+INK = c565(0, 0, 0)            # 底：纯黑，不透明，和面板 idle 同色
 FRAME = c565(24, 56, 64)       # 圆角边框
 WAVE = c565(0, 96, 112)        # 方波
 TEXT = c565(200, 216, 224)     # 字
@@ -83,7 +83,7 @@ def logo(x, y):
     if 46 <= x <= W - 47 and square_wave(x, y):
         return WAVE
     # 字：5x7，放大 4 倍，字符间距 4，居中
-    scale, gap = 4, 4
+    scale, gap = 3, 5
     word = "sm_blinky"
     total = len(word) * (5 * scale + gap) - gap
     x0 = (W - total) // 2

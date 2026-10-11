@@ -18,6 +18,7 @@
 | `asset-burn-bootloader.html` / `.mmd` | **待落地**：烧写全程 | 单脚本管全程：开串口 → J-Link 置标志复位 → 握手 → 38 块 → DONE |
 | `serial-script-flow.html` / `.mmd` | **待落地**：脚本侧流程 | 脚本自己的步骤、外部输入、重试与诊断 |
 | `asset-load.html` / `.mmd` | **待落地**：app 运行期 | 启动期把背景资产一次性搬进外挂 SRAM |
+| `splash-first-frame.html` / `.mmd` | **现有固件**启动画面顺序 | 屏幕归 **UI HSM**：Splash 页（entry `lv_obj_clean` → 黑底 → 一个 `lv_image` 控件指向槽 2，**也是 LVGL 画的**）→ hold 1500 ms → 派发 `UI_SPLASH_DONE_SIG` → Demo 页（`lv_obj_clean` + 重建控件树）。三段整屏画面（bring-up 清屏 / Splash 首帧 / Demo 首帧）各自带**覆盖证明**（信标法：320 行 × 6 列 = 1,920 点，残留信标即重来），含面板就绪环路、实测时序（面板 411 ms / 资产 892 ms、首帧 74 / 85 ms）与"12 s 整屏重刷窗口已拆"的对照结论 |
 | `ui-flush.html` / `.mmd` | **现有固件**刷屏（对象级） | UI 线程一次刷屏的完整策略：渲染 → 开窗 → 起 DMA → 线程阻塞（idle 泵日志）→ 中断唤醒 → flush_ready，含超时/错误断言与"单缓冲不重叠"的说明 |
 | `flash-log-write.html` / `.mmd` | **待落地（草案）**：运行期写 flash | 追加日志 + 小桶：生产者 → RAM 暂存环（不阻塞）→ flash 线程 → 256 B 页缓冲 → 预擦/编程/回读；擦除 130~160 ms 与 BUSY 等标了"阻塞等"的位置，DMA 写只标成将来那一步 |
 | `flash-snapshot.html` / `.mmd` | **拟采纳**：RAM 权威快照 | 权威数据放 RAM 快照：启动期无调度器直读填充（先于任何 AO）→ 任务在临界区里读写快照（值+脏标记同临界区）→ 投"有脏数据"事件 → AO_FLASH 合并后异步落盘；标了"拷贝不是指针"「只给任务读」「恢复到最后一次成功落盘」几条规则 |

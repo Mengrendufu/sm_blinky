@@ -29,14 +29,23 @@
 #define LCD_RAMWR_CMD   0x2CU
 #define LCD_RAMRD_CMD   0x2EU
 #define LCD_DISPON_CMD  0x29U  // Sent once the frame memory is cleared.
+#define LCD_INVON_CMD   0x21U  // Display inversion: the black level polarity.
 #define LCD_BLACK       0x0000U
 
 #define LCD_ID_ST7789   0x8552U
 
 // Panel geometry; the display layer will address the panel through these.
-// How long a whole frame may take before the boot splash gives up: 8.6 ms on
-// the wire, so this is an order of magnitude of headroom.
-#define BSP_LCD_IMAGE_MS 100U
+// A whole-frame write that did not cover the frame is repeated this many
+// times. A try is the sentinel (about 1.5 ms) plus the frame (8.6 ms), so the
+// budget is small on purpose: this covers a frame the panel takes in part,
+// not a panel that is not up yet - BSP_lcdInit() proved the frame takes
+// writes.
+// Attempts for one whole-frame write, now that every attempt also proves the
+// sentinel landed. An attempt costs about 10 ms (two grid walks plus the
+// fill), so this spans roughly five seconds: the panel's own readiness can
+// take seconds after a reset, and a frame that cannot be proven must be
+// retried, never pushed.
+#define LCD_FRAME_TRIES 500U
 
 #define LCD_WIDTH       240U
 #define LCD_HEIGHT      320U
@@ -165,10 +174,42 @@ static void BSP_lcdFill_(uint16_t colour);
 static uint16_t BSP_lcdReadGram_(uint16_t x, uint16_t y);
 static void BSP_lcdReadRdst_(uint8_t out[4]);
 static bool BSP_lcdReady_(void);
-static bool BSP_lcdFilled_(void);
+static bool BSP_lcdCleared_(void);
 static void BSP_lcdWritePixel_(uint16_t x, uint16_t y, uint16_t colour);
+static void BSP_lcdSentinelWrite_(void);
+static bool BSP_lcdSentinelAll_(void);
+static bool BSP_lcdNoSentinel_(void);
 static bool BSP_lcdWritable_(void);
 static void BSP_dbgLcdBootId_(void);
+
+// The readiness grid. Every one of the panel's 320 rows, six columns across:
+// the failure this has to catch is a panel that comes up in row segments (a
+// cold start needed 7.9 s before a clear landed everywhere), so a grid that
+// samples rows sparsely can pass while whole bands still refuse the write,
+// and a band that refuses it keeps the picture the glass was showing, which
+// is the ghost. Columns are sparse on purpose: the segments fail along the
+// gate driver, not across the source driver. 1,920 points cost about 10 ms
+// against the 20 ms between passes.
+#define LCD_GRID_X 6U
+#define LCD_GRID_Y 320U   // every row
+
+// The coverage sentinel: a colour that appears in none of the assets, so
+// "this pixel reads back as the sentinel" means nothing else has written it,
+// and "no pixel reads back as the sentinel" means the write in between
+// covered the frame. Black cannot say either - a black read is "my write
+// landed" and "the pixel was already black" at once, which is how a clear
+// that only reached part of the frame used to pass for a clear.
+#define LCD_SENTINEL 0xF81FU
+// How far a sentinel read may sit from the calibrated one and still count as
+// the same colour: the read path gives back the pixel's level rather than its
+// bits, so this is a level window, not a bit comparison.
+#define LCD_SENTINEL_TOL 0x0808U
+static uint16_t lcdSentinelRef_;
+
+// == DEBUG: what the panel gave back for the sentinel. Read over J-Link. ==
+volatile uint16_t BSP_dbgLcdSentinel_;
+
+
 
 //============================================================================
 void BSP_lcdInit(void) {
@@ -230,13 +271,25 @@ void BSP_lcdInit(void) {
             continue;
         }
 
-        // Is the panel taking writes at all? Eight points, tens of
-        // microseconds. Only once that is true is the whole frame worth
-        // clearing.
+        // Is the panel taking writes over the whole frame? Only then is the
+        // frame worth clearing, the splash worth pushing, and a first frame
+        // worth drawing: a frame the panel takes in part is a frame that
+        // keeps part of what the glass was showing.
         if (!BSP_lcdWritable_()) {
             HAL_Delay(LCD_RETRY_SETTLE_MS);
             continue;
         }
+
+        // The table again, now that the panel is up. A panel that is still
+        // running its own power-up sequence ends that sequence by loading its
+        // NVM - the very registers this table sets (VCOM, power control,
+        // gamma). A table written before that is overwritten, and the symptom
+        // is not a blank glass but a wrong one: the panel falls back to its
+        // default polarity, where black comes up as a bright field and the
+        // picture looks like a ghost of itself. Written here, after the frame
+        // has proved it takes writes, this is the last thing the panel is
+        // programmed with - and the first one that sticks.
+        BSP_lcdPanelInit_();
 
         // Frame memory first, display on second: the panel starts scanning
         // GRAM the moment DISPON lands, and until this clear it holds
@@ -245,7 +298,7 @@ void BSP_lcdInit(void) {
         // catches a clear that only reached part of the frame.
         BSP_lcdFill_(LCD_BLACK);
 
-        if (BSP_lcdFilled_()) {
+        if (BSP_lcdCleared_()) {
             break;
         }
 
@@ -289,19 +342,65 @@ static void BSP_lcdPanelInit_(void) {
 // A whole frame, straight from memory to the panel, waited out by polling
 // the channel: the boot splash runs before the scheduler, so there is no task
 // to notify. One screen is 8.6 ms of bus.
-bool BSP_lcdShowImage(uint16_t const *pixels, uint32_t count) {
-    uint32_t const deadline = HAL_GetTick() + BSP_LCD_IMAGE_MS;
+//............................................................................
+// Put the panel's inversion back. A panel that is still running its own
+// power-up can end that sequence by loading its NVM, and what that leaves
+// behind is a panel whose black level has the wrong polarity: black comes up
+// as a bright field, so a correct frame reads as a ghost of itself. The
+// inversion bit is what that level hangs on, and unlike the power and VCOM
+// registers it can be written while the panel is scanning - idempotent, tens
+// of microseconds - so the display layer re-asserts it for a while after
+// bring-up instead of once.
+void BSP_lcdReassert(void) {
+    BSP_lcdWriteCmd_(LCD_INVON_CMD);
+}
+//............................................................................
+// Clear the frame, and prove the clear covered the whole of it: the sentinel
+// goes down first, so a point that still reads sentinel after the fill is a
+// point the fill never reached. The display layer gets the same guarantee the
+// splash has, because its first frame is a whole screen too: a frame that
+// lands in part keeps showing whatever the part it missed held, and after a
+// splash that is the splash.
+bool BSP_lcdClearFrame(void) {
+    uint16_t attempt;
 
-    BSP_lcdSetWindow(0U, 0U, LCD_WIDTH - 1U, LCD_HEIGHT - 1U);
-    BSP_lcdWritePixelsDma(pixels, count);
+    for (attempt = 0U; attempt < LCD_FRAME_TRIES; ++attempt) {
+        // The sentinel has to be *proven present* before the clear is
+        // trusted. If the panel is not taking writes yet the sentinel never
+        // lands, and "no point reads the sentinel" is then true for the
+        // wrong reason: the glass still holds the previous frame, and the
+        // clear would be called covered. The bring-up loop guards its own
+        // clear exactly this way, with BSP_lcdWritable_().
+        BSP_lcdSentinelWrite_();
 
-    while (BSP_lcdDmaBusy()) {
-        if ((int32_t)(HAL_GetTick() - deadline) >= 0) {
-            return false;
+        if (!BSP_lcdSentinelAll_()) {
+            continue;
+        }
+
+        BSP_lcdFill_(LCD_BLACK);
+
+        if (BSP_lcdNoSentinel_()) {
+            return true;
         }
     }
 
-    return true;
+    return false;
+}
+//............................................................................
+// Lay the coverage sentinel for the next full-frame write, and say whether it
+// landed. BSP_lcdFrameCovered answers whether the write that follows reached
+// every point of it: the proof, not the hope, that the frame on the glass is
+// the drawn one. A false return means the panel is not taking writes yet, so
+// the caller must not push the frame - and must not read "no sentinel left"
+// as coverage either.
+bool BSP_lcdFrameArm(void) {
+    BSP_lcdSentinelWrite_();
+
+    return BSP_lcdSentinelAll_();
+}
+//............................................................................
+bool BSP_lcdFrameCovered(void) {
+    return BSP_lcdNoSentinel_();
 }
 //............................................................................
 void BSP_lcdSetWindow(uint16_t xs, uint16_t ys,
@@ -498,23 +597,90 @@ static uint16_t BSP_lcdReadGram_(uint16_t x, uint16_t y) {
     return value;
 }
 //............................................................................
-// Did the clear actually land? Four points, spread over both halves of the
-// frame: a fill that only reached part
-// of the frame memory reads back as noise here, which is the cold start
-// symptom this loop exists to catch.
-// The frame is black where these eight points are: both halves of the glass,
-// top and bottom. Eight and not four because the failure being hunted is a
-// clear that only reached part of the frame, and the old set - all of it down
-// the x = 0 column - could not see a right half that never took the write.
-static bool BSP_lcdFilled_(void) {
-    static uint16_t const xs[2] = {0U, LCD_WIDTH - 1U};
-    static uint16_t const ys[4] = {0U, 159U, 160U, LCD_HEIGHT - 1U};
-    uint8_t i;
-    uint8_t j;
+// Columns spread over the width, first and last included.
+static uint16_t lcdGridX_(uint16_t i) {
+    return (uint16_t)((i * (LCD_WIDTH - 1U)) / (LCD_GRID_X - 1U));
+}
 
-    for (i = 0U; i < 2U; ++i) {
-        for (j = 0U; j < 4U; ++j) {
-            if (BSP_lcdReadGram_(xs[i], ys[j]) != LCD_BLACK) {
+// Rows: all of them, in order.
+static uint16_t lcdGridY_(uint16_t j) {
+    return (uint16_t)((j * (LCD_HEIGHT - 1U)) / (LCD_GRID_Y - 1U));
+}
+//............................................................................
+// Did the clear actually land? Every point of the grid has to read the black
+// it was written: not "free of sentinel", which a frame the panel reset on
+// its own would also satisfy, but the colour itself. A point that reads
+// anything else is a point the clear never reached.
+static bool BSP_lcdCleared_(void) {
+    uint16_t i;
+    uint16_t j;
+
+    for (j = 0U; j < LCD_GRID_Y; ++j) {
+        for (i = 0U; i < LCD_GRID_X; ++i) {
+            if (BSP_lcdReadGram_(lcdGridX_(i), lcdGridY_(j)) != LCD_BLACK) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+//............................................................................
+// The grid is row-dense, so the loops that walk it use 16 bit indices.
+//............................................................................
+// The sentinel at every grid point, and what this panel gives back for it:
+// the first point read is the reference the rest are compared against, so the
+// check does not depend on knowing the read path's quirks.
+static void BSP_lcdSentinelWrite_(void) {
+    uint16_t i;
+    uint16_t j;
+
+    for (j = 0U; j < LCD_GRID_Y; ++j) {
+        for (i = 0U; i < LCD_GRID_X; ++i) {
+            BSP_lcdWritePixel_(lcdGridX_(i), lcdGridY_(j), LCD_SENTINEL);
+        }
+    }
+
+    lcdSentinelRef_ = BSP_lcdReadGram_(lcdGridX_(0U), lcdGridY_(0U));
+    BSP_dbgLcdSentinel_ = lcdSentinelRef_;
+}
+//............................................................................
+static bool lcdSentinelSame_(uint16_t a, uint16_t b) {
+    uint16_t const d = (uint16_t)((a > b) ? (a - b) : (b - a));
+
+    return d <= LCD_SENTINEL_TOL;
+}
+//............................................................................
+// Every point reads the sentinel: the panel is taking writes over the whole
+// frame.
+static bool BSP_lcdSentinelAll_(void) {
+    uint16_t i;
+    uint16_t j;
+
+    for (j = 0U; j < LCD_GRID_Y; ++j) {
+        for (i = 0U; i < LCD_GRID_X; ++i) {
+            uint16_t const v = BSP_lcdReadGram_(lcdGridX_(i), lcdGridY_(j));
+
+            if (!lcdSentinelSame_(v, lcdSentinelRef_)) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+//............................................................................
+// No point reads the sentinel any more: whatever was written last covered
+// the whole frame.
+static bool BSP_lcdNoSentinel_(void) {
+    uint16_t i;
+    uint16_t j;
+
+    for (j = 0U; j < LCD_GRID_Y; ++j) {
+        for (i = 0U; i < LCD_GRID_X; ++i) {
+            uint16_t const v = BSP_lcdReadGram_(lcdGridX_(i), lcdGridY_(j));
+
+            if (lcdSentinelSame_(v, lcdSentinelRef_)) {
                 return false;
             }
         }
@@ -531,25 +697,17 @@ static void BSP_lcdWritePixel_(uint16_t x, uint16_t y, uint16_t colour) {
 
 }
 //............................................................................
-// Can this panel take a write yet? The same eight points, written black and
-// read back. This is the authority, not the ready bit: measured on this panel
-// the bit comes up at 383 ms both warm and cold, while a cold power on needs
-// 7.9 s before writes land - and RDDST reads the same 00 53 00 20 the whole
-// time. Tens of microseconds against 13 ms for a full clear, which is what
-// lets the bring-up loop retry every 20 ms without loading the bus.
+// Can this panel take a write yet? Every point of the grid, written black
+// and read back. This is the authority, not the ready bit: measured on this
+// panel the bit comes up at 383 ms both warm and cold, while a cold power on
+// needed 7.9 s before a clear landed everywhere - and RDDST reads the same
+// 00 53 00 20 the whole time. About 1.5 ms against 13 ms for a full clear,
+// which is what lets the bring-up loop retry every 20 ms without loading the
+// bus.
 static bool BSP_lcdWritable_(void) {
-    static uint16_t const xs[2] = {0U, LCD_WIDTH - 1U};
-    static uint16_t const ys[4] = {0U, 159U, 160U, LCD_HEIGHT - 1U};
-    uint8_t i;
-    uint8_t j;
+    BSP_lcdSentinelWrite_();
 
-    for (i = 0U; i < 2U; ++i) {
-        for (j = 0U; j < 4U; ++j) {
-            BSP_lcdWritePixel_(xs[i], ys[j], LCD_BLACK);
-        }
-    }
-
-    return BSP_lcdFilled_();
+    return BSP_lcdSentinelAll_();
 }
 //............................................................................
 // Sample both halves of the frame down the left edge. If the fill only

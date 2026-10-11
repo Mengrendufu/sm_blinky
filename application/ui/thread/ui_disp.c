@@ -45,11 +45,15 @@
 // has no timer pending, and as the ceiling for what it does ask for.
 #define UI_FALLBACK_MS 10U
 
-// The boot splash (main.c) is a whole frame pushed straight to the panel, and
-// it is worth looking at: LVGL is held off for this long so it stays up. The
-// inbox keeps being drained meanwhile, so no event is lost - they just land
-// together in the first real frame.
-#define UI_SPLASH_MS 1500U
+// How many repaints the first frame's coverage check may ask for. Running out
+// leaves the glass in whatever state it is in - the counter says so - rather
+// than resetting a board that is otherwise running, the same shape as the
+// bring-up loop's budget.
+// Attempts for one whole-frame write, same reasoning as LCD_FRAME_TRIES:
+// with the sentinel now proven before every write, a failure means the panel
+// is not taking writes yet, so the only correct answer is to try again.
+// ~10 ms each, spanning roughly five seconds.
+#define UI_FRAME_TRIES 500U
 
 // How long the flush wait may spin before it calls the channel wedged: a
 // 240x32 strip is 7,680 pixels, about 1.3 ms at the measured 169 ns/px, which
@@ -65,6 +69,33 @@
 // A 240x32 strip is 7,680 pixels, about 0.9 ms of bus time at the measured
 // 112 ns/px. The timeout catches a wedged channel, not a slow one.
 #define UI_DMA_TIMEOUT_MS 20U
+
+// A whole frame is 76,800 pixels, and the boot image comes from the external
+// SRAM: every pixel is a read there and a write to the panel, so the measured
+// cost is about 20 ms - the same order as this timeout, which is why the
+// whole-frame push cannot share the strip's.
+#define UI_DMA_FRAME_MS 100U
+
+// The panel's *display* path is not part of the proof the pages are drawn
+// under: it comes up on its own schedule (measured 3 to 8 s on a cold start,
+// worst case past 11), and until it does the glass holds whatever was last
+// driven into it, so a page change in that window can show as two pictures at
+// once - the new page where the panel is already driving, the previous one
+// elsewhere. Nothing here re-drives the screen over that window: the clear,
+// its coverage proof and the asset being current are the whole of it. Under
+// test (2026-10-12): the re-drive window was dropped, the glass is the judge.
+
+// How long after bring-up the panel's inversion is re-asserted, and how
+// often. A panel still running its own power-up can end that sequence by
+// loading its NVM, leaving the black level with the wrong polarity: a correct
+// frame then reads as a ghost of itself (black as a bright field). The
+// inversion bit is
+// the only one of those settings that is safe to write while the panel scans,
+// so it is re-asserted for a while rather than once - a clobber is corrected
+// within one period. The panel's own power-up is done within seconds
+// (measured 3 to 8 s, worst case past 11), hence the generous window.
+#define UI_PANEL_SETTLE_MS   15000U
+#define UI_PANEL_REASSERT_MS 500U
 
 // Which background slot the demo shows. 0 = bg-a (夜色仪表),
 // 1 = bg-b (网格科技),
@@ -85,7 +116,8 @@
 #define UI_TRACE_BLK   41U
 
 static lv_display_t *Ui_disp_;
-static lv_image_dsc_t Ui_bgDsc_;
+static lv_image_dsc_t Ui_bgDsc_;      // demo page background, slot 0
+static lv_image_dsc_t Ui_splashDsc_;  // boot image, slot 2
 static lv_obj_t *Ui_led_;
 static lv_obj_t *Ui_state_;
 static lv_obj_t *Ui_edges_;
@@ -105,13 +137,29 @@ static uint32_t Ui_flushes_;
 static uint32_t Ui_flushPx_;
 static uint32_t Ui_flushUs_;
 static uint32_t Ui_lastFlushEnd_;
+
+// The first frame is a whole screen, so it is drawn under the same contract
+// as the splash: cleared first, sentinel down, and not counted as drawn until
+// the sentinel is gone (see BSP_lcdClearFrame). Until then the UI asks for
+// another repaint.
+static bool Ui_frameArmed_;
+static bool Ui_frameDone_;
+// The widget tree is built once, by the demo page's entry action - never
+// earlier. While the splash holds the glass there is nothing to draw, so a
+// flag and a state disagreeing can no longer put widget pixels on the panel.
+static bool Ui_built_;
+
+// == DEBUG: how many repaints that check needed, and whether the boot image
+// covered the frame; read over J-Link. ==
+volatile uint16_t Ui_dbgFrameTries_;
+volatile uint8_t Ui_dbgSplashOk_;
 //============================================================================
 static void Ui_buildWidgets_(void);
 static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
                       uint8_t *px);
 static void Ui_flushDone_(void);
 static void Ui_flushWait_(lv_display_t *disp);
-static void Ui_dmaWait_(void);
+static void Ui_dmaWait_(uint32_t timeoutMs);
 static uint32_t Ui_tick_(void);
 static uint32_t Ui_us_(void);
 
@@ -135,25 +183,156 @@ void Ui_dispInit(void) {
     lv_display_set_buffers(Ui_disp_, Ui_strip_, (void *)0, sizeof(Ui_strip_),
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
 
+    // No widgets here on purpose: the splash page owns the glass first, and
+    // its entry action is what brings the demo page's tree into being.
+}
+//............................................................................
+// Push the boot image and prove it: the frame is cleared first (and the clear
+// proven), the coverage sentinel goes down, the whole 240x320 goes out as one
+// DMA transfer straight from the external SRAM, and the sentinel has to be
+// gone afterwards. False means the glass is not showing the boot image, and
+// the caller must not hold it as if it were.
+//
+// The transfer is waited out as this thread's own wait - the flush's slot -
+// because the splash runs on the UI thread now instead of before the
+// scheduler: a poll here would spin a task that has an idle task to give the
+// CPU to.
+// One screen base for every page: no scrolling, and a real background so a
+// widget that moves repaints what it covered. Black, because that is the
+// colour BSP_lcdInit() leaves in the frame memory.
+static void Ui_screenBase_(lv_obj_t * const screen) {
+    lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000U), 0);
+    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+}
+
+// One RGB565 descriptor per slot: 240x320, no copy, no decode - it points
+// straight at the external SRAM. Every page shows one of these, so the panel
+// has a single writer (the flush) and the state machine a single owner.
+static void Ui_slotDesc_(lv_image_dsc_t * const dsc,
+                         void const * const pixels) {
+    dsc->header.magic = LV_IMAGE_HEADER_MAGIC;
+    dsc->header.cf = LV_COLOR_FORMAT_RGB565;
+    dsc->header.w = UI_LCD_HOR;
+    dsc->header.h = UI_LCD_VER;
+    dsc->header.stride = UI_LCD_HOR * 2U;
+    dsc->data_size = ASSET_SLOT_BYTES;
+    dsc->data = (uint8_t const *)pixels;
+}
+
+bool Ui_dispSplash(void) {
+    Asset const * const asset = Asset_get();
+    void const * const pixels = Asset_slot(asset, 2U);
+    lv_obj_t * const screen = lv_screen_active();
+    lv_obj_t *img;
+
+    Ui_dbgSplashOk_ = 0U;
+
+    // The boot image is an ordinary widget now, not a push straight to the
+    // panel: one writer on the glass, and the state machine owns it. The
+    // frame's coverage proof still runs, in the heartbeat, on the first frame
+    // this page draws.
+    lv_obj_clean(screen);
+    Ui_screenBase_(screen);
+
+    if (pixels == (void const *)0) {
+        return false;   // no asset: the demo page comes up straight away
+    }
+
+    Ui_slotDesc_(&Ui_splashDsc_, pixels);
+
+    img = lv_image_create(screen);
+    lv_image_set_src(img, &Ui_splashDsc_);
+    lv_obj_align(img, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_remove_flag(img, LV_OBJ_FLAG_CLICKABLE);
+
+    Ui_frameArmed_ = false;   // ask for the clear and its proof
+    Ui_frameDone_ = false;
+    Ui_dbgSplashOk_ = 1U;
+
+    return true;
+}
+//............................................................................
+// The demo page starts. The widgets were built at bring-up and the model has
+// moved on since - the AO keeps beating while the boot image is up - so the
+// next render has to write it all out again instead of trusting what the
+// widgets already show.
+void Ui_dispDemo(void) {
+    lv_obj_t * const screen = lv_screen_active();
+
+    // Every page builds its own tree, from a clean screen: the splash's image
+    // is gone before the demo's exists, so the two can never share the glass.
+    lv_obj_clean(screen);
+    Ui_built_ = false;
+
     Ui_buildWidgets_();
+
+    // A whole screen, under the same contract: cleared and proven before
+    // anything is counted as drawn.
+    Ui_frameArmed_ = false;
+    Ui_frameDone_ = false;
+    Ui_shownValid_ = false;
 }
 //............................................................................
 TickType_t Ui_dispHeartbeat(void) {
-    static TickType_t Ui_splashUntil_;
+    static TickType_t Ui_bootTick_;
+    static TickType_t Ui_reassertAt_;
     uint32_t const before = Ui_us_();
+    TickType_t const now = xTaskGetTickCount();
 
-    // Hold LVGL off while the boot splash is up. The deadline starts on the
-    // first call, which is the loop's first pass - right after the widgets
-    // were built, so the splash has the screen to itself.
-    if (Ui_splashUntil_ == 0U) {
-        Ui_splashUntil_ = xTaskGetTickCount() + pdMS_TO_TICKS(UI_SPLASH_MS);
+    // The panel's inversion keep-alive, see UI_PANEL_SETTLE_MS. Runs between
+    // flushes like everything else here, on every page: a clobber does not
+    // wait for the splash hold to be over.
+    if (Ui_bootTick_ == 0U) {
+        Ui_bootTick_ = (now == 0U) ? 1U : now;
+        Ui_reassertAt_ = now;
     }
-    if ((int32_t)(xTaskGetTickCount() - Ui_splashUntil_) < 0) {
-        return pdMS_TO_TICKS(UI_SPLASH_MS);
+    if (((int32_t)(now - Ui_bootTick_)
+         < (int32_t)pdMS_TO_TICKS(UI_PANEL_SETTLE_MS))
+        && ((int32_t)(now - Ui_reassertAt_) >= 0)) {
+        BSP_lcdReassert();
+        Ui_reassertAt_ = now + pdMS_TO_TICKS(UI_PANEL_REASSERT_MS);
+    }
+
+    // LVGL runs on every page now, the boot image included: it is a widget
+    // like any other, and the page that owns the glass is the only page whose
+    // tree exists (each entry action rebuilds from a clean screen). There is
+    // nothing to hold back.
+
+    // The first frame of a page is a whole screen, and it is drawn under the
+    // same contract the boot image was: cleared first, and the clear proven -
+    // a frame landing in part would leave the page before it showing in the
+    // part it missed, which is the ghost. Forcing the invalidation says out
+    // loud that this frame is a whole screen, instead of relying on an
+    // invalidation that happened while LVGL was held off.
+    if (!Ui_frameArmed_) {
+        if (!BSP_lcdClearFrame()) {
+            return pdMS_TO_TICKS(1U);   // the clear did not cover the frame
+        }
+
+        if (!BSP_lcdFrameArm()) {
+            return pdMS_TO_TICKS(1U);   // sentinel did not land; retry
+        }
+
+        lv_obj_invalidate(lv_screen_active());
+        Ui_frameArmed_ = true;
     }
 
     uint32_t const next = lv_timer_handler();
     uint32_t const took = Ui_us_() - before;
+
+    if (Ui_frameArmed_ && !Ui_frameDone_) {
+        if (BSP_lcdFrameCovered()) {
+            Ui_frameDone_ = true;
+        }
+        else if (++Ui_dbgFrameTries_ < UI_FRAME_TRIES) {
+            lv_obj_invalidate(lv_screen_active());
+            return pdMS_TO_TICKS(1U);   // repaint, and check again
+        }
+        else {
+            Ui_frameDone_ = true;       // out of tries: the counter says so
+        }
+    }
 
     if (Ui_flushes_ > 0U) {
         uint32_t const flushes = Ui_flushes_;
@@ -191,6 +370,10 @@ TickType_t Ui_dispHeartbeat(void) {
 }
 //............................................................................
 void Ui_dispRender(bool ledOn, uint16_t edges) {
+    if (!Ui_built_) {
+        return;   // no widgets yet: the splash still owns the glass
+    }
+
     if (Ui_shownValid_ && (ledOn == Ui_shownOn_)
         && (edges == Ui_shownEdges_)) {
         return;
@@ -224,7 +407,7 @@ static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
     // master, not through this core's write buffer.
     __DSB();
     BSP_lcdWritePixelsDma((uint16_t const *)(void const *)px, width * height);
-    Ui_dmaWait_();
+    Ui_dmaWait_(UI_DMA_TIMEOUT_MS);
 
     ++Ui_flushes_;
     Ui_flushPx_ += width * height;
@@ -268,9 +451,9 @@ static void Ui_flushDone_(void) {
 // failed transfer means the channel reported an error - both are asserted on
 // this thread, where pushing a record and resetting the board is ordinary
 // work.
-static void Ui_dmaWait_(void) {
+static void Ui_dmaWait_(uint32_t timeoutMs) {
     uint32_t const signalled = ulTaskNotifyTakeIndexed(
-        UI_DMA_NOTIFY, pdTRUE, pdMS_TO_TICKS(UI_DMA_TIMEOUT_MS));
+        UI_DMA_NOTIFY, pdTRUE, pdMS_TO_TICKS(timeoutMs));
 
     if ((signalled == 0U) || BSP_lcdDmaFailed()) {
         SM_onAssert("uidma", __LINE__);
@@ -318,30 +501,20 @@ static void Ui_buildWidgets_(void) {
     Asset const * const asset = Asset_get();
     void const * const bgPixels = Asset_slot(asset, UI_BG_SLOT);
 
-    lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
+    if (Ui_built_) {
+        return;   // a re-entry to the demo page must not duplicate the tree
+    }
+    Ui_built_ = true;
 
-    // Black, the same black BSP_lcdInit() leaves in the frame memory: the
-    // screen has a real background (moving or removing a widget must repaint
-    // what it covered), but it matches the panel's own idle colour, so the
-    // first refresh does not tint the whole glass on the way in.
-    lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000U), 0);
-    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+    Ui_screenBase_(screen);
 
     // The bootloader's asset, if it verified: the whole screen becomes one
-    // image and the widgets sit on top of it. The descriptor points
-    // straight at the external SRAM - nothing is copied, nothing is decoded.
-    // Without it the screen keeps the black background, which is the
-    // degradation the design counts on.
+    // image and the widgets sit on top of it. Without it the screen keeps the
+    // black background, which is the degradation the design counts on.
     if (bgPixels != (void const *)0) {
         lv_obj_t *bg;
 
-        Ui_bgDsc_.header.magic = LV_IMAGE_HEADER_MAGIC;
-        Ui_bgDsc_.header.cf = LV_COLOR_FORMAT_RGB565;
-        Ui_bgDsc_.header.w = UI_LCD_HOR;
-        Ui_bgDsc_.header.h = UI_LCD_VER;
-        Ui_bgDsc_.header.stride = UI_LCD_HOR * 2U;
-        Ui_bgDsc_.data_size = ASSET_SLOT_BYTES;
-        Ui_bgDsc_.data = (uint8_t const *)bgPixels;
+        Ui_slotDesc_(&Ui_bgDsc_, bgPixels);
 
         bg = lv_image_create(screen);
         lv_image_set_src(bg, &Ui_bgDsc_);

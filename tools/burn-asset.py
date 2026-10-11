@@ -17,7 +17,7 @@ import serial  # pyserial
 
 JLINK = r"C:\mengrendufu\software_ins\JLink\JLink.exe"
 JL_OPTS = "-device STM32F103ZE -if SWD -speed 4000 -autoconnect 1 -ExitOnError 1 -NoGui 1"
-CMD = "/mnt/c/Windows/System32/cmd.exe"
+CMD = "cmd.exe"
 
 # ---- 线协议（握手部分已与目标机联调验证，见 AGENTS.md 的镜像布局条）----
 #   request  PC -> BL:  AA | ver(1) | len(4 BE) | crc32(4 BE)        10 B
@@ -75,9 +75,9 @@ def noinit_addr(elf):
 def jlink_flag_and_reset(addr, tpl):
     """② 生成命令文件并执行：置标志 → 复位。（JLink 退出时用 qc，目标继续跑）"""
     script = open(tpl, encoding="utf-8").read().replace("@ADDR@", addr)
-    path = "/tmp/enter-burn.jlink"
+    path = os.path.join(os.environ.get("TEMP", r"C:\tmp_atk"), "enter-burn.jlink")
     open(path, "w", encoding="utf-8").write(script)
-    win = subprocess.run(["wslpath", "-w", path], capture_output=True, text=True).stdout.strip()
+    win = path   # already a Windows path when run from Windows
     if " " in win:
         sys.exit("[burn] 路径带空格，cmd.exe 传不过去")
     t0 = time.time()
@@ -176,7 +176,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", default="COM5")
     ap.add_argument("--image", required=True, help="RGB565 裸数据（240x320x2 = 153600 B）")
-    ap.add_argument("--elf", default="build/debug/bootloader.elf")
+    ap.add_argument("--elf", default="build/debug/sm_blinky.elf")
+    ap.add_argument("--noinit", help="noinit base hex; skips arm-none-eabi-nm (WSL only)")
     ap.add_argument("--tpl", default=os.path.join(os.path.dirname(__file__), "enter-burn.jlink.tpl"))
     ap.add_argument("--no-jlink", action="store_true", help="跳过 J-Link（标志已置好时用，便于调协议）")
     ap.add_argument("--handshake-only", action="store_true", help="握上手就停（联调用，不碰 flash）")
@@ -193,7 +194,7 @@ def main():
     print(f"[burn] 串口 {a.port} 已打开并保持（rts/dtr = deassert）")
     try:
         if not a.no_jlink:
-            jlink_flag_and_reset(noinit_addr(a.elf), a.tpl)   # ②
+            jlink_flag_and_reset(a.noinit if a.noinit else noinit_addr(a.elf), a.tpl)   # ②
         handshake(ser, len(img))                         # ③
         if a.handshake_only:
             print("[burn] --handshake-only：到此为止（不碰 flash）")

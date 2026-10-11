@@ -23,10 +23,23 @@
 // because LV_OS_NONE has no locks at all.
 void Ui_dispInit(void);
 
+// Pushes the boot image and proves the push covered the frame: the frame is
+// cleared first, the coverage sentinel goes down, the image goes out as one
+// whole-frame transfer, and the sentinel has to be gone afterwards. False
+// means the glass is not showing the boot image, so there is nothing to hold.
+bool Ui_dispSplash(void);
+
+// The demo page starts: the next frame is a whole screen, so the adapter
+// clears the frame and proves the clear before it draws.
+void Ui_dispDemo(void);
+
 // Runs lv_timer_handler() (which draws whatever is dirty) and returns how
 // long the thread may sleep before the next timer is due. Clamped both ways:
 // LV_NO_TIMER_READY or anything above the poll fallback becomes the fallback,
 // and zero becomes one tick, so the loop never spins.
+//
+// splashLeft > 0 means the boot image still owns the glass: LVGL is not run
+// at all, and the returned wait is what is left of that hold.
 TickType_t Ui_dispHeartbeat(void);
 
 // Pushes the HSM state into the widgets. Idempotent and cheap: an unchanged

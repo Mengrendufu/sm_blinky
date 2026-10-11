@@ -55,11 +55,6 @@ void BSP_dbgLcdBootReport(void);
 // as it is - no byte swapping on this path.
 void BSP_lcdSetWindow(uint16_t xs, uint16_t ys, uint16_t xe, uint16_t ye);
 
-// One whole frame, straight to the panel, waited out by polling the channel:
-// for the boot splash, which runs before there is a task to notify. count is
-// in pixels, 240 x 320 of them for a full screen.
-bool BSP_lcdShowImage(uint16_t const *pixels, uint32_t count);
-
 // The pixel push runs on DMA1 channel 6: the caller arms the channel and
 // returns, and the transfer's completion runs the hook below from the
 // channel's interrupt.
@@ -85,6 +80,21 @@ void BSP_lcdWritePixelsDma(uint16_t const *pixels, uint32_t count);
 // thread from here and calls lv_display_flush_ready(); keep it to that. No
 // blocking, no waiting, nothing that takes a lock.
 void BSP_lcdDmaSetDoneHook(void (*hook)(void));
+
+// The same coverage contract for any other whole-screen picture, which for
+// this firmware is the display layer's first frame: clear the frame and prove
+// the clear covered it, lay the sentinel, draw, then ask whether the drawing
+// covered the frame. A caller that gets false for either half knows the glass
+// is showing two pictures at once - the ghost - and repaints instead of
+// accepting it.
+// Re-send the panel's own register table and display-on. A cold power-up can
+// brown the panel out mid-way, which resets those registers and leaves the
+// frame memory alone - a picture that survives with the wrong polarity. Cheap
+// and idempotent: the display layer calls it for a while after bring-up.
+void BSP_lcdReassert(void);
+bool BSP_lcdClearFrame(void);
+bool BSP_lcdFrameArm(void);
+bool BSP_lcdFrameCovered(void);
 
 // True when the last transfer ended in a DMA error. The adapter reads it
 // after its wait, so the assertion and its record happen on the thread
