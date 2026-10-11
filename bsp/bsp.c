@@ -162,25 +162,10 @@ void BSP_dbgMemReport(uint8_t selfRecId) {
 }
 //............................................................................
 void BSP_ledOn(void) {
-    // FreeRTOS tick: the AO beat itself is driven by it, so it cannot freeze.
-    uint32_t timeStamp = (uint32_t)xTaskGetTickCount();
-    SM_TRACE_BEGIN(11, 4)
-        SM_TRACE_PAYLOAD_BE(timeStamp >> 24)
-        SM_TRACE_PAYLOAD_BE(timeStamp >> 16)
-        SM_TRACE_PAYLOAD_BE(timeStamp >>  8)
-        SM_TRACE_PAYLOAD_BE(timeStamp >>  0)
-    SM_TRACE_END()
+    // The LED is active low: logic 0 lights it.
     HAL_GPIO_WritePin(BSP_LED_PORT, BSP_LED_PIN, 0);
 }
 void BSP_ledOff(void) {
-    // FreeRTOS tick: the AO beat itself is driven by it, so it cannot freeze.
-    uint32_t timeStamp = (uint32_t)xTaskGetTickCount();
-    SM_TRACE_BEGIN(10, 4)
-        SM_TRACE_PAYLOAD_BE(timeStamp >> 24)
-        SM_TRACE_PAYLOAD_BE(timeStamp >> 16)
-        SM_TRACE_PAYLOAD_BE(timeStamp >>  8)
-        SM_TRACE_PAYLOAD_BE(timeStamp >>  0)
-    SM_TRACE_END()
     HAL_GPIO_WritePin(BSP_LED_PORT, BSP_LED_PIN, 1);
 }
 

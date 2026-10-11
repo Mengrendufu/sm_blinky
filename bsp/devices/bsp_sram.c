@@ -11,13 +11,6 @@
 #include "bsp_sram.h"
 
 //============================================================================
-// Bank base. The bank is 1 MB, 512K x 16, and it is the one place that
-// defines where it starts: the asset loader takes its base from here, and the
-// partition on it (the asset in the first 450 KB, the rest free) lives here
-// too, in the header.
-#define SRAM_BANK_ADDR  BSP_SRAM_BASE
-
-//============================================================================
 static void BSP_sramGpioInit_(void);
 static void BSP_sramFsmcInit_(void);
 

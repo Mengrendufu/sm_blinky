@@ -69,35 +69,10 @@
 // its coverage proof and the asset being current are the whole of it. Under
 // test (2026-10-12): the re-drive window was dropped, the glass is the judge.
 
-// How long after bring-up the panel's inversion is re-asserted, and how
-// often. A panel still running its own power-up can end that sequence by
-// loading its NVM, leaving the black level with the wrong polarity: a correct
-// frame then reads as a ghost of itself (black as a bright field). The
-// inversion bit is
-// the only one of those settings that is safe to write while the panel scans,
-// so it is re-asserted for a while rather than once - a clobber is corrected
-// within one period. The panel's own power-up is done within seconds
-// (measured 3 to 8 s, worst case past 11), hence the generous window.
-#define UI_PANEL_SETTLE_MS   15000U
-#define UI_PANEL_REASSERT_MS 500U
-
 // Which background slot the demo shows. 0 = bg-a (夜色仪表),
 // 1 = bg-b (网格科技),
 // 2 = bg-c (暮色准照片) - the three the burner wrote, in that order.
 #define UI_BG_SLOT 0U
-
-// Temporary measurement: what one refresh really costs, and how much of it is
-// our own flush. Two records per refresh that flushed something, so the log
-// stays readable:
-//   ==TIME==[FRAME][<us total>][<flushes>][<KiB flushed>]==  RecID 39
-//   ==TIME==[FLUSH][<us in flush>][<flushes>]==             RecID 40
-//   ==TIME==[BLK][<us render><us flush><w/8><h/8>]==        RecID 41
-// The difference between 39 and 40 is what LVGL's rendering costs; 41 splits
-// that by chunk, and says which chunk: the render time of a chunk is the gap
-// between the end of the previous flush and the start of this one.
-#define UI_TRACE_FRAME 39U
-#define UI_TRACE_FLUSH 40U
-#define UI_TRACE_BLK   41U
 
 static lv_display_t *Ui_disp_;
 static lv_image_dsc_t Ui_bgDsc_;      // demo page background, slot 0
@@ -116,11 +91,6 @@ static uint16_t Ui_strip_[UI_STRIP_PX] LV_ATTRIBUTE_MEM_ALIGN;
 
 // Captured at bring-up: the thread the transfer's interrupt wakes.
 static TaskHandle_t Ui_waiter_;
-
-static uint32_t Ui_flushes_;
-static uint32_t Ui_flushPx_;
-static uint32_t Ui_flushUs_;
-static uint32_t Ui_lastFlushEnd_;
 
 // A page's entry action sets this, and the first frame that answers it
 // clears it: it asks for one whole-screen repaint, and it is what holds the
@@ -148,7 +118,6 @@ static void Ui_flushDone_(void);
 static void Ui_flushWait_(lv_display_t *disp);
 static void Ui_dmaWait_(uint32_t timeoutMs);
 static uint32_t Ui_tick_(void);
-static uint32_t Ui_us_(void);
 
 //============================================================================
 void Ui_dispInit(void) {
@@ -260,25 +229,6 @@ void Ui_dispDemo(void) {
 }
 //............................................................................
 TickType_t Ui_dispHeartbeat(void) {
-    static TickType_t Ui_bootTick_;
-    static TickType_t Ui_reassertAt_;
-    uint32_t const before = Ui_us_();
-    TickType_t const now = xTaskGetTickCount();
-
-    // The panel's inversion keep-alive, see UI_PANEL_SETTLE_MS. Runs between
-    // flushes like everything else here, on every page: a clobber does not
-    // wait for the splash hold to be over.
-    if (Ui_bootTick_ == 0U) {
-        Ui_bootTick_ = (now == 0U) ? 1U : now;
-        Ui_reassertAt_ = now;
-    }
-    if (((int32_t)(now - Ui_bootTick_)
-         < (int32_t)pdMS_TO_TICKS(UI_PANEL_SETTLE_MS))
-        && ((int32_t)(now - Ui_reassertAt_) >= 0)) {
-        BSP_lcdReassert();
-        Ui_reassertAt_ = now + pdMS_TO_TICKS(UI_PANEL_REASSERT_MS);
-    }
-
     // LVGL runs on every page now, the boot image included: it is a widget
     // like any other, and the page that owns the glass is the only page whose
     // tree exists (each entry action rebuilds from a clean screen). There is
@@ -293,35 +243,6 @@ TickType_t Ui_dispHeartbeat(void) {
     }
 
     uint32_t const next = lv_timer_handler();
-    uint32_t const took = Ui_us_() - before;
-
-    if (Ui_flushes_ > 0U) {
-        uint32_t const flushes = Ui_flushes_;
-        uint32_t const kib = Ui_flushPx_ / 1024U;
-
-        Ui_flushes_ = 0U;
-        Ui_flushPx_ = 0U;
-
-        SM_TRACE_BEGIN(UI_TRACE_FRAME, 6)
-            SM_TRACE_PAYLOAD_BE((took >> 24) & 0xFFU)
-            SM_TRACE_PAYLOAD_BE((took >> 16) & 0xFFU)
-            SM_TRACE_PAYLOAD_BE((took >> 8) & 0xFFU)
-            SM_TRACE_PAYLOAD_BE(took & 0xFFU)
-            SM_TRACE_PAYLOAD_BE((uint8_t)((flushes > 255U) ? 255U : flushes))
-            SM_TRACE_PAYLOAD_BE((uint8_t)((kib > 255U) ? 255U : kib))
-        SM_TRACE_END()
-
-        SM_TRACE_BEGIN(UI_TRACE_FLUSH, 5)
-            SM_TRACE_PAYLOAD_BE((Ui_flushUs_ >> 24) & 0xFFU)
-            SM_TRACE_PAYLOAD_BE((Ui_flushUs_ >> 16) & 0xFFU)
-            SM_TRACE_PAYLOAD_BE((Ui_flushUs_ >> 8) & 0xFFU)
-            SM_TRACE_PAYLOAD_BE(Ui_flushUs_ & 0xFFU)
-            SM_TRACE_PAYLOAD_BE((uint8_t)((flushes > 255U) ? 255U : flushes))
-        SM_TRACE_END()
-
-        Ui_flushUs_ = 0U;
-        Ui_lastFlushEnd_ = 0U;   // the next refresh starts a new chain
-    }
 
     if ((next == LV_NO_TIMER_READY) || (next > UI_FALLBACK_MS)) {
         return pdMS_TO_TICKS(UI_FALLBACK_MS);
@@ -354,11 +275,8 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
 // window first makes the panel's address counter walk exactly that rectangle.
 static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
                       uint8_t *px) {
-    uint32_t const entered = Ui_us_();
     uint32_t const width = (uint32_t)(area->x2 - area->x1 + 1);
     uint32_t const height = (uint32_t)(area->y2 - area->y1 + 1);
-    uint32_t const gap = (Ui_lastFlushEnd_ == 0U)
-                         ? 0U : (entered - Ui_lastFlushEnd_);
 
     BSP_lcdSetWindow((uint16_t)area->x1, (uint16_t)area->y1,
                      (uint16_t)area->x2, (uint16_t)area->y2);
@@ -381,28 +299,6 @@ static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
             Ui_backlightOn_ = true;
             BSP_lcdBacklight(true);
         }
-    }
-
-    ++Ui_flushes_;
-    Ui_flushPx_ += width * height;
-
-    {
-        uint32_t const left = Ui_us_();
-        uint32_t const inFlush = left - entered;
-        uint32_t const gapClamped = (gap > 65535U) ? 65535U : gap;
-        uint32_t const flushClamped = (inFlush > 65535U) ? 65535U : inFlush;
-
-        Ui_flushUs_ += inFlush;
-        Ui_lastFlushEnd_ = left;
-
-        SM_TRACE_BEGIN(UI_TRACE_BLK, 6)
-            SM_TRACE_PAYLOAD_BE((gapClamped >> 8) & 0xFFU)
-            SM_TRACE_PAYLOAD_BE(gapClamped & 0xFFU)
-            SM_TRACE_PAYLOAD_BE((flushClamped >> 8) & 0xFFU)
-            SM_TRACE_PAYLOAD_BE(flushClamped & 0xFFU)
-            SM_TRACE_PAYLOAD_BE((uint8_t)(width / 8U))
-            SM_TRACE_PAYLOAD_BE((uint8_t)(height / 8U))
-        SM_TRACE_END()
     }
 
     lv_display_flush_ready(disp);
@@ -457,13 +353,6 @@ static void Ui_flushWait_(lv_display_t *disp) {
 // agree and nothing needs lv_tick_inc() (charter §3).
 static uint32_t Ui_tick_(void) {
     return (uint32_t)xTaskGetTickCount();
-}
-//............................................................................
-// Microseconds, for the measurement above: the HAL time base is TIM1 at 1 MHz
-// (one count per microsecond, wrapping every millisecond), so the tick count
-// carries the milliseconds and TIM1->CNT the rest.
-static uint32_t Ui_us_(void) {
-    return ((uint32_t)HAL_GetTick() * 1000U) + (uint32_t)TIM1->CNT;
 }
 //............................................................................
 // The demo screen: a title, one square that follows the Blinky AO's LED, and

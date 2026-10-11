@@ -337,17 +337,13 @@ static void BSP_lcdPanelInit_(void) {
 // the channel: the boot splash runs before the scheduler, so there is no task
 // to notify. One screen is 8.6 ms of bus.
 //............................................................................
-// Put the panel's inversion back. A panel that is still running its own
-// power-up can end that sequence by loading its NVM, and what that leaves
-// behind is a panel whose black level has the wrong polarity: black comes up
-// as a bright field, so a correct frame reads as a ghost of itself. The
-// inversion bit is what that level hangs on, and unlike the power and VCOM
-// registers it can be written while the panel is scanning - idempotent, tens
-// of microseconds - so the display layer re-asserts it for a while after
-// bring-up instead of once.
-void BSP_lcdReassert(void) {
-    BSP_lcdWriteCmd_(LCD_INVON_CMD);
-}
+// The inversion keep-alive that used to stand here - 0x21 re-sent every
+// 500 ms for 15 s after bring-up - is gone (2026-10-12): the run-time path
+// writes pixels and nothing else. The vendor table below sets the inversion
+// once, and bring-up writes that table last, after the frame has proved it
+// takes writes, which is the half of it that was measured. A clobber after
+// that has never been seen; if one ever is, its symptom is a frame that reads
+// as its own ghost (black as a bright field).
 //............................................................................
 // The run-time coverage proof used to live here: clear the frame and prove
 // it, lay the sentinel, draw, then ask whether the drawing covered the frame

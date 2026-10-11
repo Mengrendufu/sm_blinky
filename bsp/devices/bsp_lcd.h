@@ -95,11 +95,9 @@ void BSP_lcdWritePixelsDma(uint16_t const *pixels, uint32_t count);
 // blocking, no waiting, nothing that takes a lock.
 void BSP_lcdDmaSetDoneHook(void (*hook)(void));
 
-// Re-send the panel's own register table and display-on. A cold power-up can
-// brown the panel out mid-way, which resets those registers and leaves the
-// frame memory alone - a picture that survives with the wrong polarity. Cheap
-// and idempotent: the display layer calls it for a while after bring-up.
-void BSP_lcdReassert(void);
+// Nothing here writes a panel register at run time any more: the display
+// layer opens a window and pushes pixels, and the vendor table was written
+// last during bring-up (2026-10-12: the inversion keep-alive is retired).
 
 // True when the last transfer ended in a DMA error. The adapter reads it
 // after its wait, so the assertion and its record happen on the thread

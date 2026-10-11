@@ -58,11 +58,7 @@ sequenceDiagram
     end
     Note over ui,panel: 实测（2026-10-12 拆净证明后）：Splash 首帧 34.8 ms / 10 flushes / 75 KiB（拆之前同口径 74 ms）；Ui_dbgSplashOk_=1
 
-    par 极性保活（面板自己的上电序列可能把极性顶掉：黑↔亮）
-        ui->>panel: 每 500 ms 重发显示反转 0x21（持续 15 s；唯一能在扫描期安全改写的寄存器）
-    and 事件照常（LED 边沿不丢，收件箱照常排空）
-        blinky->>ui: LED 边沿（500 ms beat）⇒ HSM 更新模型
-    end
+    Note over blinky,ui: 事件照常：LED 边沿（500 ms beat）⇒ HSM 更新模型，收件箱照常排空；<br/>运行期的面板只有像素写、一条寄存器写都没有（2026-10-12 拆掉 0x21 保活）
 
     ui->>hsm: hold 到期（UI_SPLASH_MS = 1500）⇒ 派发 UI_SPLASH_DONE_SIG
     hsm->>disp: Ui_dispDemo()：lv_obj_clean + 重建 demo 控件树（**每页从干净屏幕重建**）
