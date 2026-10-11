@@ -23,8 +23,6 @@ BGS = [
      '<span class="no">当前没有任何页面显示</span>'),
     ("bg-logo", "开机展示页", "深底 + 圆角边框 + 方波 + 5×7 点阵字 sm_blinky", 1027, 153600, 504837039, 2,
      "Splash 首帧 —— <b>在显</b>（上电先看它 1.5 s）"),
-    ("bg-c", "暮色准照片", "斜向渐变 + 冷暖光斑 + 重暗角", 697, 153600, 393248149, None,
-     '<span class="warn">候选，不在板上</span>'),
 ]
 
 def overlay(show=True):
@@ -92,12 +90,11 @@ html = f'''<!DOCTYPE html>
 {frame("bg-logo", "槽 2 · 开机展示页 —— 上电先看它 1.5 s，不叠布局锚点", False)}
 </div>
 
-<h2>② 纯背景（同尺寸，看构图；最后一张是候选、不在板上）</h2>
+<h2>② 纯背景（同尺寸，看构图）</h2>
 <div class="row">
 {frame("bg-a", "bg-a · 槽 0（在显）", False)}
 {frame("bg-b", "bg-b · 槽 1（在板未显）", False)}
 {frame("bg-logo", "bg-logo · 槽 2（开机图）", False)}
-{frame("bg-c", "bg-c · 候选，不在板上", False)}
 </div>
 
 <h2>③ 资产表（槽位 / 尺寸 / 单张 CRC / 用途）</h2>
@@ -126,12 +123,12 @@ payload 读 <b>263 ms</b>（1.75 MB/s，差的 ~58 ms 是分块开销；块已�
 <td>LVGL 每帧逐像素解码</td><td><span class="no">不建议</span>每帧解码 + 混合，刷新会被拖垮</td></tr>
 </table>
 <div class="note">
-<span class="warn">RLE 游程数（4,150 / 9,551 / 9,078）是按"相邻像素相同"直接数的，没有真实编码器；B2 若真做还要算长度字段与解码耗时。</span>
+<span class="warn">RLE 游程数（4,150 / 9,551，bg-a / bg-b）是按"相邻像素相同"直接数的，没有真实编码器；B2 若真做还要算长度字段与解码耗时。</span>
 </div>
 
 <h2>⑤ 文件在哪 / 怎么烧 / 怎么核</h2>
 <div class="note">
-图源与产物：<code>./bg/</code> 共 8 个文件（<code>bg-a</code> / <code>bg-b</code> / <code>bg-c</code> / <code>bg-logo</code> 各一份 <code>.png</code> + <code>.rgb565</code>，小端 RGB565）。<br>
+图源与产物：在板三张 = <code>bg-a</code> / <code>bg-b</code> / <code>bg-logo</code>，各一份 <code>.png</code>（看）与 <code>.rgb565</code>（LVGL 原生，小端）。<br>
 生成器：<code>gen_bg.py</code>（三张背景）+ <code>gen_logo.py</code>（开机图），都在本目录，纯标准库；本页由 <code>gen_bg_preview.py</code> 生成。<br>
 烧写：<code>tools/burn-asset.py</code>（Windows 侧，CH340 = COM12）把三槽拼成 460,800 B 经 bootloader 写进 NOR <code>0x00081000</code>。<br>
 核验（三方对齐）：烧完读 app 的 <code>Asset_.crc32</code>（J-Link）＝ SRAM 槽头 ＝ 仓库拼出来的 <code>0x7BE8D093</code> ✓。
