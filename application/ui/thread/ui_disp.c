@@ -84,7 +84,6 @@
 #define UI_FRAME_BUDGET_US 33000U
 #define UI_STACK_WORDS    2048U   // the UI task's static stack, in words
 #define UI_BEAT_MS        500U    // the AO beat the demo page's card shows
-#define UI_TRACE_RECT     83U     // temporary: the flush rectangle (id 83)
 // How often the panel's inversion bit is re-sent. The clobber has no
 // schedule, so this one never stops - it is one command, and it is the only
 // panel register the run-time path touches (see BSP_lcdReassert).
@@ -152,6 +151,7 @@ static void Ui_buildStats_(void);
 static void Ui_pageBegin_(uint32_t slot, Ui_Page page);
 static uint32_t Ui_pct_(uint32_t used, uint32_t total);
 static void Ui_showMs_(lv_obj_t *label, uint32_t us);
+static void Ui_ringRefresh_(void);
 static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
                       uint8_t *px);
 static void Ui_flushDone_(void);
@@ -380,6 +380,7 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
             uint32_t const v = (uint32_t)edges % 101U;
 
             lv_arc_set_value(Ui_arc_, (int32_t)v);
+            Ui_ringRefresh_();
             lv_label_set_text_fmt(Ui_num_, "%u", (unsigned)v);
             lv_label_set_text(Ui_v1_, ledOn ? "ON" : "OFF");
             lv_label_set_text_fmt(Ui_v3_, "%u", (unsigned)edges);
@@ -407,6 +408,7 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
             lv_arc_set_value(Ui_arc_,
                              (int32_t)Ui_pct_(UI_STACK_WORDS - stackFree,
                                               UI_STACK_WORDS));
+            Ui_ringRefresh_();
             lv_label_set_text_fmt(Ui_v1_, "%u w", (unsigned)stackFree);
             uint32_t const poolKb = mon.free_size / 1024U;
 
@@ -425,15 +427,6 @@ static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
                       uint8_t *px) {
     uint32_t const width = (uint32_t)(area->x2 - area->x1 + 1);
     uint32_t const height = (uint32_t)(area->y2 - area->y1 + 1);
-
-    // == DEBUG (temporary, id 83): which rectangle is being pushed, and how
-    // wide it is against the 240-pixel buffer stride. Out when answered. ==
-    SM_TRACE_BEGIN(UI_TRACE_RECT, 4)
-        SM_TRACE_PAYLOAD_BE((uint8_t)area->x1)
-        SM_TRACE_PAYLOAD_BE((uint8_t)area->x2)
-        SM_TRACE_PAYLOAD_BE((uint8_t)area->y1)
-        SM_TRACE_PAYLOAD_BE((uint8_t)area->y2)
-    SM_TRACE_END()
 
     // The pixels of the rectangle are contiguous from the buffer's start,
     // however narrow the rectangle is: LVGL re-shapes its render buffer to
@@ -522,6 +515,29 @@ static uint32_t Ui_tick_(void) {
 // the tick count carries the milliseconds and TIM1->CNT carries the rest.
 static uint32_t Ui_us_(void) {
     return ((uint32_t)HAL_GetTick() * 1000U) + (uint32_t)TIM1->CNT;
+}
+//............................................................................
+// Ask for the ring's redraw over the full-width strips it lives in, not over
+// its own box. LVGL 9.5 draws a partial-width redraw of lv_arc with wrong
+// pixels: the same bands come out right when the whole row is dirty, wrong
+// when only the arc's columns are (measured on the glass, 2026-10-12, with
+// the pushed rectangles identical in both cases). Six 240x32 strips - the
+// arc's own rows - are what the glass was measured clean with, and that is
+// about 21 ms against the whole screen's 34.8.
+static void Ui_ringRefresh_(void) {
+    lv_area_t box;
+    lv_area_t strips;
+
+    if (Ui_arc_ == (lv_obj_t *)0) {
+        return;
+    }
+
+    lv_obj_get_coords(Ui_arc_, &box);
+    strips.x1 = 0;
+    strips.x2 = (lv_coord_t)(UI_LCD_HOR - 1);
+    strips.y1 = box.y1;
+    strips.y2 = box.y2;
+    lv_obj_invalidate_area(lv_screen_active(), &strips);
 }
 //............................................................................
 static uint32_t Ui_pct_(uint32_t used, uint32_t total) {
