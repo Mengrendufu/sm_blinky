@@ -265,13 +265,9 @@ static void Ui_pageBegin_(uint32_t slot, Ui_Page page) {
     void const * const bgPixels = Asset_slot(asset, slot);
     lv_obj_t * const screen = lv_screen_active();
 
-    // A running animation would hold the old widget by pointer, and the clean
-    // below takes that widget away with it: the animation goes first.
-    if (Ui_led_ != (lv_obj_t *)0) {
-        lv_anim_delete(Ui_led_, (lv_anim_exec_xcb_t)0);
-        Ui_led_ = (lv_obj_t *)0;
-    }
-
+    // Nothing to stop by hand: LVGL clears an object's animations in its own
+    // delete path (lv_obj.c), and the led in the corner no longer animates.
+    // The clean below is what takes the old page's widgets away.
     // Every page builds its own tree, from a clean screen: the page before it
     // is gone before this one exists, so the two can never share the glass.
     lv_obj_clean(screen);
@@ -377,6 +373,12 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
         lv_obj_set_style_bg_color(Ui_led_,
                                   lv_color_hex(ledOn ? 0x00C853U
                                                      : 0x303840U), 0);
+        if (ledOn) {
+            lv_led_on(Ui_led_);
+        }
+        else {
+            lv_led_off(Ui_led_);
+        }
     }
 
     // One readout both pages share: the load over the window that just
@@ -678,14 +680,12 @@ static void Ui_ring_(lv_obj_t *parent) {
     lv_obj_align(Ui_unit_, LV_ALIGN_TOP_MID, 0, 140);
 }
 //............................................................................
-// The one thing on the glass that moves on its own: the heartbeat's breath.
-// The animation goes before the widget does - see Ui_pageBegin_.
-static void Ui_ledAnim_(void * obj, int32_t v) {
-    lv_led_set_brightness((lv_obj_t *)obj, (uint8_t)v);
-}
+// The corner's heartbeat: one led that blinks with the AO's own LED, so what
+// the screen shows and what the board does are the same event. It used to
+// breathe at the tick rate instead, which was decoration and cost a redraw
+// every frame; a toggle is 0.1 ms twice a second.
 static void Ui_heartbeat_(lv_obj_t *parent) {
     lv_obj_t *led = lv_led_create(parent);
-    lv_anim_t a;
 
     lv_obj_set_size(led, 10, 10);
     lv_obj_align(led, LV_ALIGN_TOP_RIGHT, -8, 7);
@@ -699,16 +699,8 @@ static void Ui_heartbeat_(lv_obj_t *parent) {
     Ui_cpu_ = Ui_label_(parent, "cpu --%", 0x9AA3ACU);
     lv_obj_align(Ui_cpu_, LV_ALIGN_TOP_RIGHT, -24, 6);
 
-    // 900 ms in, 900 ms out, forever. The dirty area is 10x10, so the whole
-    // animation is 0.1 ms a frame against a 33 ms budget (charter §6).
-    lv_anim_init(&a);
-    lv_anim_set_var(&a, led);
-    lv_anim_set_values(&a, 60, 255);
-    lv_anim_set_duration(&a, 900);
-    lv_anim_set_playback_duration(&a, 900);
-    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_exec_cb(&a, Ui_ledAnim_);
-    lv_anim_start(&a);
+    // On and off is Ui_dispRender's job: it turns this led with ledOn, which
+    // the AO posts.
 }
 //............................................................................
 static void Ui_barCreate_(lv_obj_t *parent) {

@@ -64,7 +64,7 @@ def page1():
     o = []
     o.append(div(0, 0, 240, 24, "topbar", "<span>sm_blinky</span><span>cpu 26 %</span>"))
     o.append(div(210, 7, 10, 10, "led"))
-    o.append(tag(0, 0, "顶栏 240x24 · title + cpu 读数 + lv_led(10x10) 呼吸"))
+    o.append(tag(0, 0, "顶栏 240x24 · title + cpu 读数 + lv_led(10x10) 闪烁（跟板载 LED 同步）"))
     o.append(div(40, 28, 160, 160, "ring"))
     o.append(tag(40, 28, "lv_arc 160x160 环宽12 扫角240°"))
     o.append(div(80, 84, 80, 48, "bignum", '<span style="font-size:44px">72</span>'))
@@ -112,7 +112,7 @@ def screen(bg, widgets, title):
 
 ROWS = [
     ("1", "顶栏文字", "(0,0)-(240,24)", "常量", "不动", "-", "-"),
-    ("1", "lv_led", "(210,7) 10x10", "AO beat（ledOn）", "lv_led_set_brightness + lv_anim（呼吸）", "100", "0.1 / 0%"),
+    ("1+2", "lv_led（两页共用）", "(210,7) 10x10", "AO beat（ledOn）", "lv_led_on/off，跟板载 LED 同步闪烁（不再呼吸）", "100", "0.1 / 每 500 ms 一次"),
     ("1", "lv_arc", "(40,28) 160x160", "edges 映射 0..100", "值变时一次性重绘（160x160 ⇒ 34.8 ms，太贵不补间）", "25,600", "34.8 / 105%"),
     ("1", "大数字", "(80,84) 80x48", "同上", "文本替换（值变时）", "~3,800", "4.6 / 14%"),
     ("1", "单位", "(80,132) 80x16", "常量", "不动", "-", "-"),
