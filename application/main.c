@@ -80,7 +80,6 @@ int main(void) {
     // order is the contract, not the timing luck that used to cover it.
     SST_init();
     Ui_start();
-    BSP_cpuProbeStart();   // TODO(probe): the known-load task
     Flash_start();
     AO_start();
     SST_start();

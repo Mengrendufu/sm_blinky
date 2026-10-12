@@ -28,42 +28,6 @@ void BSP_cpuSample(uint32_t *idle, uint32_t *total) {
     *total = BSP_cpuTicks_;
 }
 //............................................................................
-//============================================================================
-// TODO(probe 2026-10-12): a known CPU load, so the corner's number can be
-// checked against the glass. Duty walks 0/25/50/75/100 percent, three seconds
-// each, for ever: the display should follow it (plus the ~6 percent the rest
-// of the system uses). At the 100 percent step the idle task is starved, so
-// the trace pump stops and nMin falls to 0 - that is the probe at work, not a
-// fault. Remove this, its BSP_cpuProbeStart declaration and the main.c call
-// once the meter is trusted.
-static void BSP_cpuProbeTask_(void *arg) {
-    TickType_t last = xTaskGetTickCount();
-    TickType_t spin;
-    uint32_t step = 0U;
-    uint32_t n = 0U;
-
-    (void)arg;
-    for (;;) {
-        spin = (TickType_t)(step % 5U);         // 0..4 ticks of burn
-        while ((TickType_t)(xTaskGetTickCount() - last) < spin) {
-            ;                                   // the load, and nothing else
-        }
-        vTaskDelay((TickType_t)(4U - spin));    // period = 4 ticks = 40 ms
-        last = xTaskGetTickCount();
-        if (++n >= 75U) {                       // 75 * 40 ms = 3 s per step
-            n = 0U;
-            ++step;
-        }
-    }
-}
-void BSP_cpuProbeStart(void) {
-    static StaticTask_t tcb;
-    static StackType_t stack[128];
-
-    (void)xTaskCreateStatic(BSP_cpuProbeTask_, "cpuprobe", 128U, (void *)0,
-                            tskIDLE_PRIORITY + 1U, stack, &tcb);
-}
-//............................................................................
 void vApplicationIdleHook(void)
 {
     SST_onIdle();
