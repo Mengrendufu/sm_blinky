@@ -416,11 +416,10 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
             lv_arc_set_value(Ui_arc_, (int32_t)v);
             Ui_ringRefresh_();
             lv_label_set_text_fmt(Ui_num_, "%u", (unsigned)v);
-            lv_label_set_text(Ui_v1_, ledOn ? "ON" : "OFF");
             lv_label_set_text_fmt(Ui_v3_, "%u", (unsigned)edges);
         }
         if (slow) {
-            lv_label_set_text_fmt(Ui_v2_, "%u ms", (unsigned)UI_BEAT_MS);
+            lv_label_set_text_fmt(Ui_v1_, "%u ms", (unsigned)UI_BEAT_MS);
             Ui_showMs_(Ui_v4_, Ui_frameUs_);
             uint32_t const load = Ui_pct_(Ui_frameUs_,
                                           UI_FRAME_BUDGET_US);
@@ -757,7 +756,12 @@ static void Ui_buildDemo_(void) {
     // takes some seven seconds. The raw number stays on card B.
     lv_label_set_text(Ui_unit_, "beat");
     Ui_heartbeat_(screen);
-    Ui_card_(screen, 12, 204, "LED", "beat", &Ui_v1_, &Ui_v2_);
+    // No LED text on this card any more: the led in the corner is that
+    // readout now, and it is the one that blinks. The freed pair stays blank
+    // (its two labels get an empty string) rather than inventing a value for
+    // it.
+    Ui_card_(screen, 12, 204, "beat", "", &Ui_v1_, &Ui_v2_);
+    lv_label_set_text(Ui_v2_, "");
     Ui_card_(screen, 124, 204, "edges", "frame", &Ui_v3_, &Ui_v4_);
     Ui_barCreate_(screen);
     Ui_dots_(screen, 0U);
