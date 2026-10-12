@@ -102,6 +102,7 @@ static lv_image_dsc_t Ui_bgDsc_;      // the background of the page that is up
 static lv_image_dsc_t Ui_splashDsc_;  // boot image, slot 2
 static Ui_Page Ui_page_;              // which page owns the glass
 static lv_obj_t *Ui_led_;             // heartbeat, top right on both pages
+static lv_obj_t *Ui_cpu_;             // CPU load, top right on both pages
 static lv_obj_t *Ui_arc_;             // the ring the art leaves room for
 static lv_obj_t *Ui_num_;             // the big number inside it
 static lv_obj_t *Ui_unit_;            // and what that number counts
@@ -378,6 +379,27 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
                                                      : 0x303840U), 0);
     }
 
+    // One readout both pages share: the load over the window that just
+    // passed. The tick hook counts the ticks that found the idle task on the
+    // CPU, so everything else is work. At 10 ms a tick and a 500 ms window
+    // that is fifty samples - a percentage to the nearest two.
+    if (slow) {
+        uint32_t idle;
+        uint32_t total;
+
+        BSP_cpuSample(&idle, &total);
+        uint32_t const dIdle = idle - Ui_cpuIdle_;
+        uint32_t const dTotal = total - Ui_cpuTotal_;
+
+        Ui_cpuIdle_ = idle;
+        Ui_cpuTotal_ = total;
+        if (dTotal > 0U) {
+            Ui_cpuPct_ = 100U - ((dIdle * 100U) / dTotal);
+        }
+        lv_label_set_text_fmt(Ui_cpu_, "cpu %u%%", (unsigned)Ui_cpuPct_);
+        Ui_statAt_ = now;
+    }
+
     if (Ui_page_ == UI_PAGE_DEMO) {
         // The ring follows the AO's edge count, wrapped to one turn, and the
         // number in it spells the same value: a ring nobody can read is
@@ -402,10 +424,10 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
                                           UI_FRAME_BUDGET_US);
 
             lv_bar_set_value(Ui_bar_, (int32_t)load, LV_ANIM_ON);
-            Ui_statAt_ = now;
         }
     }
     else {
+        lv_mem_monitor_t mon;
         uint32_t const stackFree =
             (uint32_t)uxTaskGetStackHighWaterMark((TaskHandle_t)0);
 
@@ -413,33 +435,19 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
             lv_label_set_text_fmt(Ui_num_, "%u", (unsigned)edges);
         }
         if (slow) {
-            uint32_t idle;
-            uint32_t total;
-
+            lv_mem_monitor(&mon);   // the LVGL pool, in bytes
             lv_arc_set_value(Ui_arc_,
                              (int32_t)Ui_pct_(UI_STACK_WORDS - stackFree,
                                               UI_STACK_WORDS));
             Ui_ringRefresh_();
             lv_label_set_text_fmt(Ui_v1_, "%u w", (unsigned)stackFree);
 
-            // The load over the window that just passed: the tick hook counts
-            // the ticks that found the idle task on the CPU, so everything
-            // else is work. At 10 ms a tick and a 500 ms window that is fifty
-            // samples - a percentage to the nearest two.
-            BSP_cpuSample(&idle, &total);
-            uint32_t const dIdle = idle - Ui_cpuIdle_;
-            uint32_t const dTotal = total - Ui_cpuTotal_;
+            uint32_t const poolKb = mon.free_size / 1024U;
 
-            Ui_cpuIdle_ = idle;
-            Ui_cpuTotal_ = total;
-            if (dTotal > 0U) {
-                Ui_cpuPct_ = 100U - ((dIdle * 100U) / dTotal);
-            }
-            lv_label_set_text_fmt(Ui_v2_, "%u %%", (unsigned)Ui_cpuPct_);
+            lv_label_set_text_fmt(Ui_v2_, "%u KB", (unsigned)poolKb);
             Ui_showMs_(Ui_v3_, Ui_frameMin_);
             Ui_showMs_(Ui_v4_, Ui_frameMax_);
-            lv_bar_set_value(Ui_bar_, (int32_t)Ui_cpuPct_, LV_ANIM_ON);
-            Ui_statAt_ = now;
+            lv_bar_set_value(Ui_bar_, (int32_t)mon.used_pct, LV_ANIM_ON);
         }
     }
 }
@@ -685,6 +693,12 @@ static void Ui_heartbeat_(lv_obj_t *parent) {
     lv_led_on(led);
     Ui_led_ = led;
 
+    // The top bar carries one number that belongs to the system rather than
+    // to a page: the CPU load, left of the led. Ui_dispRender keeps it
+    // current on every page, so it is part of the corner, not of a page.
+    Ui_cpu_ = Ui_label_(parent, "cpu --%", 0x9AA3ACU);
+    lv_obj_align(Ui_cpu_, LV_ALIGN_TOP_RIGHT, -24, 6);
+
     // 900 ms in, 900 ms out, forever. The dirty area is 10x10, so the whole
     // animation is 0.1 ms a frame against a 33 ms budget (charter §6).
     lv_anim_init(&a);
@@ -769,7 +783,7 @@ static void Ui_buildStats_(void) {
 
     Ui_ring_(screen);
     Ui_heartbeat_(screen);
-    Ui_card_(screen, 12, 204, "stack free", "cpu", &Ui_v1_, &Ui_v2_);
+    Ui_card_(screen, 12, 204, "stack free", "pool", &Ui_v1_, &Ui_v2_);
     Ui_card_(screen, 124, 204, "frame min", "frame max", &Ui_v3_, &Ui_v4_);
     Ui_barCreate_(screen);
     Ui_dots_(screen, 1U);
