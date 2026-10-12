@@ -70,9 +70,7 @@ def page1():
     o.append(div(80, 84, 80, 48, "bignum", '<span style="font-size:44px">72</span>'))
     o.append(div(80, 132, 80, 16, "unit", "edges/s"))
     o.append(tag(80, 84, "大数字 + 单位"))
-    o.append(div(12, 204, 104, 92, "card", '<div class="k">beat</div><div class="v">500<small> ms</small></div>'
-                 '<div class="k" style="margin-top:6px">&nbsp;</div><div class="v">&nbsp;</div>'))
-    o.append(tag(12, 204, "卡 A 104x92 · 节拍（LED 文本已删：右上角那盏灯就是它）"))
+    o.append(tag(12, 204, "原卡 A 位置 · 已空（beat 读数删除，节拍看右上角的灯）"))
     o.append(div(124, 204, 104, 92, "card", '<div class="k">edges</div><div class="v">1234</div>'
                  '<div class="k" style="margin-top:6px">frame</div><div class="v">12.5<small> ms</small></div>'))
     o.append(tag(124, 204, "卡 B 104x92 · 计数/帧时"))
@@ -116,7 +114,7 @@ ROWS = [
     ("1", "lv_arc", "(40,28) 160x160", "edges 映射 0..100", "值变时一次性重绘（160x160 ⇒ 34.8 ms，太贵不补间）", "25,600", "34.8 / 105%"),
     ("1", "大数字", "(80,84) 80x48", "同上", "文本替换（值变时）", "~3,800", "4.6 / 14%"),
     ("1", "单位", "(80,132) 80x16", "常量", "不动", "-", "-"),
-    ("1", "卡 A · 节拍", "(12,204) 104x92", "常量 UI_BEAT_MS", "文本替换（每 500 ms 一次）", "~1,000", "1.2 / 4%"),
+    ("1", "（原卡 A 空位）", "(12,204) 104x92", "—", "已删除：节拍由右上角的灯体现", "—", "—"),
     ("1", "卡 B 计数/帧时", "(124,204) 104x92", "edges + 自测帧时", "文本替换", "~2,000", "2.4 / 7%"),
     ("1", "进度条", "(16,302) 96x14", "beat 占空比 / 池占用（待定）", "lv_bar_set_value(..., LV_ANIM_ON)", "1,344", "1.6 / 5%"),
     ("1", "页指示点 x2", "(112,309)", "当前页", "style transition（缩放/颜色）", "~200", "0.2 / 1%"),

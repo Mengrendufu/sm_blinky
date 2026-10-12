@@ -419,7 +419,6 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
             lv_label_set_text_fmt(Ui_v3_, "%u", (unsigned)edges);
         }
         if (slow) {
-            lv_label_set_text_fmt(Ui_v1_, "%u ms", (unsigned)UI_BEAT_MS);
             Ui_showMs_(Ui_v4_, Ui_frameUs_);
             uint32_t const load = Ui_pct_(Ui_frameUs_,
                                           UI_FRAME_BUDGET_US);
@@ -760,8 +759,9 @@ static void Ui_buildDemo_(void) {
     // readout now, and it is the one that blinks. The freed pair stays blank
     // (its two labels get an empty string) rather than inventing a value for
     // it.
-    Ui_card_(screen, 12, 204, "beat", "", &Ui_v1_, &Ui_v2_);
-    lv_label_set_text(Ui_v2_, "");
+    // No pair for the beat either: the blink in the corner is that readout,
+    // and it is the one the eye gets for free. Card A held nothing else, so
+    // it went with its last label instead of standing there empty.
     Ui_card_(screen, 124, 204, "edges", "frame", &Ui_v3_, &Ui_v4_);
     Ui_barCreate_(screen);
     Ui_dots_(screen, 0U);
