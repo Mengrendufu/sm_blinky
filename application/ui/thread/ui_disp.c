@@ -587,8 +587,15 @@ static void Ui_ring_(lv_obj_t *parent) {
     lv_obj_set_size(arc, 160, 160);
     lv_obj_set_pos(arc, 40, 28);
     lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
-    lv_arc_set_rotation(arc, 210);
-    lv_arc_set_bg_angles(arc, 0, 240);
+    // The angles carry the rotation - never lv_arc_set_rotation. The widget
+    // combines the two differently in the two places that matter: the draw
+    // path adds rotation raw (lv_arc.c:834-849, which for a 240 degree gauge
+    // means 210..450), while the invalidation normalises the angle to
+    // [0,360) first and only then adds it (lv_arc.c:866-881). Drawn and
+    // invalidated then disagree about a wedge of the ring, which is where the
+    // stale rectangular patches came from as the value grew. v9's own gauge
+    // example spells the turn out in the angles instead: a wrapped range.
+    lv_arc_set_bg_angles(arc, 210, 90);
     lv_arc_set_range(arc, 0, 100);
     lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_arc_width(arc, 12, LV_PART_MAIN);
