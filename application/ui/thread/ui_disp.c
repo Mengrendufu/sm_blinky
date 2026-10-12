@@ -84,6 +84,7 @@
 #define UI_FRAME_BUDGET_US 33000U
 #define UI_STACK_WORDS    2048U   // the UI task's static stack, in words
 #define UI_BEAT_MS        500U    // the AO beat the demo page's card shows
+#define UI_TRACE_RECT     83U     // temporary: the flush rectangle (id 83)
 // How often the panel's inversion bit is re-sent. The clobber has no
 // schedule, so this one never stops - it is one command, and it is the only
 // panel register the run-time path touches (see BSP_lcdReassert).
@@ -425,15 +426,54 @@ static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
     uint32_t const width = (uint32_t)(area->x2 - area->x1 + 1);
     uint32_t const height = (uint32_t)(area->y2 - area->y1 + 1);
 
-    BSP_lcdSetWindow((uint16_t)area->x1, (uint16_t)area->y1,
-                     (uint16_t)area->x2, (uint16_t)area->y2);
+    // == DEBUG (temporary, id 83): which rectangle is being pushed, and how
+    // wide it is against the 240-pixel buffer stride. Out when answered. ==
+    SM_TRACE_BEGIN(UI_TRACE_RECT, 4)
+        SM_TRACE_PAYLOAD_BE((uint8_t)area->x1)
+        SM_TRACE_PAYLOAD_BE((uint8_t)area->x2)
+        SM_TRACE_PAYLOAD_BE((uint8_t)area->y1)
+        SM_TRACE_PAYLOAD_BE((uint8_t)area->y2)
+    SM_TRACE_END()
 
-    // Arm the channel and wait for it. The barrier publishes the strip's
-    // stores before the transfer starts: the DMA reads them as another bus
-    // master, not through this core's write buffer.
-    __DSB();
-    BSP_lcdWritePixelsDma((uint16_t const *)(void const *)px, width * height);
-    Ui_dmaWait_(UI_DMA_TIMEOUT_MS);
+    // The pixels LVGL hands over live in a buffer whose row stride is the
+    // display width (lv_display_set_buffers computes it from hor_res), and
+    // the rectangle does not have to be that wide: a narrow one - the arc's
+    // area, the led's 10x10 - is stored with that same stride. Pushing it as
+    // "width * height contiguous pixels" therefore took the first row from
+    // the right place and every later row from somewhere else, which is what
+    // the rectangular garbage on the glass was (measured 2026-10-12: 317 of
+    // the pushed rectangles are 29x28, most of them not display-wide).
+    // Full-width rectangles keep the single-transfer fast path.
+    uint32_t const stridePx = UI_LCD_HOR;
+
+    if (width == stridePx) {
+        BSP_lcdSetWindow((uint16_t)area->x1, (uint16_t)area->y1,
+                         (uint16_t)area->x2, (uint16_t)area->y2);
+
+        // The barrier publishes the strip's stores before the transfer
+        // starts: the DMA reads them as another bus master, not through this
+        // core's write buffer.
+        __DSB();
+        BSP_lcdWritePixelsDma((uint16_t const *)(void const *)px,
+                              width * height);
+        Ui_dmaWait_(UI_DMA_TIMEOUT_MS);
+    }
+    else {
+        uint32_t const strideB = stridePx * 2U;
+        uint16_t const * const row = (uint16_t const *)(void const *)px;
+        uint32_t y;
+
+        for (y = 0U; y < height; ++y) {
+            __DSB();
+            BSP_lcdSetWindow((uint16_t)area->x1, (uint16_t)(area->y1 + y),
+                             (uint16_t)area->x2, (uint16_t)(area->y1 + y));
+            BSP_lcdWritePixelsDma(
+                (uint16_t const *)(void const *)((uint8_t const *)row
+                                                 + (y * strideB)),
+                width);
+            Ui_dmaWait_(UI_DMA_TIMEOUT_MS);
+        }
+    }
 
     // The page's first frame is complete once its last dirty area is on the
     // glass. That is the moment the light can come on - bring-up left the
@@ -581,9 +621,15 @@ static void Ui_ring_(lv_obj_t *parent) {
     lv_obj_set_style_arc_color(arc, lv_color_hex(0x1B2830U), LV_PART_MAIN);
     lv_obj_set_style_arc_color(arc, lv_color_hex(0x00C3BCU),
                                LV_PART_INDICATOR);
+    // The knob goes away entirely, styles and all. Making it transparent is
+    // not enough: the default theme gives it a shadow, and an invisible knob
+    // with a shadow is a blurry blob that the arc leaves behind at every
+    // position it passes - which reads as garbage along the ring, growing
+    // with the value (measured on the glass 2026-10-12).
+    lv_obj_remove_style(arc, (lv_style_t *)0, LV_PART_KNOB);
     lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_KNOB);
+    lv_obj_set_style_shadow_width(arc, 0, LV_PART_KNOB);
     lv_obj_set_style_pad_all(arc, 0, LV_PART_KNOB);
-    lv_obj_set_style_border_width(arc, 0, LV_PART_KNOB);
     Ui_arc_ = arc;
 
     // The number sits at the default font for now. Scaling a label was tried
