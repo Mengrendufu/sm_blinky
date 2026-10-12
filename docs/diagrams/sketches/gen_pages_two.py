@@ -66,18 +66,16 @@ def page1():
     o.append(div(210, 7, 10, 10, "led"))
     o.append(tag(0, 0, "顶栏 240x24 · title + cpu 读数 + lv_led(10x10) 闪烁（跟板载 LED 同步）"))
     o.append(div(40, 28, 160, 160, "ring"))
-    o.append(tag(40, 28, "lv_arc 160x160 环宽12 扫角240°"))
-    o.append(div(80, 84, 80, 48, "bignum", '<span style="font-size:44px">72</span>'))
-    o.append(div(80, 132, 80, 16, "unit", "edges/s"))
-    o.append(tag(80, 84, "大数字 + 单位"))
+    o.append(tag(40, 28, "lv_arc 160x160 环宽12 扫角 210°→90°（240°）"))
+    o.append(div(60, 96, 120, 18, "bignum", '<div style="font-size:14px;text-align:center">72</div>'))
+    o.append(div(60, 140, 120, 16, "unit", "beat"))
+    o.append(tag(60, 96, "环内读数：默认字体 14 px（放大被否：变换走 layer 路径 ⇒ 要 ARGB8888，本构建关了）"))
     o.append(tag(12, 204, "原卡 A 位置 · 已空（beat 读数删除，节拍看右上角的灯）"))
     o.append(div(124, 204, 104, 92, "card", '<div class="k">edges</div><div class="v">1234</div>'
                  '<div class="k" style="margin-top:6px">frame</div><div class="v">12.5<small> ms</small></div>'))
     o.append(tag(124, 204, "卡 B 104x92 · 计数/帧时"))
-    o.append(div(16, 302, 96, 14, "bar", '<i style="width:62%"></i>'))
-    o.append(div(16, 302, 96, 14, "", '<div style="font-size:10px;line-height:14px;padding-left:4px">assist 62%</div>'))
-    o.append(div(176, 304, 48, 16, "unit", "12.5 ms"))
-    o.append(tag(176, 304, "底栏"))
+    o.append(div(16, 302, 96, 14, "bar", '<i style="width:38%"></i>'))
+    o.append(tag(16, 302, "底栏进度条 = 帧时预算（frameUs / 33 ms）· 无文字标注"))
     o.append(dots(0))
     return "".join(o)
 
@@ -88,8 +86,8 @@ def page2():
     o.append(tag(0, 0, "顶栏同页 1（cpu 读数两页共用 ✓）"))
     o.append(div(40, 28, 160, 160, "ring"))
     o.append(tag(40, 28, "同位置：环形/趋势图 160x160（值变时一次性重绘）"))
-    o.append(div(64, 76, 112, 22, "bignum", '<span style="font-size:26px">3,214</span>'))
-    o.append(div(64, 102, 112, 16, "unit", "total edges"))
+    o.append(div(60, 96, 120, 18, "bignum", '<div style="font-size:14px;text-align:center">3214</div>'))
+    o.append(div(60, 140, 120, 16, "unit", "edges"))
     o.append(div(12, 204, 104, 92, "card", '<div class="k">UI stack free</div><div class="v">1320<small> w</small></div>'
                  '<div class="k" style="margin-top:6px">LVGL pool</div><div class="v">18<small> KB</small></div>'))
     o.append(tag(12, 204, "卡 A · 真值（栈高水位 + 池占用）"))
@@ -97,9 +95,7 @@ def page2():
                  '<div class="k" style="margin-top:6px">frame max</div><div class="v">46.3<small> ms</small></div>'))
     o.append(tag(124, 204, "卡 B · 帧时统计"))
     o.append(div(16, 302, 96, 14, "bar", '<i style="width:38%"></i>'))
-    o.append(div(16, 302, 96, 14, "", '<div style="font-size:10px;line-height:14px;padding-left:4px">pool 18%</div>'))
-    o.append(div(176, 304, 48, 16, "unit", "1 / 2"))
-    o.append(tag(176, 304, "底栏"))
+    o.append(tag(16, 302, "底栏进度条 = 池占用（lv_mem_monitor）· 无文字标注"))
     o.append(dots(1))
     return "".join(o)
 
@@ -112,14 +108,13 @@ ROWS = [
     ("1", "顶栏文字", "(0,0)-(240,24)", "常量", "不动", "-", "-"),
     ("1+2", "lv_led（两页共用）", "(210,7) 10x10", "AO beat（ledOn）", "lv_led_on/off，跟板载 LED 同步闪烁（不再呼吸）", "100", "0.1 / 每 500 ms 一次"),
     ("1", "lv_arc", "(40,28) 160x160", "edges 映射 0..100", "值变时一次性重绘（160x160 ⇒ 34.8 ms，太贵不补间）", "25,600", "34.8 / 105%"),
-    ("1", "大数字", "(80,84) 80x48", "同上", "文本替换（值变时）", "~3,800", "4.6 / 14%"),
-    ("1", "单位", "(80,132) 80x16", "常量", "不动", "-", "-"),
-    ("1", "（原卡 A 空位）", "(12,204) 104x92", "—", "已删除：节拍由右上角的灯体现", "—", "—"),
+    ("1", "环内读数 + 单位", "(60,96)/(60,140)", "(edges*7)%101 / 常量 beat", "文本替换（默认字体 14 px，不放大）", "~1,200", "1.4 / 4%"),
+        ("1", "（原卡 A 空位）", "(12,204) 104x92", "—", "已删除：节拍由右上角的灯体现", "—", "—"),
     ("1", "卡 B 计数/帧时", "(124,204) 104x92", "edges + 自测帧时", "文本替换", "~2,000", "2.4 / 7%"),
-    ("1", "进度条", "(16,302) 96x14", "beat 占空比 / 池占用（待定）", "lv_bar_set_value(..., LV_ANIM_ON)", "1,344", "1.6 / 5%"),
+    ("1", "进度条 = 帧时预算", "(16,302) 96x14", "frameUs / 33000 µs", "lv_bar_set_value(..., LV_ANIM_ON)", "1,344", "1.6 / 5%"),
     ("1", "页指示点 x2", "(112,309)", "当前页", "style transition（缩放/颜色）", "~200", "0.2 / 1%"),
-    ("2", "lv_arc → 环形/趋势", "(40,28) 160x160", "总量/趋势数组", "值变时一次性重绘（同页 1）", "25,600", "34.8 / 105%"),
-    ("2", "大数字 + 单位", "(64,76) 112x38", "总边沿数", "文本替换", "~4,000", "4.8 / 15%"),
+    ("2", "lv_arc = 栈占用", "(40,28) 160x160", "栈占用 %（栈高水位）", "值变时整行带重绘（Ui_ringRefresh_）", "25,600", "34.8 / 105%"),
+    ("2", "环内读数 + 单位", "(60,96)/(60,140)", "原始 edges / 常量 edges", "文本替换（默认字体 14 px）", "~1,200", "1.4 / 4%"),
     ("2", "卡 A 真值", "(12,204) 104x92", "uxTaskGetStackHighWaterMark / lv_mem_monitor（池占用）", "文本替换", "~2,000", "2.4 / 7%"),
     ("2", "卡 B 帧时统计", "(124,204) 104x92", "UI 线程自测 min/max", "文本替换", "~2,000", "2.4 / 7%"),
     ("2", "进度条 = 池占用", "(16,302) 96x14", "lv_mem_monitor", "LV_ANIM_ON", "1,344", "1.6 / 5%"),
