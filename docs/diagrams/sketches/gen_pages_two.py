@@ -86,16 +86,16 @@ def page2():
     o.append(tag(0, 0, "顶栏同页 1（cpu 读数两页共用 ✓）"))
     o.append(div(40, 28, 160, 160, "ring"))
     o.append(tag(40, 28, "同位置：环形/趋势图 160x160（值变时一次性重绘）"))
-    o.append(div(60, 96, 120, 18, "bignum", '<div style="font-size:14px;text-align:center">3214</div>'))
-    o.append(div(60, 140, 120, 16, "unit", "edges"))
+    o.append(div(60, 96, 120, 18, "bignum", '<div style="font-size:14px;text-align:center">36</div>'))
+    o.append(div(60, 140, 120, 16, "unit", "%"))
     o.append(div(12, 204, 104, 92, "card", '<div class="k">UI stack free</div><div class="v">1320<small> w</small></div>'
-                 '<div class="k" style="margin-top:6px">LVGL pool</div><div class="v">18<small> KB</small></div>'))
-    o.append(tag(12, 204, "卡 A · 真值（栈高水位 + 池占用）"))
+                 '<div class="k" style="margin-top:6px">tracer nmin</div><div class="v">16</div>'))
+    o.append(tag(12, 204, "卡 A · 两个水位（栈余量 + tracer 环最小剩余条数）"))
     o.append(div(124, 204, 104, 92, "card", '<div class="k">frame min</div><div class="v">11.9<small> ms</small></div>'
                  '<div class="k" style="margin-top:6px">frame max</div><div class="v">46.3<small> ms</small></div>'))
     o.append(tag(124, 204, "卡 B · 帧时统计"))
     o.append(div(16, 302, 96, 14, "bar", '<i style="width:38%"></i>'))
-    o.append(tag(16, 302, "底栏进度条 = 池占用（lv_mem_monitor）· 无文字标注"))
+    o.append(tag(16, 302, "底栏进度条 = 池占用（lv_mem_monitor）· 池的唯一显示"))
     o.append(dots(1))
     return "".join(o)
 
@@ -114,8 +114,8 @@ ROWS = [
     ("1", "进度条 = 帧时预算", "(16,302) 96x14", "frameUs / 33000 µs", "lv_bar_set_value(..., LV_ANIM_ON)", "1,344", "1.6 / 5%"),
     ("1", "页指示点 x2", "(112,309)", "当前页", "style transition（缩放/颜色）", "~200", "0.2 / 1%"),
     ("2", "lv_arc = 栈占用", "(40,28) 160x160", "栈占用 %（栈高水位）", "值变时整行带重绘（Ui_ringRefresh_）", "25,600", "34.8 / 105%"),
-    ("2", "环内读数 + 单位", "(60,96)/(60,140)", "原始 edges / 常量 edges", "文本替换（默认字体 14 px）", "~1,200", "1.4 / 4%"),
-    ("2", "卡 A 真值", "(12,204) 104x92", "uxTaskGetStackHighWaterMark / lv_mem_monitor（池占用）", "文本替换", "~2,000", "2.4 / 7%"),
+    ("2", "环内读数 + 单位", "(60,96)/(60,140)", "栈占用 %（与弧同量）/ 常量 %", "文本替换（默认字体 14 px）", "~1,200", "1.4 / 4%"),
+    ("2", "卡 A 两个水位", "(12,204) 104x92", "uxTaskGetStackHighWaterMark / SM_Tracer_inst.nMin", "文本替换", "~2,000", "2.4 / 7%"),
     ("2", "卡 B 帧时统计", "(124,204) 104x92", "UI 线程自测 min/max", "文本替换", "~2,000", "2.4 / 7%"),
     ("2", "进度条 = 池占用", "(16,302) 96x14", "lv_mem_monitor", "LV_ANIM_ON", "1,344", "1.6 / 5%"),
 ]

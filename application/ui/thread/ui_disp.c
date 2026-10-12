@@ -28,6 +28,7 @@
 #include "asset.h"
 #include "bsp.h"
 #include "bsp_lcd.h"
+#include "sm_tracer.h"
 #include "ui_disp_priv.h"
 #include "lvgl.h"
 #include "FreeRTOS.h"
@@ -427,24 +428,28 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
         }
     }
     else {
-        lv_mem_monitor_t mon;
-        uint32_t const stackFree =
-            (uint32_t)uxTaskGetStackHighWaterMark((TaskHandle_t)0);
-
-        if (changed) {
-            lv_label_set_text_fmt(Ui_num_, "%u", (unsigned)edges);
-        }
+        // The stats page is about what is left, so every readout on it is a
+        // watermark: the stack's, the trace ring's, the pool's, and the two
+        // frame times. The arc and the number inside the ring are the same
+        // quantity now - one gauge, one number.
         if (slow) {
+            lv_mem_monitor_t mon;
+            uint32_t const stackFree =
+                (uint32_t)uxTaskGetStackHighWaterMark((TaskHandle_t)0);
+            uint32_t const stackPct =
+                Ui_pct_(UI_STACK_WORDS - stackFree, UI_STACK_WORDS);
+            // The tracer's own high-water mark: the fewest free record slots
+            // its ring has ever had. It only falls, and 0 means the pump fell
+            // behind far enough to drop records. Reading the byte is atomic
+            // on this core, and a read one window late costs nothing.
+            uint32_t const nMin = (uint32_t)SM_Tracer_inst.nMin;
+
             lv_mem_monitor(&mon);   // the LVGL pool, in bytes
-            lv_arc_set_value(Ui_arc_,
-                             (int32_t)Ui_pct_(UI_STACK_WORDS - stackFree,
-                                              UI_STACK_WORDS));
+            lv_arc_set_value(Ui_arc_, (int32_t)stackPct);
             Ui_ringRefresh_();
+            lv_label_set_text_fmt(Ui_num_, "%u", (unsigned)stackPct);
             lv_label_set_text_fmt(Ui_v1_, "%u w", (unsigned)stackFree);
-
-            uint32_t const poolKb = mon.free_size / 1024U;
-
-            lv_label_set_text_fmt(Ui_v2_, "%u KB", (unsigned)poolKb);
+            lv_label_set_text_fmt(Ui_v2_, "%u", (unsigned)nMin);
             Ui_showMs_(Ui_v3_, Ui_frameMin_);
             Ui_showMs_(Ui_v4_, Ui_frameMax_);
             lv_bar_set_value(Ui_bar_, (int32_t)mon.used_pct, LV_ANIM_ON);
@@ -779,7 +784,10 @@ static void Ui_buildStats_(void) {
 
     Ui_ring_(screen);
     Ui_heartbeat_(screen);
-    Ui_card_(screen, 12, 204, "stack free", "pool", &Ui_v1_, &Ui_v2_);
+    // The pool's number gave up its slot to the tracer's watermark: the bar
+    // along the bottom is the pool gauge, so the text was the duplicate.
+    lv_label_set_text(Ui_unit_, "%");
+    Ui_card_(screen, 12, 204, "stack free", "tracer nmin", &Ui_v1_, &Ui_v2_);
     Ui_card_(screen, 124, 204, "frame min", "frame max", &Ui_v3_, &Ui_v4_);
     Ui_barCreate_(screen);
     Ui_dots_(screen, 1U);
