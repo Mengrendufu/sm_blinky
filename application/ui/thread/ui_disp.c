@@ -571,11 +571,13 @@ static void Ui_ring_(lv_obj_t *parent) {
     lv_obj_set_style_border_width(arc, 0, LV_PART_KNOB);
     Ui_arc_ = arc;
 
-    // The number is a label at the default font, scaled: the cheap way to a
-    // big readout without a second font in flash. Blocky on purpose - the day
-    // it has to be pretty is the day a digits-only font earns its ~3 KB.
+    // The number sits at the default font for now. Scaling a label was tried
+    // and taken back out (2026-10-12): a transformed object makes the
+    // refresher take the layer/matrix path (lv_refr.c:520-592), which wants
+    // ARGB8888 layers - and this build has LV_DRAW_SW_SUPPORT_ARGB8888 0, so
+    // the draw came out as garbage on the glass. A big readout has to come
+    // from a font, not from a transform.
     Ui_num_ = Ui_label_(parent, "0", 0xFFFFFFU);
-    lv_obj_set_style_transform_scale(Ui_num_, 640, 0);
     lv_obj_align(Ui_num_, LV_ALIGN_TOP_MID, 0, 96);
 
     unit = Ui_label_(parent, "edges", 0x9AA3ACU);
