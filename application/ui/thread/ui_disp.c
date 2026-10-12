@@ -116,6 +116,11 @@ static uint32_t Ui_frameUs_;
 static uint32_t Ui_frameMin_;
 static uint32_t Ui_frameMax_;
 static uint32_t Ui_statAt_;           // when the slow readouts were rewritten
+// CPU load over the last window: the tick hook's two counters, differenced
+// here (see BSP_cpuSample), and the percentage they come to.
+static uint32_t Ui_cpuIdle_;
+static uint32_t Ui_cpuTotal_;
+static uint32_t Ui_cpuPct_;
 
 // What the widgets currently show. Keeping it here means an unchanged state
 // costs nothing: no property writes, no invalidation, no redraw.
@@ -401,7 +406,6 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
         }
     }
     else {
-        lv_mem_monitor_t mon;
         uint32_t const stackFree =
             (uint32_t)uxTaskGetStackHighWaterMark((TaskHandle_t)0);
 
@@ -409,18 +413,32 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
             lv_label_set_text_fmt(Ui_num_, "%u", (unsigned)edges);
         }
         if (slow) {
-            lv_mem_monitor(&mon);   // the LVGL pool, in bytes
+            uint32_t idle;
+            uint32_t total;
+
             lv_arc_set_value(Ui_arc_,
                              (int32_t)Ui_pct_(UI_STACK_WORDS - stackFree,
                                               UI_STACK_WORDS));
             Ui_ringRefresh_();
             lv_label_set_text_fmt(Ui_v1_, "%u w", (unsigned)stackFree);
-            uint32_t const poolKb = mon.free_size / 1024U;
 
-            lv_label_set_text_fmt(Ui_v2_, "%u KB", (unsigned)poolKb);
+            // The load over the window that just passed: the tick hook counts
+            // the ticks that found the idle task on the CPU, so everything
+            // else is work. At 10 ms a tick and a 500 ms window that is fifty
+            // samples - a percentage to the nearest two.
+            BSP_cpuSample(&idle, &total);
+            uint32_t const dIdle = idle - Ui_cpuIdle_;
+            uint32_t const dTotal = total - Ui_cpuTotal_;
+
+            Ui_cpuIdle_ = idle;
+            Ui_cpuTotal_ = total;
+            if (dTotal > 0U) {
+                Ui_cpuPct_ = 100U - ((dIdle * 100U) / dTotal);
+            }
+            lv_label_set_text_fmt(Ui_v2_, "%u %%", (unsigned)Ui_cpuPct_);
             Ui_showMs_(Ui_v3_, Ui_frameMin_);
             Ui_showMs_(Ui_v4_, Ui_frameMax_);
-            lv_bar_set_value(Ui_bar_, (int32_t)mon.used_pct, LV_ANIM_ON);
+            lv_bar_set_value(Ui_bar_, (int32_t)Ui_cpuPct_, LV_ANIM_ON);
             Ui_statAt_ = now;
         }
     }
@@ -751,7 +769,7 @@ static void Ui_buildStats_(void) {
 
     Ui_ring_(screen);
     Ui_heartbeat_(screen);
-    Ui_card_(screen, 12, 204, "stack free", "pool free", &Ui_v1_, &Ui_v2_);
+    Ui_card_(screen, 12, 204, "stack free", "cpu", &Ui_v1_, &Ui_v2_);
     Ui_card_(screen, 124, 204, "frame min", "frame max", &Ui_v3_, &Ui_v4_);
     Ui_barCreate_(screen);
     Ui_dots_(screen, 1U);

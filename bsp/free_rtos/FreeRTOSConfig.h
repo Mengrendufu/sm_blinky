@@ -55,7 +55,7 @@
 #define configSUPPORT_STATIC_ALLOCATION          1
 #define configSUPPORT_DYNAMIC_ALLOCATION         0
 #define configUSE_IDLE_HOOK                      1
-#define configUSE_TICK_HOOK                      0
+#define configUSE_TICK_HOOK                      1   // CPU load sampling
 #define configUSE_TASK_NOTIFICATIONS             1
 /* Two slots: 0 is a task's own entry wake, 1 is a flash RPC completion. */
 #define configTASK_NOTIFICATION_ARRAY_ENTRIES    2

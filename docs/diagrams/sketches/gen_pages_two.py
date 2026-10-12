@@ -93,13 +93,13 @@ def page2():
     o.append(div(64, 76, 112, 22, "bignum", '<span style="font-size:26px">3,214</span>'))
     o.append(div(64, 102, 112, 16, "unit", "total edges"))
     o.append(div(12, 204, 104, 92, "card", '<div class="k">UI stack free</div><div class="v">1320<small> w</small></div>'
-                 '<div class="k" style="margin-top:6px">LVGL pool</div><div class="v">待测</div>'))
-    o.append(tag(12, 204, "卡 A · 真值（栈高水位）"))
+                 '<div class="k" style="margin-top:6px">CPU</div><div class="v">26<small> %</small></div>'))
+    o.append(tag(12, 204, "卡 A · 真值（栈高水位 + CPU 占用）"))
     o.append(div(124, 204, 104, 92, "card", '<div class="k">frame min</div><div class="v">11.9<small> ms</small></div>'
                  '<div class="k" style="margin-top:6px">frame max</div><div class="v">46.3<small> ms</small></div>'))
     o.append(tag(124, 204, "卡 B · 帧时统计"))
     o.append(div(16, 302, 96, 14, "bar", '<i style="width:38%"></i>'))
-    o.append(div(16, 302, 96, 14, "", '<div style="font-size:10px;line-height:14px;padding-left:4px">load 38%</div>'))
+    o.append(div(16, 302, 96, 14, "", '<div style="font-size:10px;line-height:14px;padding-left:4px">cpu 26%</div>'))
     o.append(div(176, 304, 48, 16, "unit", "1 / 2"))
     o.append(tag(176, 304, "底栏"))
     o.append(dots(1))
@@ -122,9 +122,9 @@ ROWS = [
     ("1", "页指示点 x2", "(112,309)", "当前页", "style transition（缩放/颜色）", "~200", "0.2 / 1%"),
     ("2", "lv_arc → 环形/趋势", "(40,28) 160x160", "总量/趋势数组", "值变时一次性重绘（同页 1）", "25,600", "34.8 / 105%"),
     ("2", "大数字 + 单位", "(64,76) 112x38", "总边沿数", "文本替换", "~4,000", "4.8 / 15%"),
-    ("2", "卡 A 真值", "(12,204) 104x92", "uxTaskGetStackHighWaterMark / 池占用", "文本替换", "~2,000", "2.4 / 7%"),
+    ("2", "卡 A 真值", "(12,204) 104x92", "uxTaskGetStackHighWaterMark / BSP_cpuSample（tick 钩子采样）", "文本替换", "~2,000", "2.4 / 7%"),
     ("2", "卡 B 帧时统计", "(124,204) 104x92", "UI 线程自测 min/max", "文本替换", "~2,000", "2.4 / 7%"),
-    ("2", "进度条", "(16,302) 96x14", "同上", "LV_ANIM_ON", "1,344", "1.6 / 5%"),
+    ("2", "进度条 = CPU 占用", "(16,302) 96x14", "BSP_cpuSample 差分（50 tick 采样 ⇒ ±2%）", "LV_ANIM_ON", "1,344", "1.6 / 5%"),
 ]
 rows = "".join(
     f'<tr><td class="num">{p}</td><td>{w}</td><td>{box}</td><td>{src}</td><td>{anim}</td>'

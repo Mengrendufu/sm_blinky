@@ -59,5 +59,9 @@ void BSP_ledOff(void);
 // a task every few ticks, to size the static stacks from measurements.
 void BSP_dbgMemReport(uint8_t selfRecId);
 
+// CPU load as seen from the tick: the idle sample count and the tick count,
+// to be differenced by the caller over its own window (see freertos_hooks.c).
+void BSP_cpuSample(uint32_t *idle, uint32_t *total);
+
 
 #endif // BSP_H_
