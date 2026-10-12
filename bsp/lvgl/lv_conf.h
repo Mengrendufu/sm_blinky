@@ -17,7 +17,7 @@
 // stay at their defaults for now; trim them once the UI is known.
 
 // Display: ST7789 over the 8080 16-bit interface, one RGB565 word per pixel.
-#define LV_COLOR_DEPTH 16
+#define LV_COLOR_FORMAT_DEFAULT LV_COLOR_FORMAT_RGB565
 
 // The draw buffer and LVGL's own pool are plain arrays in .bss; give them the
 // alignment the renderer expects (LV_DRAW_BUF_ALIGN is 4 on this build).
@@ -55,6 +55,11 @@
 // part of the macro (its own default is "while(1);").
 #define LV_ASSERT_HANDLER_INCLUDE   "sm_assert.h"
 #define LV_ASSERT_HANDLER           SM_onAssert(__FILE__, __LINE__);
+// 9.6 deprecates the include-and-define pair above in favour of
+// LV_ASSERT_USE_CUSTOM_INCLUDE (the handler lives inside the included
+// header). sm_assert.h is in a submodule, so migrating means adding a header
+// of our own; until then this keeps the warning quiet and the wiring intact.
+#define LV_DISABLE_ASSERT_HANDLER_INCLUDE_WARNING 1
 
 //============================================================================
 // Trim. LVGL v9 switches every widget and every draw format on by default,
