@@ -69,17 +69,48 @@
 // its coverage proof and the asset being current are the whole of it. Under
 // test (2026-10-12): the re-drive window was dropped, the glass is the judge.
 
-// Which background slot the demo shows. 0 = bg-a (夜色仪表),
-// 1 = bg-b (网格科技),
-// 2 = bg-c (暮色准照片) - the three the burner wrote, in that order.
-#define UI_BG_SLOT 0U
+// Which background slot each page lays down. The burner writes three, in
+// this order: 0 = bg-a (夜色仪表), 1 = bg-b (网格科技), 2 = bg-logo, which is
+// the splash page's own and is not a page background.
+#define UI_BG_SLOT_DEMO  0U
+#define UI_BG_SLOT_STATS 1U
+
+// How often a page's slow readouts (frame time, stack, pool) are rewritten.
+// The fast ones follow the AO's events instead, so 2 Hz is where the numbers
+// stop being interesting and the redraws start being expensive.
+#define UI_STAT_MS        500U
+// The refresh period the frame readout is read against: a percentage that
+// means "how much of a 30 fps budget this frame took".
+#define UI_FRAME_BUDGET_US 33000U
+#define UI_STACK_WORDS    2048U   // the UI task's static stack, in words
+#define UI_BEAT_MS        500U    // the AO beat the demo page's card shows
+
+// The two content pages. The widgets are the same kinds on both, so one set
+// of handles serves whichever page is up (see Ui_pageBegin_).
+
+typedef enum {
+    UI_PAGE_DEMO = 0,
+    UI_PAGE_STATS
+} Ui_Page;
 
 static lv_display_t *Ui_disp_;
-static lv_image_dsc_t Ui_bgDsc_;      // demo page background, slot 0
+static lv_image_dsc_t Ui_bgDsc_;      // the background of the page that is up
 static lv_image_dsc_t Ui_splashDsc_;  // boot image, slot 2
-static lv_obj_t *Ui_led_;
-static lv_obj_t *Ui_state_;
-static lv_obj_t *Ui_edges_;
+static Ui_Page Ui_page_;              // which page owns the glass
+static lv_obj_t *Ui_led_;             // heartbeat, top right on both pages
+static lv_obj_t *Ui_arc_;             // the ring the art leaves room for
+static lv_obj_t *Ui_num_;             // the big number inside it
+static lv_obj_t *Ui_v1_;              // card A, first value
+static lv_obj_t *Ui_v2_;              // card A, second value
+static lv_obj_t *Ui_v3_;              // card B, first value
+static lv_obj_t *Ui_v4_;              // card B, second value
+static lv_obj_t *Ui_bar_;             // the bottom bar
+// One heartbeat's cost, measured, and the extremes it has shown: the stats
+// page reads them, so they are a readout and not a probe.
+static uint32_t Ui_frameUs_;
+static uint32_t Ui_frameMin_;
+static uint32_t Ui_frameMax_;
+static uint32_t Ui_statAt_;           // when the slow readouts were rewritten
 
 // What the widgets currently show. Keeping it here means an unchanged state
 // costs nothing: no property writes, no invalidation, no redraw.
@@ -111,13 +142,18 @@ static bool Ui_built_;
 // == DEBUG: whether the boot image holds the glass; read over J-Link. ==
 volatile uint8_t Ui_dbgSplashOk_;
 //============================================================================
-static void Ui_buildWidgets_(void);
+static void Ui_buildDemo_(void);
+static void Ui_buildStats_(void);
+static void Ui_pageBegin_(uint32_t slot, Ui_Page page);
+static uint32_t Ui_pct_(uint32_t used, uint32_t total);
+static void Ui_showMs_(lv_obj_t *label, uint32_t us);
 static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
                       uint8_t *px);
 static void Ui_flushDone_(void);
 static void Ui_flushWait_(lv_display_t *disp);
 static void Ui_dmaWait_(uint32_t timeoutMs);
 static uint32_t Ui_tick_(void);
+static uint32_t Ui_us_(void);
 
 //============================================================================
 void Ui_dispInit(void) {
@@ -208,27 +244,61 @@ bool Ui_dispSplash(void) {
     return true;
 }
 //............................................................................
-// The demo page starts. The widgets were built at bring-up and the model has
-// moved on since - the AO keeps beating while the boot image is up - so the
-// next render has to write it all out again instead of trusting what the
-// widgets already show.
-void Ui_dispDemo(void) {
+// One page entry, whichever page it is: clean the screen, lay the background
+// that page belongs to, hand the glass over, then let the page build its
+// tree. Nothing else draws while this runs - which is why it is an entry
+// action and not work the loop gets to later.
+static void Ui_pageBegin_(uint32_t slot, Ui_Page page) {
+    Asset const * const asset = Asset_get();
+    void const * const bgPixels = Asset_slot(asset, slot);
     lv_obj_t * const screen = lv_screen_active();
 
-    // Every page builds its own tree, from a clean screen: the splash's image
-    // is gone before the demo's exists, so the two can never share the glass.
+    // A running animation would hold the old widget by pointer, and the clean
+    // below takes that widget away with it: the animation goes first.
+    if (Ui_led_ != (lv_obj_t *)0) {
+        lv_anim_delete(Ui_led_, (lv_anim_exec_xcb_t)0);
+        Ui_led_ = (lv_obj_t *)0;
+    }
+
+    // Every page builds its own tree, from a clean screen: the page before it
+    // is gone before this one exists, so the two can never share the glass.
     lv_obj_clean(screen);
-    Ui_built_ = false;
+    Ui_screenBase_(screen);
 
-    Ui_buildWidgets_();
+    // The bootloader's asset, if it verified: the whole screen becomes one
+    // image and the widgets sit on top of it. Without it the page keeps the
+    // black background, which is the degradation the design counts on.
+    if (bgPixels != (void const *)0) {
+        lv_obj_t *bg;
 
-    // This page too starts with a whole screen: ask for one, and let the
-    // model be written out again on the next render.
-    Ui_framePending_ = true;
-    Ui_shownValid_ = false;
+        Ui_slotDesc_(&Ui_bgDsc_, bgPixels);
+
+        bg = lv_image_create(screen);
+        lv_image_set_src(bg, &Ui_bgDsc_);
+        lv_obj_align(bg, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_remove_flag(bg, LV_OBJ_FLAG_CLICKABLE);
+    }
+
+    Ui_page_ = page;
+    Ui_built_ = true;
+    Ui_framePending_ = true;   // this page starts with a whole screen
+    Ui_shownValid_ = false;    // and the model gets written out again
+    Ui_statAt_ = 0U;           // slow readouts: rewrite next frame
+}
+
+void Ui_dispDemo(void) {
+    Ui_pageBegin_(UI_BG_SLOT_DEMO, UI_PAGE_DEMO);
+    Ui_buildDemo_();
+}
+//............................................................................
+void Ui_dispStats(void) {
+    Ui_pageBegin_(UI_BG_SLOT_STATS, UI_PAGE_STATS);
+    Ui_buildStats_();
 }
 //............................................................................
 TickType_t Ui_dispHeartbeat(void) {
+    uint32_t const t0 = Ui_us_();
+
     // LVGL runs on every page now, the boot image included: it is a widget
     // like any other, and the page that owns the glass is the only page whose
     // tree exists (each entry action rebuilds from a clean screen). There is
@@ -243,6 +313,15 @@ TickType_t Ui_dispHeartbeat(void) {
     }
 
     uint32_t const next = lv_timer_handler();
+    uint32_t const dt = Ui_us_() - t0;   // what one heartbeat really cost
+
+    if ((Ui_frameMin_ == 0U) || (dt < Ui_frameMin_)) {
+        Ui_frameMin_ = dt;
+    }
+    if (dt > Ui_frameMax_) {
+        Ui_frameMax_ = dt;
+    }
+    Ui_frameUs_ = dt;
 
     if ((next == LV_NO_TIMER_READY) || (next > UI_FALLBACK_MS)) {
         return pdMS_TO_TICKS(UI_FALLBACK_MS);
@@ -251,24 +330,77 @@ TickType_t Ui_dispHeartbeat(void) {
     return pdMS_TO_TICKS((next == 0U) ? 1U : next);
 }
 //............................................................................
+// Which page is up, and what the widgets on it show. The two pages carry the
+// same widget kinds, so this is one function with a half each rather than two
+// entry points: Ui_page_ picks the half. The fast values follow the model,
+// the slow ones are rewritten on UI_STAT_MS at most - a label that is set
+// every heartbeat would redraw itself every heartbeat.
 void Ui_dispRender(bool ledOn, uint16_t edges) {
+    uint32_t const now = (uint32_t)xTaskGetTickCount();
+    bool const changed = (!Ui_shownValid_) || (ledOn != Ui_shownOn_)
+                         || (edges != Ui_shownEdges_);
+    bool const slow = (Ui_statAt_ == 0U)
+                      || ((int32_t)(now - Ui_statAt_)
+                          >= (int32_t)pdMS_TO_TICKS(UI_STAT_MS));
+
     if (!Ui_built_) {
         return;   // no widgets yet: the splash still owns the glass
     }
 
-    if (Ui_shownValid_ && (ledOn == Ui_shownOn_)
-        && (edges == Ui_shownEdges_)) {
-        return;
+    if (changed) {
+        Ui_shownOn_ = ledOn;
+        Ui_shownEdges_ = edges;
+        Ui_shownValid_ = true;
+        lv_obj_set_style_bg_color(Ui_led_,
+                                  lv_color_hex(ledOn ? 0x00C853U
+                                                     : 0x303840U), 0);
     }
 
-    Ui_shownOn_ = ledOn;
-    Ui_shownEdges_ = edges;
-    Ui_shownValid_ = true;
+    if (Ui_page_ == UI_PAGE_DEMO) {
+        // The ring follows the AO's edge count, wrapped to one turn, and the
+        // number in it spells the same value: a ring nobody can read is
+        // decoration, and decoration is what the background art already is.
+        if (changed) {
+            uint32_t const v = (uint32_t)edges % 101U;
 
-    lv_obj_set_style_bg_color(Ui_led_,
-                              lv_color_hex(ledOn ? 0x00C853U : 0x303840U), 0);
-    lv_label_set_text(Ui_state_, ledOn ? "LED ON" : "LED OFF");
-    lv_label_set_text_fmt(Ui_edges_, "edges %u", (unsigned)edges);
+            lv_arc_set_value(Ui_arc_, (int32_t)v);
+            lv_label_set_text_fmt(Ui_num_, "%u", (unsigned)v);
+            lv_label_set_text(Ui_v1_, ledOn ? "ON" : "OFF");
+            lv_label_set_text_fmt(Ui_v3_, "%u", (unsigned)edges);
+        }
+        if (slow) {
+            lv_label_set_text_fmt(Ui_v2_, "%u ms", (unsigned)UI_BEAT_MS);
+            Ui_showMs_(Ui_v4_, Ui_frameUs_);
+            uint32_t const load = Ui_pct_(Ui_frameUs_,
+                                          UI_FRAME_BUDGET_US);
+
+            lv_bar_set_value(Ui_bar_, (int32_t)load, LV_ANIM_ON);
+            Ui_statAt_ = now;
+        }
+    }
+    else {
+        lv_mem_monitor_t mon;
+        uint32_t const stackFree =
+            (uint32_t)uxTaskGetStackHighWaterMark((TaskHandle_t)0);
+
+        if (changed) {
+            lv_label_set_text_fmt(Ui_num_, "%u", (unsigned)edges);
+        }
+        if (slow) {
+            lv_mem_monitor(&mon);   // the LVGL pool, in bytes
+            lv_arc_set_value(Ui_arc_,
+                             (int32_t)Ui_pct_(UI_STACK_WORDS - stackFree,
+                                              UI_STACK_WORDS));
+            lv_label_set_text_fmt(Ui_v1_, "%u w", (unsigned)stackFree);
+            uint32_t const poolKb = mon.free_size / 1024U;
+
+            lv_label_set_text_fmt(Ui_v2_, "%u KB", (unsigned)poolKb);
+            Ui_showMs_(Ui_v3_, Ui_frameMin_);
+            Ui_showMs_(Ui_v4_, Ui_frameMax_);
+            lv_bar_set_value(Ui_bar_, (int32_t)mon.used_pct, LV_ANIM_ON);
+            Ui_statAt_ = now;
+        }
+    }
 }
 //............................................................................
 // LVGL hands over one dirty rectangle and the pixels for it. Setting the
@@ -355,53 +487,198 @@ static uint32_t Ui_tick_(void) {
     return (uint32_t)xTaskGetTickCount();
 }
 //............................................................................
-// The demo screen: a title, one square that follows the Blinky AO's LED, and
-// the edge count the HSM keeps. Absolute positions, no layout engine, so
-// nothing here depends on the theme's spacing.
-static void Ui_buildWidgets_(void) {
+// Microseconds, for the frame readout on both pages: the HAL time base is
+// TIM1 at 1 MHz (one count per microsecond, wrapping every millisecond), so
+// the tick count carries the milliseconds and TIM1->CNT carries the rest.
+static uint32_t Ui_us_(void) {
+    return ((uint32_t)HAL_GetTick() * 1000U) + (uint32_t)TIM1->CNT;
+}
+//............................................................................
+static uint32_t Ui_pct_(uint32_t used, uint32_t total) {
+    uint32_t const pct = (total == 0U) ? 0U : ((used * 100U) / total);
+
+    return (pct > 100U) ? 100U : pct;
+}
+//............................................................................
+// Milliseconds with one decimal: the readouts are "12.5 ms", not 12 or 13.
+static void Ui_showMs_(lv_obj_t *label, uint32_t us) {
+    lv_label_set_text_fmt(label, "%u.%u ms",
+                          (unsigned)(us / 1000U),
+                          (unsigned)((us % 1000U) / 100U));
+}
+//............................................................................
+static lv_obj_t *Ui_label_(lv_obj_t *parent, char const *text,
+                           uint32_t colour) {
+    lv_obj_t *label = lv_label_create(parent);
+
+    lv_label_set_text(label, text);
+    lv_obj_set_style_text_color(label, lv_color_hex(colour), 0);
+
+    return label;
+}
+//............................................................................
+// One card: rounded, half transparent, placed absolutely, with two key and
+// value pairs. The value labels come back so the render can rewrite them.
+static void Ui_card_(lv_obj_t *parent, lv_coord_t x, lv_coord_t y,
+                     char const *k1, char const *k2,
+                     lv_obj_t **v1, lv_obj_t **v2) {
+    lv_obj_t *card = lv_obj_create(parent);
+    lv_obj_t *key;
+
+    lv_obj_set_size(card, 104, 92);
+    lv_obj_set_pos(card, x, y);
+    lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(card, lv_color_hex(0x0A0E12U), 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_80, 0);
+    lv_obj_set_style_radius(card, 12, 0);
+    lv_obj_set_style_border_width(card, 1, 0);
+    lv_obj_set_style_border_color(card, lv_color_hex(0x1E2A32U), 0);
+    lv_obj_set_style_shadow_width(card, 0, 0);
+    lv_obj_set_style_pad_all(card, 8, 0);
+
+    key = Ui_label_(card, k1, 0x8E97A0U);
+    lv_obj_align(key, LV_ALIGN_TOP_LEFT, 0, 0);
+    *v1 = Ui_label_(card, "-", 0xFFFFFFU);
+    lv_obj_align(*v1, LV_ALIGN_TOP_LEFT, 0, 14);
+
+    key = Ui_label_(card, k2, 0x8E97A0U);
+    lv_obj_align(key, LV_ALIGN_TOP_LEFT, 0, 46);
+    *v2 = Ui_label_(card, "-", 0xFFFFFFU);
+    lv_obj_align(*v2, LV_ALIGN_TOP_LEFT, 0, 60);
+}
+//............................................................................
+// The ring, and the number and the unit inside it: the frame the background
+// art leaves for a gauge, used by both pages. 240 degrees of sweep with the
+// gap at the bottom is the e-bike demo's shape.
+static void Ui_ring_(lv_obj_t *parent) {
+    lv_obj_t *arc = lv_arc_create(parent);
+    lv_obj_t *unit;
+
+    lv_obj_set_size(arc, 160, 160);
+    lv_obj_set_pos(arc, 40, 28);
+    lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
+    lv_arc_set_rotation(arc, 210);
+    lv_arc_set_bg_angles(arc, 0, 240);
+    lv_arc_set_range(arc, 0, 100);
+    lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(arc, 12, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(arc, 12, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(arc, lv_color_hex(0x1B2830U), LV_PART_MAIN);
+    lv_obj_set_style_arc_color(arc, lv_color_hex(0x00C3BCU),
+                               LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(arc, 0, LV_PART_KNOB);
+    lv_obj_set_style_border_width(arc, 0, LV_PART_KNOB);
+    Ui_arc_ = arc;
+
+    // The number is a label at the default font, scaled: the cheap way to a
+    // big readout without a second font in flash. Blocky on purpose - the day
+    // it has to be pretty is the day a digits-only font earns its ~3 KB.
+    Ui_num_ = Ui_label_(parent, "0", 0xFFFFFFU);
+    lv_obj_set_style_transform_scale(Ui_num_, 640, 0);
+    lv_obj_align(Ui_num_, LV_ALIGN_TOP_MID, 0, 96);
+
+    unit = Ui_label_(parent, "edges", 0x9AA3ACU);
+    lv_obj_align(unit, LV_ALIGN_TOP_MID, 0, 140);
+}
+//............................................................................
+// The one thing on the glass that moves on its own: the heartbeat's breath.
+// The animation goes before the widget does - see Ui_pageBegin_.
+static void Ui_ledAnim_(void * obj, int32_t v) {
+    lv_led_set_brightness((lv_obj_t *)obj, (uint8_t)v);
+}
+static void Ui_heartbeat_(lv_obj_t *parent) {
+    lv_obj_t *led = lv_led_create(parent);
+    lv_anim_t a;
+
+    lv_obj_set_size(led, 10, 10);
+    lv_obj_align(led, LV_ALIGN_TOP_RIGHT, -8, 7);
+    lv_led_set_color(led, lv_color_hex(0x00C853U));
+    lv_led_on(led);
+    Ui_led_ = led;
+
+    // 900 ms in, 900 ms out, forever. The dirty area is 10x10, so the whole
+    // animation is 0.1 ms a frame against a 33 ms budget (charter §6).
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, led);
+    lv_anim_set_values(&a, 60, 255);
+    lv_anim_set_duration(&a, 900);
+    lv_anim_set_playback_duration(&a, 900);
+    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_exec_cb(&a, Ui_ledAnim_);
+    lv_anim_start(&a);
+}
+//............................................................................
+static void Ui_barCreate_(lv_obj_t *parent) {
+    lv_obj_t *bar = lv_bar_create(parent);
+
+    lv_obj_set_size(bar, 96, 14);
+    lv_obj_set_pos(bar, 16, 302);
+    lv_bar_set_range(bar, 0, 100);
+    lv_obj_set_style_radius(bar, 6, 0);
+    lv_obj_set_style_border_width(bar, 0, 0);
+    lv_obj_set_style_shadow_width(bar, 0, 0);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(0x1E2A32U), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(0xC6FF3DU),
+                              LV_PART_INDICATOR);
+    Ui_bar_ = bar;
+}
+//............................................................................
+// Which page is up, in two dots at the bottom: the active one is bigger and
+// teal, the language the e-bike demo's bullets use for the same job.
+static void Ui_dots_(lv_obj_t *parent, uint32_t active) {
+    uint32_t i;
+
+    for (i = 0U; i < 2U; ++i) {
+        lv_obj_t *dot = lv_obj_create(parent);
+        lv_coord_t const size = (i == active) ? 6 : 4;
+
+        lv_obj_set_size(dot, size, size);
+        lv_obj_set_pos(dot, (lv_coord_t)(112 + (int32_t)i * 12),
+                       (lv_coord_t)((i == active) ? 309 : 310));
+        lv_obj_remove_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_border_width(dot, 0, 0);
+        lv_obj_set_style_shadow_width(dot, 0, 0);
+        lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(dot,
+                                  lv_color_hex((i == active) ? 0x00C3BCU
+                                                             : 0x555F68U), 0);
+    }
+}
+//............................................................................
+// Page 1, the demo: the AO's own numbers - the ring follows its edge count,
+// the cards carry the LED state, the beat, the edge total and this frame's
+// cost. Absolute positions throughout, so nothing leans on the theme's
+// spacing (the layout is docs/diagrams/sketches/pages-two.html).
+static void Ui_buildDemo_(void) {
     lv_obj_t * const screen = lv_screen_active();
-    lv_obj_t *title;
-    Asset const * const asset = Asset_get();
-    void const * const bgPixels = Asset_slot(asset, UI_BG_SLOT);
+    lv_obj_t *title = Ui_label_(screen, "sm_blinky", 0xE0E4E8U);
 
-    if (Ui_built_) {
-        return;   // a re-entry to the demo page must not duplicate the tree
-    }
-    Ui_built_ = true;
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 8, 6);
 
-    Ui_screenBase_(screen);
+    Ui_ring_(screen);
+    Ui_heartbeat_(screen);
+    Ui_card_(screen, 12, 204, "LED", "beat", &Ui_v1_, &Ui_v2_);
+    Ui_card_(screen, 124, 204, "edges", "frame", &Ui_v3_, &Ui_v4_);
+    Ui_barCreate_(screen);
+    Ui_dots_(screen, 0U);
+}
+//............................................................................
+// Page 2, the stats: the same screen and the same widget kinds, holding the
+// numbers that describe the firmware instead of the AO. Every one of them is
+// a real readout, so the page is a diagnostics view that happens to look like
+// a dashboard.
+static void Ui_buildStats_(void) {
+    lv_obj_t * const screen = lv_screen_active();
+    lv_obj_t *title = Ui_label_(screen, "STATS", 0xE0E4E8U);
 
-    // The bootloader's asset, if it verified: the whole screen becomes one
-    // image and the widgets sit on top of it. Without it the screen keeps the
-    // black background, which is the degradation the design counts on.
-    if (bgPixels != (void const *)0) {
-        lv_obj_t *bg;
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 8, 6);
 
-        Ui_slotDesc_(&Ui_bgDsc_, bgPixels);
-
-        bg = lv_image_create(screen);
-        lv_image_set_src(bg, &Ui_bgDsc_);
-        lv_obj_align(bg, LV_ALIGN_CENTER, 0, 0);
-        lv_obj_remove_flag(bg, LV_OBJ_FLAG_CLICKABLE);
-    }
-
-    title = lv_label_create(screen);
-    lv_label_set_text(title, "sm_blinky");
-    lv_obj_set_style_text_color(title, lv_color_hex(0xE0E4E8U), 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 16);
-
-    Ui_led_ = lv_obj_create(screen);
-    lv_obj_set_size(Ui_led_, 72, 72);
-    lv_obj_set_style_radius(Ui_led_, 12, 0);
-    lv_obj_set_style_border_width(Ui_led_, 0, 0);
-    lv_obj_align(Ui_led_, LV_ALIGN_CENTER, 0, -48);
-
-    Ui_state_ = lv_label_create(screen);
-    lv_obj_set_style_text_color(Ui_state_, lv_color_hex(0xE0E4E8U), 0);
-    lv_obj_align(Ui_state_, LV_ALIGN_CENTER, 0, 44);
-
-    Ui_edges_ = lv_label_create(screen);
-    lv_obj_set_style_text_color(Ui_edges_, lv_color_hex(0x808890U), 0);
-    lv_obj_align(Ui_edges_, LV_ALIGN_CENTER, 0, 72);
-
+    Ui_ring_(screen);
+    Ui_heartbeat_(screen);
+    Ui_card_(screen, 12, 204, "stack free", "pool free", &Ui_v1_, &Ui_v2_);
+    Ui_card_(screen, 124, 204, "frame min", "frame max", &Ui_v3_, &Ui_v4_);
+    Ui_barCreate_(screen);
+    Ui_dots_(screen, 1U);
 }

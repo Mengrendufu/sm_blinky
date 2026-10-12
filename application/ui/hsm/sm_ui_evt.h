@@ -28,7 +28,11 @@ enum {
     // Delivered by the UI thread, not by the inbox: the splash page's hold is
     // over, so the page that owns the glass changes. It is the thread's clock
     // that raises it, and the state machine's decision that acts on it.
-    UI_SPLASH_DONE_SIG
+    UI_SPLASH_DONE_SIG,
+    // The same source and the same shape: the page that owns the glass has
+    // held it for long enough, and the machine hands it to its sibling. Two
+    // content pages take turns this way - demo, stats, demo, ...
+    UI_PAGE_SWITCH_SIG
 };
 
 #endif // SM_UI_EVT_H_

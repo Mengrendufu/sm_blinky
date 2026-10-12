@@ -22,12 +22,14 @@
 // that touches it.
 //
 // The machine owns the screen in pages: Splash first (the boot image, pushed
-// by its entry action, and held for UI_SPLASH_MS), then Demo. The LED events
-// are handled one level up, so the model stays live while the splash is up -
-// the demo page's first frame then draws the state as it is, not as it was.
-// More pages (status, menu) grow as siblings of these two.
+// by its entry action, and held for UI_SPLASH_MS), then two content pages -
+// Demo and Stats - that take turns on UI_PAGE_MS. The LED events are handled
+// one level up, so the model stays live while any page is up - the next
+// page's entry action then draws the state as it is, not as it was.
+// More pages (menu, diagnostics) grow as siblings of these two.
 
 #define UI_SPLASH_MS 1500U   // how long the boot image holds the glass
+#define UI_PAGE_MS   5000U   // how long a page holds the glass
 
 typedef struct {
     SM_Hsm sm_hsm_;

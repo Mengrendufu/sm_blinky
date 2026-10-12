@@ -23,6 +23,9 @@ static SM_RetState Sm_Ui_splash_(void * const me,
 static void Sm_Ui_demo_entry_(SM_Hsm * const me) SM_HSM_RETT;
 static SM_RetState Sm_Ui_demo_(void * const me,
                                void const * const e) SM_HSM_RETT;
+static void Sm_Ui_stats_entry_(SM_Hsm * const me) SM_HSM_RETT;
+static SM_RetState Sm_Ui_stats_(void * const me,
+                                void const * const e) SM_HSM_RETT;
 
 // State-Ui: the level every page shares. The LED events land here, so the
 // model keeps tracking the AO while the splash owns the glass - the demo
@@ -45,6 +48,16 @@ SM_HsmState SM_HSM_ROM Sm_Ui_splash = {
     (SM_ActionHandler)&Sm_Ui_splash_entry_,  // entry_
     (SM_ActionHandler)0,              // exit_
     (SM_StateHandler)&Sm_Ui_splash_   // handler
+};
+
+// State-Stats: the second content page. Same shape as Demo, different tree -
+// and the two hand the glass back and forth on UI_PAGE_SWITCH_SIG.
+SM_HsmState SM_HSM_ROM Sm_Ui_stats = {
+    (SM_StatePtr)&Sm_Ui_ui,           // super
+    (SM_InitHandler)0,                // init_
+    (SM_ActionHandler)&Sm_Ui_stats_entry_,  // entry_
+    (SM_ActionHandler)0,              // exit_
+    (SM_StateHandler)&Sm_Ui_stats_    // handler
 };
 
 // State-Demo: the page the firmware lives in. Its entry asks the display
@@ -141,7 +154,35 @@ static void Sm_Ui_demo_entry_(SM_Hsm * const me) SM_HSM_RETT {
 }
 static SM_RetState Sm_Ui_demo_(void * const me,
                                void const * const e) SM_HSM_RETT {
+    Ui_Evt const * const evt = (Ui_Evt const *)e;
+
+    switch (evt->sig) {
+        case UI_PAGE_SWITCH_SIG: {
+            (void)me;
+            return _SM_TRAN(&Sm_Ui_stats);
+        }
+        default: {
+            return _SM_SUPER();
+        }
+    }
+}
+//............................................................................
+// State-Stats
+static void Sm_Ui_stats_entry_(SM_Hsm * const me) SM_HSM_RETT {
     (void)me;
-    (void)e;
-    return _SM_SUPER();
+    Ui_dispStats();
+}
+static SM_RetState Sm_Ui_stats_(void * const me,
+                                void const * const e) SM_HSM_RETT {
+    Ui_Evt const * const evt = (Ui_Evt const *)e;
+
+    switch (evt->sig) {
+        case UI_PAGE_SWITCH_SIG: {
+            (void)me;
+            return _SM_TRAN(&Sm_Ui_demo);
+        }
+        default: {
+            return _SM_SUPER();
+        }
+    }
 }

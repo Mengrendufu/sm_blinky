@@ -65,6 +65,7 @@ void Ui_start(void) {
 // deadline is whatever LVGL asks for next (clamped by the display adapter).
 static void Ui_thread_(void *arg) {
     TickType_t wait;
+    TickType_t pageAt = 0U;   // when the page on the glass last changed
 
     (void)arg;
 
@@ -87,10 +88,27 @@ static void Ui_thread_(void *arg) {
         // The hold is the state machine's; the thread only delivers its
         // deadline as an event, and the transition that follows starts the
         // demo page (clear the frame, prove it, draw it whole).
+        TickType_t const now = xTaskGetTickCount();
+
         if (Ui_sm_.splashUp && (Sm_Ui_splashLeft(&Ui_sm_) == 0U)) {
             Ui_Evt evt;
 
             evt.sig = UI_SPLASH_DONE_SIG;
+            Sm_Ui_dispatch(&Ui_sm_, &evt);
+        }
+
+        // The dwell is the page's own; this is only its clock. While the boot
+        // image holds the glass the clock keeps being pushed forward, so the
+        // first content page gets its full UI_PAGE_MS.
+        if (Ui_sm_.splashUp) {
+            pageAt = now;
+        }
+        else if ((int32_t)(now - pageAt)
+                 >= (int32_t)pdMS_TO_TICKS(UI_PAGE_MS)) {
+            Ui_Evt evt;
+
+            pageAt = now;
+            evt.sig = UI_PAGE_SWITCH_SIG;
             Sm_Ui_dispatch(&Ui_sm_, &evt);
         }
 

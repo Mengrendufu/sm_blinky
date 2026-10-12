@@ -29,9 +29,14 @@ void Ui_dispInit(void);
 // means the glass is not showing the boot image, so there is nothing to hold.
 bool Ui_dispSplash(void);
 
-// The demo page starts: the next frame is a whole screen, so the adapter
-// clears the frame and proves the clear before it draws.
+// The demo page starts (page 1, background slot 0): the widgets were built at
+// bring-up and the model has moved on since, so the next render writes it all
+// out again instead of trusting what the widgets already show.
 void Ui_dispDemo(void);
+
+// The stats page starts (page 2, background slot 1): same contract, same
+// screen, a different tree - the two pages take turns on the same glass.
+void Ui_dispStats(void);
 
 // Runs lv_timer_handler() (which draws whatever is dirty) and returns how
 // long the thread may sleep before the next timer is due. Clamped both ways:
