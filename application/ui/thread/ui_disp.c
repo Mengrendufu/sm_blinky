@@ -104,6 +104,7 @@ static Ui_Page Ui_page_;              // which page owns the glass
 static lv_obj_t *Ui_led_;             // heartbeat, top right on both pages
 static lv_obj_t *Ui_arc_;             // the ring the art leaves room for
 static lv_obj_t *Ui_num_;             // the big number inside it
+static lv_obj_t *Ui_unit_;            // and what that number counts
 static lv_obj_t *Ui_v1_;              // card A, first value
 static lv_obj_t *Ui_v2_;              // card A, second value
 static lv_obj_t *Ui_v3_;              // card B, first value
@@ -377,7 +378,11 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
         // number in it spells the same value: a ring nobody can read is
         // decoration, and decoration is what the background art already is.
         if (changed) {
-            uint32_t const v = (uint32_t)edges % 101U;
+            // Seven steps per edge, and not an lv_anim on purpose: an
+            // animated value would re-render the ring on every LVGL tick (10
+            // ms) at about 21 ms a frame, which saturates this thread. One
+            // update per LED event is 4% of a 500 ms period.
+            uint32_t const v = ((uint32_t)edges * 7U) % 101U;
 
             lv_arc_set_value(Ui_arc_, (int32_t)v);
             Ui_ringRefresh_();
@@ -598,7 +603,6 @@ static void Ui_card_(lv_obj_t *parent, lv_coord_t x, lv_coord_t y,
 // gap at the bottom is the e-bike demo's shape.
 static void Ui_ring_(lv_obj_t *parent) {
     lv_obj_t *arc = lv_arc_create(parent);
-    lv_obj_t *unit;
 
     lv_obj_set_size(arc, 160, 160);
     lv_obj_set_pos(arc, 40, 28);
@@ -644,8 +648,8 @@ static void Ui_ring_(lv_obj_t *parent) {
     Ui_num_ = Ui_label_(parent, "0", 0xFFFFFFU);
     lv_obj_align(Ui_num_, LV_ALIGN_TOP_MID, 0, 96);
 
-    unit = Ui_label_(parent, "edges", 0x9AA3ACU);
-    lv_obj_align(unit, LV_ALIGN_TOP_MID, 0, 140);
+    Ui_unit_ = Ui_label_(parent, "edges", 0x9AA3ACU);
+    lv_obj_align(Ui_unit_, LV_ALIGN_TOP_MID, 0, 140);
 }
 //............................................................................
 // The one thing on the glass that moves on its own: the heartbeat's breath.
@@ -724,6 +728,10 @@ static void Ui_buildDemo_(void) {
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 8, 6);
 
     Ui_ring_(screen);
+    // The ring is the beat made visible, not the raw count: seven steps per
+    // LED edge is about 17 degrees, which the eye catches, and a full turn
+    // takes some seven seconds. The raw number stays on card B.
+    lv_label_set_text(Ui_unit_, "beat");
     Ui_heartbeat_(screen);
     Ui_card_(screen, 12, 204, "LED", "beat", &Ui_v1_, &Ui_v2_);
     Ui_card_(screen, 124, 204, "edges", "frame", &Ui_v3_, &Ui_v4_);
