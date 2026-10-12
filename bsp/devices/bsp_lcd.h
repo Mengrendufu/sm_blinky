@@ -46,6 +46,8 @@ void BSP_lcdInit(void);
 // turns it on, after the first whole frame is on the frame memory and proven.
 void BSP_lcdBacklight(bool on);
 
+void BSP_lcdReassert(void);
+
 // The coverage sentinel belongs to bring-up alone: mark the frame, write over
 // it, ask whether the mark survived. The run-time version of that proof is
 // gone (2026-10-12): a mark is a picture on the glass, so proving a page's
@@ -95,9 +97,13 @@ void BSP_lcdWritePixelsDma(uint16_t const *pixels, uint32_t count);
 // blocking, no waiting, nothing that takes a lock.
 void BSP_lcdDmaSetDoneHook(void (*hook)(void));
 
-// Nothing here writes a panel register at run time any more: the display
-// layer opens a window and pushes pixels, and the vendor table was written
-// last during bring-up (2026-10-12: the inversion keep-alive is retired).
+// Re-send the panel's inversion bit (0x21). The panel clobbers it on its own
+// schedule - measured on the glass 2026-10-12: with the keep-alive removed,
+// the panel came up inverted (bright where it should be black) and every
+// region drawn after that kept the wrong polarity, which reads as garbage
+// where the picture changes. The inversion bit is the one register that is
+// safe to write while the panel scans, so the display layer re-asserts it
+// forever at a slow rate.
 
 // True when the last transfer ended in a DMA error. The adapter reads it
 // after its wait, so the assertion and its record happen on the thread

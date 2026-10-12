@@ -84,6 +84,10 @@
 #define UI_FRAME_BUDGET_US 33000U
 #define UI_STACK_WORDS    2048U   // the UI task's static stack, in words
 #define UI_BEAT_MS        500U    // the AO beat the demo page's card shows
+// How often the panel's inversion bit is re-sent. The clobber has no
+// schedule, so this one never stops - it is one command, and it is the only
+// panel register the run-time path touches (see BSP_lcdReassert).
+#define UI_INVON_MS       1000U
 
 // The two content pages. The widgets are the same kinds on both, so one set
 // of handles serves whichever page is up (see Ui_pageBegin_).
@@ -297,7 +301,18 @@ void Ui_dispStats(void) {
 }
 //............................................................................
 TickType_t Ui_dispHeartbeat(void) {
+    static TickType_t Ui_invonAt_;
     uint32_t const t0 = Ui_us_();
+    TickType_t const now = xTaskGetTickCount();
+
+    // The panel's polarity, forever. Losing it means the glass comes up
+    // inverted and every region drawn after that keeps the wrong polarity:
+    // the picture goes bright-on-dark where it was dark-on-bright, and every
+    // change leaves garbage. Measured on the glass (2026-10-12).
+    if ((Ui_invonAt_ == 0U) || ((int32_t)(now - Ui_invonAt_) >= 0)) {
+        BSP_lcdReassert();
+        Ui_invonAt_ = now + pdMS_TO_TICKS(UI_INVON_MS);
+    }
 
     // LVGL runs on every page now, the boot image included: it is a widget
     // like any other, and the page that owns the glass is the only page whose
