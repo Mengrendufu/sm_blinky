@@ -198,7 +198,7 @@ void Ui_dispInit(void) {
 // widget that moves repaints what it covered. Black, because that is the
 // colour BSP_lcdInit() leaves in the frame memory.
 static void Ui_screenBase_(lv_obj_t * const screen) {
-    lv_obj_set_scrollable(screen, false);
+    lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000U), 0);
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
 }
@@ -241,7 +241,7 @@ bool Ui_dispSplash(void) {
     img = lv_image_create(screen);
     lv_image_set_src(img, &Ui_splashDsc_);
     lv_obj_align(img, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_clickable(img, false);
+    lv_obj_remove_flag(img, LV_OBJ_FLAG_CLICKABLE);
 
     Ui_framePending_ = true;   // this page starts with a whole screen
     Ui_dbgSplashOk_ = 1U;
@@ -281,7 +281,7 @@ static void Ui_pageBegin_(uint32_t slot, Ui_Page page) {
         bg = lv_image_create(screen);
         lv_image_set_src(bg, &Ui_bgDsc_);
         lv_obj_align(bg, LV_ALIGN_CENTER, 0, 0);
-        lv_obj_set_clickable(bg, false);
+        lv_obj_remove_flag(bg, LV_OBJ_FLAG_CLICKABLE);
     }
 
     Ui_page_ = page;
@@ -380,10 +380,6 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
             uint32_t const v = (uint32_t)edges % 101U;
 
             lv_arc_set_value(Ui_arc_, (int32_t)v);
-            // LVGL 9.6.0 does not carry a fix for this either: with the
-            // workaround off the ring still draws garbage on a value change
-            // (glass, 2026-10-12, lv_draw_arc_get_area confirmed in the
-            // image). The full-width strip request stays.
             Ui_ringRefresh_();
             lv_label_set_text_fmt(Ui_num_, "%u", (unsigned)v);
             lv_label_set_text(Ui_v1_, ledOn ? "ON" : "OFF");
@@ -412,10 +408,6 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
             lv_arc_set_value(Ui_arc_,
                              (int32_t)Ui_pct_(UI_STACK_WORDS - stackFree,
                                               UI_STACK_WORDS));
-            // LVGL 9.6.0 does not carry a fix for this either: with the
-            // workaround off the ring still draws garbage on a value change
-            // (glass, 2026-10-12, lv_draw_arc_get_area confirmed in the
-            // image). The full-width strip request stays.
             Ui_ringRefresh_();
             lv_label_set_text_fmt(Ui_v1_, "%u w", (unsigned)stackFree);
             uint32_t const poolKb = mon.free_size / 1024U;
@@ -581,7 +573,7 @@ static void Ui_card_(lv_obj_t *parent, lv_coord_t x, lv_coord_t y,
 
     lv_obj_set_size(card, 104, 92);
     lv_obj_set_pos(card, x, y);
-    lv_obj_set_scrollable(card, false);
+    lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(card, lv_color_hex(0x0A0E12U), 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_80, 0);
     lv_obj_set_style_radius(card, 12, 0);
@@ -610,7 +602,7 @@ static void Ui_ring_(lv_obj_t *parent) {
 
     lv_obj_set_size(arc, 160, 160);
     lv_obj_set_pos(arc, 40, 28);
-    lv_obj_set_clickable(arc, false);
+    lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
     // The angles carry the rotation - never lv_arc_set_rotation. The widget
     // combines the two differently in the two places that matter: the draw
     // path adds rotation raw (lv_arc.c:834-849, which for a 240 degree gauge
@@ -710,7 +702,7 @@ static void Ui_dots_(lv_obj_t *parent, uint32_t active) {
         lv_obj_set_size(dot, size, size);
         lv_obj_set_pos(dot, (lv_coord_t)(112 + (int32_t)i * 12),
                        (lv_coord_t)((i == active) ? 309 : 310));
-        lv_obj_set_scrollable(dot, false);
+        lv_obj_remove_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
         lv_obj_set_style_border_width(dot, 0, 0);
         lv_obj_set_style_shadow_width(dot, 0, 0);
