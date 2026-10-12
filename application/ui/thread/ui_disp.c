@@ -380,9 +380,9 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
             uint32_t const v = (uint32_t)edges % 101U;
 
             lv_arc_set_value(Ui_arc_, (int32_t)v);
-            // LVGL 9.6.0 does NOT carry a fix for this: with the workaround
-            // off the ring still draws garbage on a value change (measured on
-            // the glass 2026-10-12, with lv_draw_arc_get_area confirmed in the
+            // LVGL 9.6.0 does not carry a fix for this either: with the
+            // workaround off the ring still draws garbage on a value change
+            // (glass, 2026-10-12, lv_draw_arc_get_area confirmed in the
             // image). The full-width strip request stays.
             Ui_ringRefresh_();
             lv_label_set_text_fmt(Ui_num_, "%u", (unsigned)v);
@@ -412,9 +412,9 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
             lv_arc_set_value(Ui_arc_,
                              (int32_t)Ui_pct_(UI_STACK_WORDS - stackFree,
                                               UI_STACK_WORDS));
-            // LVGL 9.6.0 does NOT carry a fix for this: with the workaround
-            // off the ring still draws garbage on a value change (measured on
-            // the glass 2026-10-12, with lv_draw_arc_get_area confirmed in the
+            // LVGL 9.6.0 does not carry a fix for this either: with the
+            // workaround off the ring still draws garbage on a value change
+            // (glass, 2026-10-12, lv_draw_arc_get_area confirmed in the
             // image). The full-width strip request stays.
             Ui_ringRefresh_();
             lv_label_set_text_fmt(Ui_v1_, "%u w", (unsigned)stackFree);
