@@ -62,6 +62,7 @@ void BSP_dbgMemReport(uint8_t selfRecId);
 // CPU load as seen from the tick: the idle sample count and the tick count,
 // to be differenced by the caller over its own window (see freertos_hooks.c).
 void BSP_cpuSample(uint32_t *idle, uint32_t *total);
+void BSP_cpuProbeStart(void);   // TODO(probe): remove with the load task
 
 
 #endif // BSP_H_

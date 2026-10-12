@@ -399,7 +399,11 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
         if (dTotal > 0U) {
             Ui_cpuPct_ = 100U - ((dIdle * 100U) / dTotal);
         }
-        lv_label_set_text_fmt(Ui_cpu_, "cpu %u%%", (unsigned)Ui_cpuPct_);
+        // TODO(probe 2026-10-12): i<idle>/<total> is the raw sample pair -
+        // it proves the window really is 50 ticks. Drop back to "cpu %u%%".
+        lv_label_set_text_fmt(Ui_cpu_, "cpu %u%% i%u/%u",
+                              (unsigned)Ui_cpuPct_, (unsigned)dIdle,
+                              (unsigned)dTotal);
         Ui_statAt_ = now;
     }
 
