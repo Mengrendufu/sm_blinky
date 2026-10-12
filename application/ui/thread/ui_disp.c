@@ -88,7 +88,7 @@
 // How often the panel's inversion bit is re-sent. The clobber has no
 // schedule, so this one never stops - it is one command, and it is the only
 // panel register the run-time path touches (see BSP_lcdReassert).
-#define UI_INVON_MS       1000U
+#define UI_INVON_MS       100U
 
 // The two content pages. The widgets are the same kinds on both, so one set
 // of handles serves whichever page is up (see Ui_pageBegin_).
@@ -435,45 +435,20 @@ static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
         SM_TRACE_PAYLOAD_BE((uint8_t)area->y2)
     SM_TRACE_END()
 
-    // The pixels LVGL hands over live in a buffer whose row stride is the
-    // display width (lv_display_set_buffers computes it from hor_res), and
-    // the rectangle does not have to be that wide: a narrow one - the arc's
-    // area, the led's 10x10 - is stored with that same stride. Pushing it as
-    // "width * height contiguous pixels" therefore took the first row from
-    // the right place and every later row from somewhere else, which is what
-    // the rectangular garbage on the glass was (measured 2026-10-12: 317 of
-    // the pushed rectangles are 29x28, most of them not display-wide).
-    // Full-width rectangles keep the single-transfer fast path.
-    uint32_t const stridePx = UI_LCD_HOR;
+    // The pixels of the rectangle are contiguous from the buffer's start,
+    // however narrow the rectangle is: LVGL re-shapes its render buffer to
+    // the area it is drawing (the stride is the rectangle's width here, not
+    // the display's - a row-by-row push stepping by the display width was
+    // tried on 2026-10-12 and made every narrow redraw wrong).
+    BSP_lcdSetWindow((uint16_t)area->x1, (uint16_t)area->y1,
+                     (uint16_t)area->x2, (uint16_t)area->y2);
 
-    if (width == stridePx) {
-        BSP_lcdSetWindow((uint16_t)area->x1, (uint16_t)area->y1,
-                         (uint16_t)area->x2, (uint16_t)area->y2);
-
-        // The barrier publishes the strip's stores before the transfer
-        // starts: the DMA reads them as another bus master, not through this
-        // core's write buffer.
-        __DSB();
-        BSP_lcdWritePixelsDma((uint16_t const *)(void const *)px,
-                              width * height);
-        Ui_dmaWait_(UI_DMA_TIMEOUT_MS);
-    }
-    else {
-        uint32_t const strideB = stridePx * 2U;
-        uint16_t const * const row = (uint16_t const *)(void const *)px;
-        uint32_t y;
-
-        for (y = 0U; y < height; ++y) {
-            __DSB();
-            BSP_lcdSetWindow((uint16_t)area->x1, (uint16_t)(area->y1 + y),
-                             (uint16_t)area->x2, (uint16_t)(area->y1 + y));
-            BSP_lcdWritePixelsDma(
-                (uint16_t const *)(void const *)((uint8_t const *)row
-                                                 + (y * strideB)),
-                width);
-            Ui_dmaWait_(UI_DMA_TIMEOUT_MS);
-        }
-    }
+    // Arm the channel and wait for it. The barrier publishes the strip's
+    // stores before the transfer starts: the DMA reads them as another bus
+    // master, not through this core's write buffer.
+    __DSB();
+    BSP_lcdWritePixelsDma((uint16_t const *)(void const *)px, width * height);
+    Ui_dmaWait_(UI_DMA_TIMEOUT_MS);
 
     // The page's first frame is complete once its last dirty area is on the
     // glass. That is the moment the light can come on - bring-up left the
@@ -621,6 +596,11 @@ static void Ui_ring_(lv_obj_t *parent) {
     lv_obj_set_style_arc_color(arc, lv_color_hex(0x1B2830U), LV_PART_MAIN);
     lv_obj_set_style_arc_color(arc, lv_color_hex(0x00C3BCU),
                                LV_PART_INDICATOR);
+    // Flat ends: the rounded cap is drawn as a width x width circle mask that
+    // the renderer blends through, and that blend is the next suspect for the
+    // small rectangular patch the arc leaves behind as it grows (2026-10-12).
+    lv_obj_set_style_arc_rounded(arc, false, LV_PART_MAIN);
+    lv_obj_set_style_arc_rounded(arc, false, LV_PART_INDICATOR);
     // The knob goes away entirely, styles and all. Making it transparent is
     // not enough: the default theme gives it a shadow, and an invisible knob
     // with a shadow is a blurry blob that the arc leaves behind at every
