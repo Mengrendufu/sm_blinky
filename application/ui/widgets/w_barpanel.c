@@ -45,10 +45,13 @@ void W_BarPanel_create(struct W_BarPanel *p, struct _lv_obj_t *parent,
                                                                : "-";
 
         p->name[i] = WidgetIO_label(parent, name, 0xC9D1D9U);
-        lv_obj_set_pos((lv_obj_t *)p->name[i], 18, y);
+        lv_obj_set_pos((lv_obj_t *)p->name[i], 14, y);
+        lv_obj_set_width((lv_obj_t *)p->name[i], 42);
+        lv_label_set_long_mode((lv_obj_t *)p->name[i],
+                               LV_LABEL_LONG_MODE_CLIP);
 
-        lv_obj_set_size(bar, 74, 10);
-        lv_obj_set_pos(bar, 64, (lv_coord_t)(y + 4));
+        lv_obj_set_size(bar, 70, 10);
+        lv_obj_set_pos(bar, 60, (lv_coord_t)(y + 4));
         lv_bar_set_range(bar, 0, 100);
         lv_obj_set_style_radius(bar, 5, 0);
         lv_obj_set_style_border_width(bar, 0, 0);
@@ -58,14 +61,23 @@ void W_BarPanel_create(struct W_BarPanel *p, struct _lv_obj_t *parent,
                                   LV_PART_INDICATOR);
         p->bar[i] = (struct _lv_obj_t *)bar;
 
+        // 100% is about 35 px in the default font, and a label that is
+        // narrower than its text wraps - the percent sign used to fall onto
+        // the next row (2026-10-13). So: wide enough for the longest string,
+        // and CLIP rather than wrap if anything ever outgrows it.
         p->pct[i] = WidgetIO_label(parent, "0%", 0xFFFFFFU);
-        lv_obj_set_pos((lv_obj_t *)p->pct[i], 144, y);
-        lv_obj_set_width((lv_obj_t *)p->pct[i], 32);
+        lv_obj_set_pos((lv_obj_t *)p->pct[i], 136, y);
+        lv_obj_set_width((lv_obj_t *)p->pct[i], 38);
         lv_obj_set_style_text_align((lv_obj_t *)p->pct[i],
                                     LV_TEXT_ALIGN_RIGHT, 0);
+        lv_label_set_long_mode((lv_obj_t *)p->pct[i],
+                               LV_LABEL_LONG_MODE_CLIP);
 
         p->val[i] = WidgetIO_label(parent, "-", 0x9AA3ACU);
-        lv_obj_set_pos((lv_obj_t *)p->val[i], 182, y);
+        lv_obj_set_pos((lv_obj_t *)p->val[i], 180, y);
+        lv_obj_set_width((lv_obj_t *)p->val[i], 54);
+        lv_label_set_long_mode((lv_obj_t *)p->val[i],
+                               LV_LABEL_LONG_MODE_CLIP);
     }
 }
 //............................................................................
