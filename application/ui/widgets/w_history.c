@@ -30,7 +30,7 @@ void W_History_create(struct W_History *w, struct _lv_obj_t *parent) {
         lv_obj_t *bar = lv_bar_create((lv_obj_t *)parent);
 
         lv_obj_set_size(bar, 12, 40);
-        lv_obj_set_pos(bar, (lv_coord_t)(30 + (int32_t)i * 15), 200);
+        lv_obj_set_pos(bar, (lv_coord_t)(30 + (int32_t)i * 15), 224);
         lv_bar_set_range(bar, 0, 100);
         lv_obj_set_style_radius(bar, 2, 0);
         lv_obj_set_style_border_width(bar, 0, 0);
@@ -43,7 +43,7 @@ void W_History_create(struct W_History *w, struct _lv_obj_t *parent) {
     }
 
     w->cap = WidgetIO_label(parent, "cpu history: 6 s", 0x9AA3ACU);
-    lv_obj_align((lv_obj_t *)w->cap, LV_ALIGN_TOP_MID, 0, 246);
+    lv_obj_align((lv_obj_t *)w->cap, LV_ALIGN_TOP_MID, 0, 270);
 }
 //............................................................................
 // The bars are drawn from the bottom up, so a sample is a height, and the
