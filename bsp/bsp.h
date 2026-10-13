@@ -62,10 +62,7 @@ void BSP_dbgMemReport(uint8_t selfRecId);
 // CPU load as seen from the tick: the idle sample count and the tick count,
 // to be differenced by the caller over its own window (see freertos_hooks.c).
 void BSP_cpuSample(uint32_t *idle, uint32_t *total);
-// The main stack's watermark, the classic way: paint the unused part of its
-// reserved region early, then scan for the deepest untouched word later.
-void BSP_mspPaint(void);
-uint32_t BSP_mspPeakBytes(void);
+uint32_t BSP_mspLow(void);   // lowest MSP seen by the tick hook, 0 if unseen
 
 
 #endif // BSP_H_
