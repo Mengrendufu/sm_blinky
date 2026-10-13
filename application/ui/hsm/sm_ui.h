@@ -15,7 +15,7 @@
 #include "widgets/w_barpanel.h"
 #include "widgets/w_dots.h"
 #include "widgets/w_gauge.h"
-#include "widgets/w_history.h"
+#include "widgets/w_ram.h"
 #include "widgets/w_dial.h"
 #include "widgets/w_switch.h"
 #include "widgets/w_topbar.h"
@@ -56,7 +56,7 @@ typedef struct {
     struct W_Dots dots;       // both pages: which page is up
     struct W_Dial dial;       // page 2: the arc that steps round
     struct W_Switch sw;       // page 2: flips with the AO's led
-    struct W_History hist;    // page 2: cpu over the last twelve windows
+    struct W_Ram ram;         // page 2: the on-chip RAM, from the linker
 
     // What the widgets last showed, so an unchanged model costs nothing: no
     // property writes, no invalidation, no redraw.

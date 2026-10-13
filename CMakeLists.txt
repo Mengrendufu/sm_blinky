@@ -51,8 +51,8 @@ set(SRC_ALL
     ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_gauge.c
     ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_barpanel.c
     ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_switch.c
-    ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_history.c
     ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_dial.c
+    ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_ram.c
     ${CMAKE_SOURCE_DIR}/application/ui/hsm/sm_ui.c
     ${CMAKE_SOURCE_DIR}/application/flash/thread/flash.c
     ${CMAKE_SOURCE_DIR}/application/flash/thread/flash_req.c

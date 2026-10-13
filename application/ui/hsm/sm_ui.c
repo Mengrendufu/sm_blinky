@@ -16,6 +16,15 @@
 #include "bsp.h"
 #include "sm_tracer.h"
 #include "sst_port.h"   // defines SST_EVT_POOL_NUM, then the pool's API
+
+// The internal SRAM as the linker script laid it out: the static image ends
+// at _ebss, the stack starts at the top (_estack). The gap between them is
+// what is left, and it still holds the 1.5 KB the script reserves for the
+// heap and the MSP, so "free" on the live page is the raw gap, not the
+// usable remainder.
+extern uint8_t _ebss;
+extern uint8_t _estack;
+#define SM_UI_RAM_BASE 0x20000000U
 #include <string.h>
 #include "FreeRTOS.h"
 #include "task.h"
@@ -273,7 +282,7 @@ void Sm_Ui_init(Sm_Ui * const me) {
     me->dialPct = 0U;
     me->dialUp = true;
     W_Switch_init(&me->sw);
-    W_History_init(&me->hist);
+    W_Ram_init(&me->ram);
     SM_Hsm_init_(&me->sm_hsm_, (SM_InitHandler)Sm_Ui_TOP_initial_);
 }
 //............................................................................
@@ -401,7 +410,12 @@ static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
                    + pdMS_TO_TICKS(SM_UI_DIAL_MS);
     W_Dial_setValue(&self->dial, 0U);
     W_Switch_create(&self->sw, Ui_dispPageRoot(), 92, 176);
-    W_History_create(&self->hist, Ui_dispPageRoot());
+    // The RAM figure never moves: it is the static image against the top of
+    // the stack, so the page sets it once, on the way in.
+    W_Ram_create(&self->ram, Ui_dispPageRoot());
+    W_Ram_set(&self->ram,
+              (uint32_t)((uintptr_t)&_ebss - SM_UI_RAM_BASE),
+              (uint32_t)((uintptr_t)&_estack - SM_UI_RAM_BASE));
     W_Dots_create(&self->dots, Ui_dispPageRoot(), 1U);
     self->shownValid = false;   // the led gets written out again
     self->statAt = 0U;          // the first window lands right away
@@ -427,9 +441,7 @@ static SM_RetState Sm_Ui_live_(void * const me,
             if (Sm_Ui_fast_(self)) {
                 W_Switch_set(&self->sw, self->ledOn);
             }
-            if (Sm_Ui_slow_(self)) {
-                W_History_push(&self->hist, (unsigned)self->cpuPct);
-            }
+            (void)Sm_Ui_slow_(self);   // the corner's cpu readout
             if ((int32_t)(now - self->dialAt) >= 0) {
                 if (self->dialUp) {
                     self->dialPct += SM_UI_DIAL_STEP;
