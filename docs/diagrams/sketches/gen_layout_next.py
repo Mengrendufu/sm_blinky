@@ -103,7 +103,7 @@ def page1():
              '</div>')
     o.append(row(150, "ui", 36, "1320 w"))
     o.append(row(169, "flash", 50, "128 w"))
-    o.append(row(188, "blinky", 44, "143 w"))
+    o.append(row(188, "ao", 44, "143 w"))
     o.append(row(207, "Tmr Svc", 25, "192 w"))
     o.append(row(226, "IDLE", 12, "112 w"))
     o.append(row(245, "nmin", 100, "16/16", fill_hex="#00C3BC"))
@@ -183,7 +183,7 @@ HTML = """<!DOCTYPE html>
 <b>①</b> 右上角：<code>cpu NN %</code> + led —— <b>两页都在</b>（页 1 的弧里也有一份，角落那个不取消 ✓）。<br>
 <b>②</b> cpu 用<b>半圆</b> <code>lv_arc</code>：bbox 156x78 &rArr; 整行带 3 条 &asymp; 10 ms/次，2 Hz &rArr; 占用 ~2%。<br>
 <b>③</b> 清单每行 = <b>条 + 百分比 + 数字</b>（mockup 原话）。<b>线程全放</b>：运行期就 5 个任务
- —— <code>ui</code>(2048 w) / <code>flash</code>(256 w) / SST 的 AO 任务 / <code>Tmr Svc</code>(256 w) / <code>IDLE</code>(128 w)
+ —— <code>ui</code>(2048 w) / <code>flash</code>(256 w) / <code>ao</code>(SST，所有 AO 共用一个入口，任务名就是 "ao"，见 <code>ports/sst_port.c:61</code>) / <code>Tmr Svc</code>(256 w) / <code>IDLE</code>(128 w)
  —— 再加 <code>tracer nmin</code> + <code>SST 事件池</code> + <code>UI inbox</code> = <b>8 行</b>✓
  （面板 164 px &divide; 8 行 = 20 px/行，还余 4 px；最多能到 8~9 行 ⇒ 以后加任务也放得下 ✓）。<br>
 <b>④</b> 页点保留（两页指示）。<br>
@@ -217,7 +217,7 @@ HTML = """<!DOCTYPE html>
 真要大字号得做一份字体，不是一行代码的事。</div>
 </div>
 
-<h2>四、要你定的三件事</h2>
+<h2>四、已定 / 默认执行</h2>
 <div class="note"><b>已定（你这轮拍的）</b>
 <ul style="font-size:13px;line-height:1.7;margin:6px 0 0 0">
 <li><b>节拍那套删掉</b> ✓：页 1 的节拍环（七步/边沿）、<code>edges/frame</code> 卡、底栏帧时条全部下线
