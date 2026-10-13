@@ -376,8 +376,11 @@ static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
 
     Sm_Ui_chrome_(self, "live");
     Ui_dispPageBegin(UI_BG_SLOT_LIVE);
-    W_Dial_create(&self->dial, Ui_dispPageRoot(), 72, 36, 96);
-    W_Switch_create(&self->sw, Ui_dispPageRoot(), 132, 56);
+    // Stacked, never side by side: the switch used to sit inside the arc's
+    // 96x96 box, and two boxes that overlap tear each other when one of them
+    // is redrawn through a narrow area (2026-10-13, seen on the glass).
+    W_Dial_create(&self->dial, Ui_dispPageRoot(), 72, 40, 96);
+    W_Switch_create(&self->sw, Ui_dispPageRoot(), 92, 146);
     W_History_create(&self->hist, Ui_dispPageRoot());
     W_Dots_create(&self->dots, Ui_dispPageRoot(), 1U);
     self->shownValid = false;   // the led gets written out again

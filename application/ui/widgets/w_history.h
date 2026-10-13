@@ -19,6 +19,7 @@ struct _lv_obj_t;
 #define W_HISTORY_N 12U
 
 struct W_History {
+    struct _lv_obj_t *cap;
     struct _lv_obj_t *bar[W_HISTORY_N];
     uint8_t fill[W_HISTORY_N];
 };
