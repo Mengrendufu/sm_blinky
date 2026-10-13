@@ -32,10 +32,12 @@
 // cheap.
 #define UI_STAT_MS 500U
 
-// How fast the live page's arc steps round. Each step redraws the ring's
-// whole bounding box as full-width bands, about 5 ms, so five a second is
-// roughly 2.5 percent of the thread; at 30 fps it would be 15.
-#define SM_UI_DIAL_MS 200U
+// The live page's arc: one sweep from empty to full per visit, and the visit
+// is UI_PAGE_MS long. Twenty steps of five percent at 240 ms is 4.8 seconds,
+// which leaves the full ring on the glass for a moment before the page hands
+// over - and each step is one whole-band redraw, about 5 ms.
+#define SM_UI_DIAL_MS 240U
+#define SM_UI_DIAL_STEP 5U
 
 // The task rows of page 1's panel: five threads, then the two pools. Only the
 // order and the names are ours - the sizes come from the kernel, which
@@ -385,6 +387,12 @@ static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
     // 96x96 box, and two boxes that overlap tear each other when one of them
     // is redrawn through a narrow area (2026-10-13, seen on the glass).
     W_Dial_create(&self->dial, Ui_dispPageRoot(), 72, 40, 96);
+    // Start the sweep empty, and let the first step come one period later:
+    // the page always begins on an empty ring.
+    self->dialPct = 0U;
+    self->dialAt = (uint32_t)xTaskGetTickCount()
+                   + pdMS_TO_TICKS(SM_UI_DIAL_MS);
+    W_Dial_setValue(&self->dial, 0U);
     W_Switch_create(&self->sw, Ui_dispPageRoot(), 92, 176);
     W_History_create(&self->hist, Ui_dispPageRoot());
     W_Dots_create(&self->dots, Ui_dispPageRoot(), 1U);
@@ -416,7 +424,8 @@ static SM_RetState Sm_Ui_live_(void * const me,
                 W_History_push(&self->hist, (unsigned)self->cpuPct);
             }
             if ((int32_t)(now - self->dialAt) >= 0) {
-                self->dialPct = (uint16_t)((self->dialPct + 7U) % 101U);
+                self->dialPct = (uint16_t)((self->dialPct
+                                            + SM_UI_DIAL_STEP) % 101U);
                 self->dialAt = now + pdMS_TO_TICKS(SM_UI_DIAL_MS);
                 W_Dial_setValue(&self->dial, self->dialPct);
             }
