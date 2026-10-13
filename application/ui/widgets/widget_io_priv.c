@@ -39,6 +39,14 @@ unsigned WidgetIO_poolUsedPct(void) {
     return (unsigned)mon.used_pct;
 }
 //............................................................................
+unsigned WidgetIO_poolFreeKb(void) {
+    lv_mem_monitor_t mon;
+
+    lv_mem_monitor(&mon);
+
+    return (unsigned)(mon.free_size / 1024U);
+}
+//............................................................................
 uint32_t WidgetIO_pct(uint32_t used, uint32_t total) {
     uint32_t const pct = (total == 0U) ? 0U : ((used * 100U) / total);
 

@@ -15,6 +15,10 @@
 
 #include <stdbool.h>
 #include "FreeRTOS.h"
+
+// How many of the inbox slots are still free, for the stats page's own row.
+unsigned Ui_evtInboxFree(void);
+unsigned Ui_evtInboxLen(void);
 #include "task.h"
 #include "sm_ui_evt.h"
 

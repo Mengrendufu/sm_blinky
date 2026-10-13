@@ -12,10 +12,12 @@
 
 #include "sm_hsm.h"
 #include "sm_ui_evt.h"
-#include "widgets/w_bar.h"
-#include "widgets/w_card.h"
+#include "widgets/w_barpanel.h"
 #include "widgets/w_dots.h"
-#include "widgets/w_ring.h"
+#include "widgets/w_gauge.h"
+#include "widgets/w_history.h"
+#include "widgets/w_spinner.h"
+#include "widgets/w_switch.h"
 #include "widgets/w_topbar.h"
 #include "FreeRTOS.h"   // TickType_t: the splash hold is measured in ticks
 
@@ -47,12 +49,13 @@ typedef struct {
     // set per page that the page's own state builds and drops. The handles
     // live here because the states are the only thing that knows which page
     // is up; the thin wrappers in application/ui/widgets do the LVGL work.
-    struct W_Topbar top;    // title, cpu readout, heartbeat led
-    struct W_Ring ring;     // the ring the art leaves room for
-    struct W_Card cardA;    // card at (12,204)
-    struct W_Card cardB;    // card at (124,204)
-    struct W_Bar bar;       // the bottom bar
-    struct W_Dots dots;     // the two page dots
+    struct W_Topbar top;      // title, cpu readout, heartbeat led
+    struct W_Gauge gauge;     // page 1: the cpu half gauge
+    struct W_BarPanel panel;  // page 1: one row per thread and per pool
+    struct W_Dots dots;       // both pages: which page is up
+    struct W_Spinner spin;    // page 2: the one piece that moves per frame
+    struct W_Switch sw;       // page 2: flips with the AO's led
+    struct W_History hist;    // page 2: cpu over the last twelve windows
 
     // What the widgets last showed, so an unchanged model costs nothing: no
     // property writes, no invalidation, no redraw.

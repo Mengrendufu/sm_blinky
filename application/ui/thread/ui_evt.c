@@ -27,6 +27,21 @@ static uint8_t Ui_used_;
 static TaskHandle_t Ui_thread_;
 
 //============================================================================
+//............................................................................
+unsigned Ui_evtInboxFree(void) {
+    unsigned free_;
+
+    taskENTER_CRITICAL();
+    free_ = (unsigned)(UI_INBOX_LEN - Ui_used_);
+    taskEXIT_CRITICAL();
+
+    return free_;
+}
+//............................................................................
+unsigned Ui_evtInboxLen(void) {
+    return (unsigned)UI_INBOX_LEN;
+}
+//............................................................................
 void Ui_evtBind(TaskHandle_t thread) {
     Ui_thread_ = thread;
 }

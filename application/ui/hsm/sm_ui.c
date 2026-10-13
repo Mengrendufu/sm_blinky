@@ -11,9 +11,11 @@
 #include "sm_ui.h"
 #include "ui.h"
 #include "ui_disp_priv.h"
+#include "ui_evt_priv.h"
 #include "widgets/widget_io_priv.h"
 #include "bsp.h"
 #include "sm_tracer.h"
+#include <string.h>
 #include "FreeRTOS.h"
 #include "task.h"
 
@@ -21,16 +23,38 @@
 // Which background slot each page lays down. The burner writes three, in this
 // order: 0 = the night dashboard, 1 = the grid, 2 = the logo, which is the
 // splash page's own and is not a page background.
-#define UI_BG_SLOT_DEMO  0U
-#define UI_BG_SLOT_STATS 1U
+#define UI_BG_SLOT_SYS  0U
+#define UI_BG_SLOT_LIVE 1U
 
-// How often a page's slow readouts (frame time, stack, pool) are rewritten.
-// The fast ones follow the AO's events instead, so 2 Hz is where the numbers
-// stop being interesting and the redraws start being expensive.
-#define UI_STAT_MS         500U
-// The refresh period the frame readout is read against: a percentage that
-// means "how much of a 30 fps budget this frame took".
-#define UI_FRAME_BUDGET_US 33000U
+// How often a page's slow readouts are rewritten. The LED events are the fast
+// ones; 2 Hz is where numbers stop being interesting and redraws stop being
+// cheap.
+#define UI_STAT_MS 500U
+
+// The task rows of page 1's panel: five threads, then the two pools. The
+// kernel reports only how much of a stack is still free
+// (uxTaskGetSystemState -> usStackHighWaterMark), so the percentage needs the
+// other half of the sum from here. If a stack size changes, this table
+// changes
+// with it: ui.c UI_STACK_WORDS (2048), flash.c FLASH_STACK_WORDS (256),
+// blinky.c BLINKY_STACK_WORDS (256), configTIMER_TASK_STACK_DEPTH (256),
+// configMINIMAL_STACK_SIZE (128).
+#define SM_UI_TASK_ROWS 5U
+#define SM_UI_PANEL_ROWS W_BARPANEL_ROWS
+#define SM_UI_TASKS 8U
+
+static char const * const Sm_Ui_panelNames_[SM_UI_PANEL_ROWS] = {
+    "ui", "flash", "ao", "Tmr Svc", "IDLE", "nmin", "ui inbox", "lvgl pool"
+};
+static char const * const Sm_Ui_panelUnits_[SM_UI_PANEL_ROWS] = {
+    "w", "w", "w", "w", "w", "-", "-", "KB"
+};
+static char const * const Sm_Ui_stackNames_[SM_UI_TASK_ROWS] = {
+    "ui", "flash", "ao", "Tmr Svc", "IDLE"
+};
+static uint16_t const Sm_Ui_stackWords_[SM_UI_TASK_ROWS] = {
+    2048U, 256U, 256U, 256U, 128U
+};
 
 //============================================================================
 static SM_StatePtr Sm_Ui_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT;
@@ -39,24 +63,21 @@ static SM_RetState Sm_Ui_ui_(void * const me,
 static void Sm_Ui_splash_entry_(SM_Hsm * const me) SM_HSM_RETT;
 static SM_RetState Sm_Ui_splash_(void * const me,
                                  void const * const e) SM_HSM_RETT;
-static void Sm_Ui_demo_entry_(SM_Hsm * const me) SM_HSM_RETT;
-static void Sm_Ui_demo_exit_(SM_Hsm * const me) SM_HSM_RETT;
-static SM_RetState Sm_Ui_demo_(void * const me,
+static void Sm_Ui_sys_entry_(SM_Hsm * const me) SM_HSM_RETT;
+static void Sm_Ui_sys_exit_(SM_Hsm * const me) SM_HSM_RETT;
+static SM_RetState Sm_Ui_sys_(void * const me,
+                              void const * const e) SM_HSM_RETT;
+static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT;
+static void Sm_Ui_live_exit_(SM_Hsm * const me) SM_HSM_RETT;
+static SM_RetState Sm_Ui_live_(void * const me,
                                void const * const e) SM_HSM_RETT;
-static void Sm_Ui_stats_entry_(SM_Hsm * const me) SM_HSM_RETT;
-static void Sm_Ui_stats_exit_(SM_Hsm * const me) SM_HSM_RETT;
-static SM_RetState Sm_Ui_stats_(void * const me,
-                                void const * const e) SM_HSM_RETT;
 
 static void Sm_Ui_chrome_(Sm_Ui * const me, char const *title);
 static bool Sm_Ui_fast_(Sm_Ui * const me);
 static bool Sm_Ui_slow_(Sm_Ui * const me);
 
 // State-Ui: the level every page shares. The LED events land here, so the
-// model keeps tracking the AO while the splash owns the glass - the demo
-// page's first frame then draws the state as it is, not as it was when the
-// widgets were built. Its entry owns the chrome: the topbar is built once,
-// here, and no page change takes it away.
+// model keeps tracking the AO while the splash owns the glass.
 SM_HsmState SM_HSM_ROM Sm_Ui_ui = {
     SM_HSM_TOP,                       // super
     (SM_InitHandler)0,                // init_
@@ -66,8 +87,7 @@ SM_HsmState SM_HSM_ROM Sm_Ui_ui = {
 };
 
 // State-Splash: the boot image, pushed by the entry action and held for
-// UI_SPLASH_MS. Nothing else may draw while this state is current - the
-// display adapter is told the page, and the thread does not run LVGL at all.
+// UI_SPLASH_MS. Nothing else may draw while this state is current.
 SM_HsmState SM_HSM_ROM Sm_Ui_splash = {
     (SM_StatePtr)&Sm_Ui_ui,           // super
     (SM_InitHandler)0,                // init_
@@ -76,25 +96,24 @@ SM_HsmState SM_HSM_ROM Sm_Ui_splash = {
     (SM_StateHandler)&Sm_Ui_splash_   // handler
 };
 
-// State-Stats: the second content page. Same shape as Demo, different tree -
-// and the two hand the glass back and forth on UI_PAGE_SWITCH_SIG.
-SM_HsmState SM_HSM_ROM Sm_Ui_stats = {
+// State-Sys: page 1, the system's own numbers - the CPU as a half gauge and
+// one bar per thread and per pool. Its entry owns every widget on it.
+SM_HsmState SM_HSM_ROM Sm_Ui_sys = {
     (SM_StatePtr)&Sm_Ui_ui,           // super
     (SM_InitHandler)0,                // init_
-    (SM_ActionHandler)&Sm_Ui_stats_entry_,  // entry_
-    (SM_ActionHandler)&Sm_Ui_stats_exit_,   // exit_
-    (SM_StateHandler)&Sm_Ui_stats_    // handler
+    (SM_ActionHandler)&Sm_Ui_sys_entry_,     // entry_
+    (SM_ActionHandler)&Sm_Ui_sys_exit_,      // exit_
+    (SM_StateHandler)&Sm_Ui_sys_      // handler
 };
 
-// State-Demo: the page the firmware lives in. Its entry asks the display
-// adapter for a whole-screen repaint, which is where the first frame gets the
-// splash's own treatment: cleared first, coverage proven.
-SM_HsmState SM_HSM_ROM Sm_Ui_demo = {
+// State-Live: page 2, the moving one - a spinner, a switch the AO's LED
+// drives, and the CPU over the last twelve windows.
+SM_HsmState SM_HSM_ROM Sm_Ui_live = {
     (SM_StatePtr)&Sm_Ui_ui,           // super
     (SM_InitHandler)0,                // init_
-    (SM_ActionHandler)&Sm_Ui_demo_entry_,    // entry_
-    (SM_ActionHandler)&Sm_Ui_demo_exit_,     // exit_
-    (SM_StateHandler)&Sm_Ui_demo_     // handler
+    (SM_ActionHandler)&Sm_Ui_live_entry_,    // entry_
+    (SM_ActionHandler)&Sm_Ui_live_exit_,     // exit_
+    (SM_StateHandler)&Sm_Ui_live_     // handler
 };
 
 //============================================================================
@@ -112,14 +131,8 @@ static void Sm_Ui_chrome_(Sm_Ui * const me, char const *title) {
     }
 }
 //............................................................................
-// The corner both pages carry: the led follows the model, and the CPU readout
-// is the load over the window that just passed. The tick hook counts the
-// ticks
-// that found the idle task on the CPU, so everything else is work. At 10 ms a
-// tick and a 500 ms window that is fifty samples - a percentage to the
-// nearest
-// two. Returns true when the model moved, which is what the pages' fast
-// readouts ride on.
+// The corner both pages carry: the led follows the model. Returns true when
+// the model moved.
 static bool Sm_Ui_fast_(Sm_Ui * const me) {
     bool const changed = (!me->shownValid) || (me->ledOn != me->shownOn)
                          || (me->ledEdges != me->shownEdges);
@@ -134,7 +147,11 @@ static bool Sm_Ui_fast_(Sm_Ui * const me) {
     return changed;
 }
 //............................................................................
-// Returns true when a new window was written out.
+// The load over the window that just passed: the tick hook counts the ticks
+// that found the idle task on the CPU, so everything else is work. At 10 ms a
+// tick and a 500 ms window that is fifty samples - a percentage to the
+// nearest
+// two. Returns true when a new window was written out.
 static bool Sm_Ui_slow_(Sm_Ui * const me) {
     uint32_t const now = (uint32_t)xTaskGetTickCount();
     bool const slow = (me->statAt == 0U)
@@ -161,6 +178,61 @@ static bool Sm_Ui_slow_(Sm_Ui * const me) {
     return slow;
 }
 //............................................................................
+// One panel row per thread: the kernel gives the free words, the table above
+// gives the total, so the bar is what has been used. The rows are matched by
+// name because that is the only handle uxTaskGetSystemState() reports.
+static void Sm_Ui_panel_(Sm_Ui * const me) {
+    static TaskStatus_t tasks[SM_UI_TASKS];
+    configRUN_TIME_COUNTER_TYPE runTime;
+    UBaseType_t const n = uxTaskGetSystemState(tasks, SM_UI_TASKS, &runTime);
+    unsigned row;
+
+    for (row = 0U; row < SM_UI_TASK_ROWS; ++row) {
+        UBaseType_t i;
+
+        for (i = 0U; i < n; ++i) {
+            if (strcmp(tasks[i].pcTaskName, Sm_Ui_stackNames_[row]) == 0) {
+                uint32_t const total = (uint32_t)Sm_Ui_stackWords_[row];
+                uint32_t const freeWords =
+                    (uint32_t)tasks[i].usStackHighWaterMark;
+                uint32_t used = 0U;
+
+                if (total > freeWords) {
+                    used = total - freeWords;
+                }
+
+                W_BarPanel_setWords(&me->panel, row,
+                                    WidgetIO_pct(used, total), freeWords);
+                break;
+            }
+        }
+    }
+
+    // The tracer's own high-water mark: the fewest free record slots its ring
+    // has ever had. It only falls, and 0 means the pump fell behind far
+    // enough to drop records.
+    {
+        uint32_t const total = (uint32_t)SM_Tracer_inst.nTot;
+        uint32_t const freeSlots = (uint32_t)SM_Tracer_inst.nMin;
+
+        W_BarPanel_setPair(&me->panel, SM_UI_TASK_ROWS,
+                           WidgetIO_pct(total - freeSlots, total), freeSlots,
+                           total);
+    }
+
+    // The UI inbox, and the LVGL pool: both hand over their own numbers.
+    {
+        unsigned const len = Ui_evtInboxLen();
+        unsigned const freeSlots = Ui_evtInboxFree();
+
+        W_BarPanel_setPair(&me->panel, SM_UI_TASK_ROWS + 1U,
+                           WidgetIO_pct(len - freeSlots, len), freeSlots,
+                           len);
+    }
+    W_BarPanel_setWords(&me->panel, SM_UI_TASK_ROWS + 2U,
+                        WidgetIO_poolUsedPct(), WidgetIO_poolFreeKb());
+}
+//............................................................................
 //============================================================================
 void Sm_Ui_init(Sm_Ui * const me) {
     me->ledOn = false;
@@ -175,7 +247,11 @@ void Sm_Ui_init(Sm_Ui * const me) {
     me->cpuTotal = 0U;
     me->cpuPct = 0U;
     W_Topbar_init(&me->top);
-    W_Ring_init(&me->ring);
+    W_Gauge_init(&me->gauge);
+    W_BarPanel_init(&me->panel);
+    W_Spinner_init(&me->spin);
+    W_Switch_init(&me->sw);
+    W_History_init(&me->hist);
     SM_Hsm_init_(&me->sm_hsm_, (SM_InitHandler)Sm_Ui_TOP_initial_);
 }
 //............................................................................
@@ -222,10 +298,6 @@ static SM_RetState Sm_Ui_ui_(void * const me,
 static void Sm_Ui_splash_entry_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
 
-    // The page is the boot image: the display adapter clears the page, pushes
-    // it and proves the push covered it. A push that could not be proven (no
-    // asset, or a frame the panel would not take whole) leaves no hold:
-    // holding a glass that is showing something else is the ghost.
     self->splashUp = Ui_dispSplash();
     self->splashUntil = xTaskGetTickCount() + pdMS_TO_TICKS(UI_SPLASH_MS);
 }
@@ -236,79 +308,50 @@ static SM_RetState Sm_Ui_splash_(void * const me,
     switch (evt->sig) {
         case UI_SPLASH_DONE_SIG: {
             (void)me;
-            return _SM_TRAN(&Sm_Ui_demo);
+            return _SM_TRAN(&Sm_Ui_sys);
         }
         case UI_FRAME_SIG: {
-            // The boot image owns the glass: a frame here would be a widget
-            // on
-            // top of it.
             (void)me;
-            return _SM_HANDLED();
+            return _SM_HANDLED();   // the boot image owns the glass
         }
         default: {
-            return _SM_SUPER();   // the LED events are the shared level's
+            return _SM_SUPER();     // the LED events are the shared level's
         }
     }
 }
 //............................................................................
-// State-Demo
-static void Sm_Ui_demo_entry_(SM_Hsm * const me) SM_HSM_RETT {
+// State-Sys (page 1)
+static void Sm_Ui_sys_entry_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
 
     self->splashUp = false;
-    Sm_Ui_chrome_(self, "sm_blinky");
-    Ui_dispPageBegin(UI_BG_SLOT_DEMO);
-    W_Ring_create(&self->ring, Ui_dispPageRoot());
-    // The ring is the beat made visible, not the raw count: seven steps per
-    // LED edge is about 17 degrees, which the eye catches, and a full turn
-    // takes some seven seconds. The raw number stays on the card.
-    W_Ring_setUnit(&self->ring, "beat");
-    // No pair for the beat: the blink in the corner is that readout, and it
-    // is
-    // the one the eye gets for free. Card A held nothing else, so it went
-    // with
-    // its last label instead of standing there empty.
-    W_Card_create(&self->cardB, Ui_dispPageRoot(), 124, 204, "edges",
-                  "frame");
-    W_Bar_create(&self->bar, Ui_dispPageRoot());
+    Sm_Ui_chrome_(self, "sys");
+    Ui_dispPageBegin(UI_BG_SLOT_SYS);
+    W_Gauge_create(&self->gauge, Ui_dispPageRoot());
+    W_BarPanel_create(&self->panel, Ui_dispPageRoot(), Sm_Ui_panelNames_,
+                      Sm_Ui_panelUnits_);
     W_Dots_create(&self->dots, Ui_dispPageRoot(), 0U);
     self->shownValid = false;   // the model gets written out again
     self->statAt = 0U;          // slow readouts: rewrite next frame
 }
-static void Sm_Ui_demo_exit_(SM_Hsm * const me) SM_HSM_RETT {
+static void Sm_Ui_sys_exit_(SM_Hsm * const me) SM_HSM_RETT {
     (void)me;
     Ui_dispPageEnd();
 }
-static SM_RetState Sm_Ui_demo_(void * const me,
-                               void const * const e) SM_HSM_RETT {
+static SM_RetState Sm_Ui_sys_(void * const me,
+                              void const * const e) SM_HSM_RETT {
     Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
     Ui_Evt const * const evt = (Ui_Evt const *)e;
 
     switch (evt->sig) {
         case UI_PAGE_SWITCH_SIG: {
-            return _SM_TRAN(&Sm_Ui_stats);
+            return _SM_TRAN(&Sm_Ui_live);
         }
         case UI_FRAME_SIG: {
-            // The ring follows the AO's edge count, wrapped to one turn, and
-            // the number in it spells the same value: a ring nobody can read
-            // is decoration, and decoration is what the art already is. Seven
-            // steps per edge, and not an lv_anim on purpose: an animated
-            // value
-            // would re-render the ring on every LVGL tick at about 21 ms a
-            // frame, which saturates this thread. One update per LED event is
-            // 4 percent of a 500 ms period.
-            if (Sm_Ui_fast_(self)) {
-                uint32_t const v = ((uint32_t)self->ledEdges * 7U) % 101U;
-
-                W_Ring_setValue(&self->ring, (uint16_t)v);
-                W_Card_setA(&self->cardB, "%u", (unsigned)self->ledEdges);
-            }
+            (void)Sm_Ui_fast_(self);
             if (Sm_Ui_slow_(self)) {
-                uint32_t const frameUs = Ui_dispFrameUs();
-
-                W_Card_setBms(&self->cardB, frameUs);
-                W_Bar_setValue(&self->bar,
-                               WidgetIO_pct(frameUs, UI_FRAME_BUDGET_US));
+                Sm_Ui_panel_(self);
+                W_Gauge_setValue(&self->gauge, (unsigned)self->cpuPct);
             }
             return _SM_HANDLED();
         }
@@ -318,62 +361,40 @@ static SM_RetState Sm_Ui_demo_(void * const me,
     }
 }
 //............................................................................
-// State-Stats
-static void Sm_Ui_stats_entry_(SM_Hsm * const me) SM_HSM_RETT {
+// State-Live (page 2)
+static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
 
-    Sm_Ui_chrome_(self, "STATS");
-    Ui_dispPageBegin(UI_BG_SLOT_STATS);
-    W_Ring_create(&self->ring, Ui_dispPageRoot());
-    // The pool's number gave up its slot to the tracer's watermark: the bar
-    // along the bottom is the pool gauge, so the text was the duplicate.
-    W_Ring_setUnit(&self->ring, "%");
-    W_Card_create(&self->cardA, Ui_dispPageRoot(), 12, 204, "stack free",
-                  "tracer nmin");
-    W_Card_create(&self->cardB, Ui_dispPageRoot(), 124, 204, "frame min",
-                  "frame max");
-    W_Bar_create(&self->bar, Ui_dispPageRoot());
+    Sm_Ui_chrome_(self, "live");
+    Ui_dispPageBegin(UI_BG_SLOT_LIVE);
+    W_Spinner_create(&self->spin, Ui_dispPageRoot(), 16, 40, 96);
+    W_Switch_create(&self->sw, Ui_dispPageRoot(), 132, 56);
+    W_History_create(&self->hist, Ui_dispPageRoot());
     W_Dots_create(&self->dots, Ui_dispPageRoot(), 1U);
-    self->shownValid = false;   // the model gets written out again
-    self->statAt = 0U;          // slow readouts: rewrite next frame
+    self->shownValid = false;   // the led gets written out again
+    self->statAt = 0U;          // the first window lands right away
 }
-static void Sm_Ui_stats_exit_(SM_Hsm * const me) SM_HSM_RETT {
+static void Sm_Ui_live_exit_(SM_Hsm * const me) SM_HSM_RETT {
     (void)me;
     Ui_dispPageEnd();
 }
-static SM_RetState Sm_Ui_stats_(void * const me,
-                                void const * const e) SM_HSM_RETT {
+static SM_RetState Sm_Ui_live_(void * const me,
+                               void const * const e) SM_HSM_RETT {
     Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
     Ui_Evt const * const evt = (Ui_Evt const *)e;
 
     switch (evt->sig) {
         case UI_PAGE_SWITCH_SIG: {
-            return _SM_TRAN(&Sm_Ui_demo);
+            return _SM_TRAN(&Sm_Ui_sys);
         }
         case UI_FRAME_SIG: {
-            // The stats page is about what is left, so every readout on it is
-            // a watermark: the stack's, the trace ring's, the pool's, and the
-            // two frame times. The arc and the number inside the ring are the
-            // same quantity now - one gauge, one number.
-            (void)Sm_Ui_fast_(self);
+            // The switch is the board's own beat, made visible: it flips when
+            // the AO's LED does. The history is one bar per slow window.
+            if (Sm_Ui_fast_(self)) {
+                W_Switch_set(&self->sw, self->ledOn);
+            }
             if (Sm_Ui_slow_(self)) {
-                uint32_t const stackFree =
-                    (uint32_t)uxTaskGetStackHighWaterMark((TaskHandle_t)0);
-                uint32_t const stackPct =
-                    WidgetIO_pct(UI_STACK_WORDS - stackFree, UI_STACK_WORDS);
-                // The tracer's own high-water mark: the fewest free record
-                // slots its ring has ever had. It only falls, and 0 means the
-                // pump fell behind far enough to drop records. Reading the
-                // byte is atomic on this core, and a read one window late
-                // costs nothing.
-                uint32_t const nMin = (uint32_t)SM_Tracer_inst.nMin;
-
-                W_Ring_setValue(&self->ring, (uint16_t)stackPct);
-                W_Card_setA(&self->cardA, "%u w", (unsigned)stackFree);
-                W_Card_setB(&self->cardA, "%u", (unsigned)nMin);
-                W_Card_setAms(&self->cardB, Ui_dispFrameMin());
-                W_Card_setBms(&self->cardB, Ui_dispFrameMax());
-                W_Bar_setValue(&self->bar, WidgetIO_poolUsedPct());
+                W_History_push(&self->hist, (unsigned)self->cpuPct);
             }
             return _SM_HANDLED();
         }

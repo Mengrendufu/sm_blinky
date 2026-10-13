@@ -22,5 +22,6 @@ uint32_t WidgetIO_pct(uint32_t used, uint32_t total);
 // The LVGL pool's used percentage. It lives here because it is an lv_* call,
 // and the state machine that wants the number does not include lvgl.h.
 unsigned WidgetIO_poolUsedPct(void);
+unsigned WidgetIO_poolFreeKb(void);
 
 #endif // WIDGET_IO_PRIV_H_

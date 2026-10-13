@@ -7,25 +7,21 @@
 // To Public License, Version 2, as published by Sam Hocevar.
 // See http://www.wtfpl.net/ for more details.
 //============================================================================
-#ifndef W_RING_H_
-#define W_RING_H_
-
-#include <stdint.h>
+#ifndef W_GAUGE_H_
+#define W_GAUGE_H_
 
 struct _lv_obj_t;
 
-// The 160x160 ring the art leaves room for: the arc, the number inside it and
-// the unit under the number. One value drives the arc and the number, so a
-// ring can never disagree with what it reads.
-struct W_Ring {
+// The CPU load as a half gauge: a 180 degree arc with the percentage under
+// it.
+struct W_Gauge {
     struct _lv_obj_t *arc;
     struct _lv_obj_t *num;
     struct _lv_obj_t *unit;
 };
 
-void W_Ring_init(struct W_Ring *ring);
-void W_Ring_create(struct W_Ring *ring, struct _lv_obj_t *parent);
-void W_Ring_setUnit(struct W_Ring *ring, char const *unit);
-void W_Ring_setValue(struct W_Ring *ring, uint16_t value);
+void W_Gauge_init(struct W_Gauge *g);
+void W_Gauge_create(struct W_Gauge *g, struct _lv_obj_t *parent);
+void W_Gauge_setValue(struct W_Gauge *g, unsigned pct);
 
-#endif // W_RING_H_
+#endif // W_GAUGE_H_
