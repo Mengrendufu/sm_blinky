@@ -19,10 +19,15 @@ struct _lv_obj_t;
 struct W_Ram {
     struct _lv_obj_t *lineA;   // "RAM 57.9 / 64.0 KB"
     struct _lv_obj_t *lineB;   // "free 6.1 KB"
+    struct _lv_obj_t *lineC;   // "msp 412 / 1024 B"
 };
 
 void W_Ram_init(struct W_Ram *r);
 void W_Ram_create(struct W_Ram *r, struct _lv_obj_t *parent);
 void W_Ram_set(struct W_Ram *r, uint32_t usedBytes, uint32_t totalBytes);
+// The main stack's peak, in bytes, against what the linker reserves for it.
+// It only ever grows, and the label is only rewritten when it does.
+void W_Ram_setMsp(struct W_Ram *r, uint32_t peakBytes,
+                   uint32_t reservedBytes);
 
 #endif // W_RAM_H_

@@ -62,6 +62,7 @@ void BSP_dbgMemReport(uint8_t selfRecId);
 // CPU load as seen from the tick: the idle sample count and the tick count,
 // to be differenced by the caller over its own window (see freertos_hooks.c).
 void BSP_cpuSample(uint32_t *idle, uint32_t *total);
+uint32_t BSP_mspLow(void);   // lowest MSP seen by the tick hook, 0 if unseen
 
 
 #endif // BSP_H_

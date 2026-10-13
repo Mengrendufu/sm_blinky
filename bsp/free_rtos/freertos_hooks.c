@@ -12,16 +12,36 @@
 static volatile uint32_t BSP_cpuIdle_;
 static volatile uint32_t BSP_cpuTicks_;
 
+// The deepest the main stack has ever been, sampled once per tick. Tasks run
+// on PSP, so in the tick hook __get_MSP() is the MSP's own depth: the lowest
+// value seen is the peak the main stack has reached since the scheduler
+// started. (Bring-up ran before this, on the same stack, and is not counted.)
+#define BSP_MSP_UNSEEN 0xFFFFFFFFU
+static volatile uint32_t BSP_mspLow_ = BSP_MSP_UNSEEN;
+
 void vApplicationTickHook(void) {
+    uint32_t const msp = __get_MSP();
+
     if (xTaskGetCurrentTaskHandle() == xTaskGetIdleTaskHandle()) {
         ++BSP_cpuIdle_;
     }
     ++BSP_cpuTicks_;
+
+    if ((BSP_mspLow_ == BSP_MSP_UNSEEN) || (msp < BSP_mspLow_)) {
+        BSP_mspLow_ = msp;
+    }
 }
 //............................................................................
 // The two counters, for a caller that wants a load over its own window: it
 // keeps the previous pair and divides the deltas (unsigned, so a wrap of the
 // 32 bit counters takes care of itself).
+//............................................................................
+// The lowest main-stack address seen, or zero before the first tick.
+uint32_t BSP_mspLow(void) {
+    uint32_t const low = BSP_mspLow_;
+
+    return (low == BSP_MSP_UNSEEN) ? 0U : low;
+}
 //............................................................................
 void BSP_cpuSample(uint32_t *idle, uint32_t *total) {
     *idle = BSP_cpuIdle_;

@@ -11,10 +11,15 @@
 #include "lvgl.h"
 #include "widget_io_priv.h"
 
+// What lineC showed last: the peak only moves a handful of times in a run, so
+// the label is left alone unless it does.
+static uint32_t W_Ram_shownMsp_ = 0xFFFFFFFFU;
+
 //............................................................................
 void W_Ram_init(struct W_Ram *r) {
     r->lineA = (struct _lv_obj_t *)0;
     r->lineB = (struct _lv_obj_t *)0;
+    r->lineC = (struct _lv_obj_t *)0;
 }
 //............................................................................
 void W_Ram_create(struct W_Ram *r, struct _lv_obj_t *parent) {
@@ -23,6 +28,9 @@ void W_Ram_create(struct W_Ram *r, struct _lv_obj_t *parent) {
 
     r->lineB = WidgetIO_label(parent, "-", 0x9AA3ACU);
     lv_obj_align((lv_obj_t *)r->lineB, LV_ALIGN_TOP_MID, 0, 254);
+
+    r->lineC = WidgetIO_label(parent, "-", 0x9AA3ACU);
+    lv_obj_align((lv_obj_t *)r->lineC, LV_ALIGN_TOP_MID, 0, 276);
 }
 //............................................................................
 void W_Ram_set(struct W_Ram *r, uint32_t usedBytes, uint32_t totalBytes) {
@@ -39,4 +47,15 @@ void W_Ram_set(struct W_Ram *r, uint32_t usedBytes, uint32_t totalBytes) {
     lv_label_set_text_fmt((lv_obj_t *)r->lineB, "free %u.%u KB",
                           (unsigned)(freeTenths / 10U),
                           (unsigned)(freeTenths % 10U));
+}
+//............................................................................
+void W_Ram_setMsp(struct W_Ram *r, uint32_t peakBytes,
+                   uint32_t reservedBytes) {
+    if (peakBytes == W_Ram_shownMsp_) {
+        return;
+    }
+    W_Ram_shownMsp_ = peakBytes;
+
+    lv_label_set_text_fmt((lv_obj_t *)r->lineC, "msp %u / %u B",
+                          (unsigned)peakBytes, (unsigned)reservedBytes);
 }

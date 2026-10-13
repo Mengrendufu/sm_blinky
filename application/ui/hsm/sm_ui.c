@@ -24,6 +24,7 @@
 // usable remainder.
 extern uint8_t _ebss;
 extern uint8_t _estack;
+extern uint32_t _Min_Stack_Size;  // what the script reserves for the MSP
 #define SM_UI_RAM_BASE 0x20000000U
 #include <string.h>
 #include "FreeRTOS.h"
@@ -442,6 +443,18 @@ static SM_RetState Sm_Ui_live_(void * const me,
                 W_Switch_set(&self->sw, self->ledOn);
             }
             (void)Sm_Ui_slow_(self);   // the corner's cpu readout
+
+            // The main stack's watermark: sampled in the tick hook, so it is
+            // live, unlike the static figure above it.
+            {
+                uint32_t const low = BSP_mspLow();
+
+                if (low != 0U) {
+                    W_Ram_setMsp(&self->ram,
+                                 (uint32_t)((uintptr_t)&_estack - low),
+                                 (uint32_t)(uintptr_t)&_Min_Stack_Size);
+                }
+            }
             if ((int32_t)(now - self->dialAt) >= 0) {
                 if (self->dialUp) {
                     self->dialPct += SM_UI_DIAL_STEP;
