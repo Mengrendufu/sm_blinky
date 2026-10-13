@@ -30,6 +30,12 @@
 #include "bsp_lcd.h"
 #include "sm_tracer.h"
 #include "ui_disp_priv.h"
+#include "widgets/w_bar.h"
+#include "widgets/w_card.h"
+#include "widgets/w_dots.h"
+#include "widgets/w_ring.h"
+#include "widgets/w_topbar.h"
+#include "widgets/widget_io_priv.h"
 #include "lvgl.h"
 #include "FreeRTOS.h"
 #include "task.h"
@@ -84,7 +90,6 @@
 // means "how much of a 30 fps budget this frame took".
 #define UI_FRAME_BUDGET_US 33000U
 #define UI_STACK_WORDS    2048U   // the UI task's static stack, in words
-#define UI_BEAT_MS        500U    // the AO beat the demo page's card shows
 // How often the panel's inversion bit is re-sent. The clobber has no
 // schedule, so this one never stops - it is one command, and it is the only
 // panel register the run-time path touches (see BSP_lcdReassert).
@@ -102,16 +107,15 @@ static lv_display_t *Ui_disp_;
 static lv_image_dsc_t Ui_bgDsc_;      // the background of the page that is up
 static lv_image_dsc_t Ui_splashDsc_;  // boot image, slot 2
 static Ui_Page Ui_page_;              // which page owns the glass
-static lv_obj_t *Ui_led_;             // heartbeat, top right on both pages
-static lv_obj_t *Ui_cpu_;             // CPU load, top right on both pages
-static lv_obj_t *Ui_arc_;             // the ring the art leaves room for
-static lv_obj_t *Ui_num_;             // the big number inside it
-static lv_obj_t *Ui_unit_;            // and what that number counts
-static lv_obj_t *Ui_v1_;              // card A, first value
-static lv_obj_t *Ui_v2_;              // card A, second value
-static lv_obj_t *Ui_v3_;              // card B, first value
-static lv_obj_t *Ui_v4_;              // card B, second value
-static lv_obj_t *Ui_bar_;             // the bottom bar
+// The widgets own their own handles now (application/ui/widgets). These are
+// the instances the page that is up was built from, and they are the only
+// things the render writes through.
+static struct W_Topbar Ui_top_;       // title, cpu readout, heartbeat led
+static struct W_Ring Ui_ring_;        // the ring the art leaves room for
+static struct W_Card Ui_cardA_;       // card at (12,204)
+static struct W_Card Ui_cardB_;       // card at (124,204)
+static struct W_Bar Ui_bar_;          // the bottom bar
+static struct W_Dots Ui_dots_;        // the two page dots
 // One heartbeat's cost, measured, and the extremes it has shown: the stats
 // page reads them, so they are a readout and not a probe.
 static uint32_t Ui_frameUs_;
@@ -157,9 +161,6 @@ volatile uint8_t Ui_dbgSplashOk_;
 static void Ui_buildDemo_(void);
 static void Ui_buildStats_(void);
 static void Ui_pageBegin_(uint32_t slot, Ui_Page page);
-static uint32_t Ui_pct_(uint32_t used, uint32_t total);
-static void Ui_showMs_(lv_obj_t *label, uint32_t us);
-static void Ui_ringRefresh_(void);
 static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
                       uint8_t *px);
 static void Ui_flushDone_(void);
@@ -371,15 +372,7 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
         Ui_shownOn_ = ledOn;
         Ui_shownEdges_ = edges;
         Ui_shownValid_ = true;
-        lv_obj_set_style_bg_color(Ui_led_,
-                                  lv_color_hex(ledOn ? 0x00C853U
-                                                     : 0x303840U), 0);
-        if (ledOn) {
-            lv_led_on(Ui_led_);
-        }
-        else {
-            lv_led_off(Ui_led_);
-        }
+        W_Topbar_setLed(&Ui_top_, ledOn);
     }
 
     // One readout both pages share: the load over the window that just
@@ -399,7 +392,7 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
         if (dTotal > 0U) {
             Ui_cpuPct_ = 100U - ((dIdle * 100U) / dTotal);
         }
-        lv_label_set_text_fmt(Ui_cpu_, "cpu %u%%", (unsigned)Ui_cpuPct_);
+        W_Topbar_setCpu(&Ui_top_, (unsigned)Ui_cpuPct_);
         Ui_statAt_ = now;
     }
 
@@ -414,17 +407,15 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
             // update per LED event is 4% of a 500 ms period.
             uint32_t const v = ((uint32_t)edges * 7U) % 101U;
 
-            lv_arc_set_value(Ui_arc_, (int32_t)v);
-            Ui_ringRefresh_();
-            lv_label_set_text_fmt(Ui_num_, "%u", (unsigned)v);
-            lv_label_set_text_fmt(Ui_v3_, "%u", (unsigned)edges);
+            W_Ring_setValue(&Ui_ring_, (uint16_t)v);
+            W_Card_setA(&Ui_cardB_, "%u", (unsigned)edges);
         }
         if (slow) {
-            Ui_showMs_(Ui_v4_, Ui_frameUs_);
-            uint32_t const load = Ui_pct_(Ui_frameUs_,
-                                          UI_FRAME_BUDGET_US);
+            uint32_t const load = WidgetIO_pct(Ui_frameUs_,
+                                               UI_FRAME_BUDGET_US);
 
-            lv_bar_set_value(Ui_bar_, (int32_t)load, LV_ANIM_ON);
+            W_Card_setBms(&Ui_cardB_, Ui_frameUs_);
+            W_Bar_setValue(&Ui_bar_, load);
         }
     }
     else {
@@ -437,7 +428,7 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
             uint32_t const stackFree =
                 (uint32_t)uxTaskGetStackHighWaterMark((TaskHandle_t)0);
             uint32_t const stackPct =
-                Ui_pct_(UI_STACK_WORDS - stackFree, UI_STACK_WORDS);
+                WidgetIO_pct(UI_STACK_WORDS - stackFree, UI_STACK_WORDS);
             // The tracer's own high-water mark: the fewest free record slots
             // its ring has ever had. It only falls, and 0 means the pump fell
             // behind far enough to drop records. Reading the byte is atomic
@@ -445,14 +436,12 @@ void Ui_dispRender(bool ledOn, uint16_t edges) {
             uint32_t const nMin = (uint32_t)SM_Tracer_inst.nMin;
 
             lv_mem_monitor(&mon);   // the LVGL pool, in bytes
-            lv_arc_set_value(Ui_arc_, (int32_t)stackPct);
-            Ui_ringRefresh_();
-            lv_label_set_text_fmt(Ui_num_, "%u", (unsigned)stackPct);
-            lv_label_set_text_fmt(Ui_v1_, "%u w", (unsigned)stackFree);
-            lv_label_set_text_fmt(Ui_v2_, "%u", (unsigned)nMin);
-            Ui_showMs_(Ui_v3_, Ui_frameMin_);
-            Ui_showMs_(Ui_v4_, Ui_frameMax_);
-            lv_bar_set_value(Ui_bar_, (int32_t)mon.used_pct, LV_ANIM_ON);
+            W_Ring_setValue(&Ui_ring_, (uint16_t)stackPct);
+            W_Card_setA(&Ui_cardA_, "%u w", (unsigned)stackFree);
+            W_Card_setB(&Ui_cardA_, "%u", (unsigned)nMin);
+            W_Card_setAms(&Ui_cardB_, Ui_frameMin_);
+            W_Card_setBms(&Ui_cardB_, Ui_frameMax_);
+            W_Bar_setValue(&Ui_bar_, mon.used_pct);
         }
     }
 }
@@ -553,223 +542,23 @@ static uint32_t Ui_us_(void) {
     return ((uint32_t)HAL_GetTick() * 1000U) + (uint32_t)TIM1->CNT;
 }
 //............................................................................
-// Ask for the ring's redraw over the full-width strips it lives in, not over
-// its own box. LVGL 9.5 draws a partial-width redraw of lv_arc with wrong
-// pixels: the same bands come out right when the whole row is dirty, wrong
-// when only the arc's columns are (measured on the glass, 2026-10-12, with
-// the pushed rectangles identical in both cases). Six 240x32 strips - the
-// arc's own rows - are what the glass was measured clean with, and that is
-// about 21 ms against the whole screen's 34.8.
-static void Ui_ringRefresh_(void) {
-    lv_area_t box;
-    lv_area_t strips;
-
-    if (Ui_arc_ == (lv_obj_t *)0) {
-        return;
-    }
-
-    lv_obj_get_coords(Ui_arc_, &box);
-    strips.x1 = 0;
-    strips.x2 = (lv_coord_t)(UI_LCD_HOR - 1);
-    strips.y1 = box.y1;
-    strips.y2 = box.y2;
-    lv_obj_invalidate_area(lv_screen_active(), &strips);
-}
-//............................................................................
-static uint32_t Ui_pct_(uint32_t used, uint32_t total) {
-    uint32_t const pct = (total == 0U) ? 0U : ((used * 100U) / total);
-
-    return (pct > 100U) ? 100U : pct;
-}
-//............................................................................
-// Milliseconds with one decimal: the readouts are "12.5 ms", not 12 or 13.
-static void Ui_showMs_(lv_obj_t *label, uint32_t us) {
-    lv_label_set_text_fmt(label, "%u.%u ms",
-                          (unsigned)(us / 1000U),
-                          (unsigned)((us % 1000U) / 100U));
-}
-//............................................................................
-static lv_obj_t *Ui_label_(lv_obj_t *parent, char const *text,
-                           uint32_t colour) {
-    lv_obj_t *label = lv_label_create(parent);
-
-    lv_label_set_text(label, text);
-    lv_obj_set_style_text_color(label, lv_color_hex(colour), 0);
-
-    return label;
-}
-//............................................................................
-// One card: rounded, half transparent, placed absolutely, with two key and
-// value pairs. The value labels come back so the render can rewrite them.
-static void Ui_card_(lv_obj_t *parent, lv_coord_t x, lv_coord_t y,
-                     char const *k1, char const *k2,
-                     lv_obj_t **v1, lv_obj_t **v2) {
-    lv_obj_t *card = lv_obj_create(parent);
-    lv_obj_t *key;
-
-    lv_obj_set_size(card, 104, 92);
-    lv_obj_set_pos(card, x, y);
-    lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_bg_color(card, lv_color_hex(0x0A0E12U), 0);
-    lv_obj_set_style_bg_opa(card, LV_OPA_80, 0);
-    lv_obj_set_style_radius(card, 12, 0);
-    lv_obj_set_style_border_width(card, 1, 0);
-    lv_obj_set_style_border_color(card, lv_color_hex(0x1E2A32U), 0);
-    lv_obj_set_style_shadow_width(card, 0, 0);
-    lv_obj_set_style_pad_all(card, 8, 0);
-
-    key = Ui_label_(card, k1, 0x8E97A0U);
-    lv_obj_align(key, LV_ALIGN_TOP_LEFT, 0, 0);
-    *v1 = Ui_label_(card, "-", 0xFFFFFFU);
-    lv_obj_align(*v1, LV_ALIGN_TOP_LEFT, 0, 14);
-
-    key = Ui_label_(card, k2, 0x8E97A0U);
-    lv_obj_align(key, LV_ALIGN_TOP_LEFT, 0, 46);
-    *v2 = Ui_label_(card, "-", 0xFFFFFFU);
-    lv_obj_align(*v2, LV_ALIGN_TOP_LEFT, 0, 60);
-}
-//............................................................................
-// The ring, and the number and the unit inside it: the frame the background
-// art leaves for a gauge, used by both pages. 240 degrees of sweep with the
-// gap at the bottom is the e-bike demo's shape.
-static void Ui_ring_(lv_obj_t *parent) {
-    lv_obj_t *arc = lv_arc_create(parent);
-
-    lv_obj_set_size(arc, 160, 160);
-    lv_obj_set_pos(arc, 40, 28);
-    lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
-    // The angles carry the rotation - never lv_arc_set_rotation. The widget
-    // combines the two differently in the two places that matter: the draw
-    // path adds rotation raw (lv_arc.c:834-849, which for a 240 degree gauge
-    // means 210..450), while the invalidation normalises the angle to
-    // [0,360) first and only then adds it (lv_arc.c:866-881). Drawn and
-    // invalidated then disagree about a wedge of the ring, which is where the
-    // stale rectangular patches came from as the value grew. v9's own gauge
-    // example spells the turn out in the angles instead: a wrapped range.
-    lv_arc_set_bg_angles(arc, 210, 90);
-    lv_arc_set_range(arc, 0, 100);
-    lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(arc, 12, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(arc, 12, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_color(arc, lv_color_hex(0x1B2830U), LV_PART_MAIN);
-    lv_obj_set_style_arc_color(arc, lv_color_hex(0x00C3BCU),
-                               LV_PART_INDICATOR);
-    // Flat ends: the rounded cap is drawn as a width x width circle mask that
-    // the renderer blends through, and that blend is the next suspect for the
-    // small rectangular patch the arc leaves behind as it grows (2026-10-12).
-    lv_obj_set_style_arc_rounded(arc, false, LV_PART_MAIN);
-    lv_obj_set_style_arc_rounded(arc, false, LV_PART_INDICATOR);
-    // The knob goes away entirely, styles and all. Making it transparent is
-    // not enough: the default theme gives it a shadow, and an invisible knob
-    // with a shadow is a blurry blob that the arc leaves behind at every
-    // position it passes - which reads as garbage along the ring, growing
-    // with the value (measured on the glass 2026-10-12).
-    lv_obj_remove_style(arc, (lv_style_t *)0, LV_PART_KNOB);
-    lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_KNOB);
-    lv_obj_set_style_shadow_width(arc, 0, LV_PART_KNOB);
-    lv_obj_set_style_pad_all(arc, 0, LV_PART_KNOB);
-    Ui_arc_ = arc;
-
-    // The number sits at the default font for now. Scaling a label was tried
-    // and taken back out (2026-10-12): a transformed object makes the
-    // refresher take the layer/matrix path (lv_refr.c:520-592), which wants
-    // ARGB8888 layers - and this build has LV_DRAW_SW_SUPPORT_ARGB8888 0, so
-    // the draw came out as garbage on the glass. A big readout has to come
-    // from a font, not from a transform.
-    Ui_num_ = Ui_label_(parent, "0", 0xFFFFFFU);
-    lv_obj_align(Ui_num_, LV_ALIGN_TOP_MID, 0, 96);
-
-    Ui_unit_ = Ui_label_(parent, "edges", 0x9AA3ACU);
-    lv_obj_align(Ui_unit_, LV_ALIGN_TOP_MID, 0, 140);
-}
-//............................................................................
-// The corner's heartbeat: one led that blinks with the AO's own LED, so what
-// the screen shows and what the board does are the same event. It used to
-// breathe at the tick rate instead, which was decoration and cost a redraw
-// every frame; a toggle is 0.1 ms twice a second.
-static void Ui_heartbeat_(lv_obj_t *parent) {
-    lv_obj_t *led = lv_led_create(parent);
-
-    lv_obj_set_size(led, 10, 10);
-    lv_obj_align(led, LV_ALIGN_TOP_RIGHT, -8, 7);
-    lv_led_set_color(led, lv_color_hex(0x00C853U));
-    lv_led_on(led);
-    Ui_led_ = led;
-
-    // The top bar carries one number that belongs to the system rather than
-    // to a page: the CPU load, left of the led. Ui_dispRender keeps it
-    // current on every page, so it is part of the corner, not of a page.
-    Ui_cpu_ = Ui_label_(parent, "cpu --%", 0x9AA3ACU);
-    lv_obj_align(Ui_cpu_, LV_ALIGN_TOP_RIGHT, -24, 6);
-
-    // On and off is Ui_dispRender's job: it turns this led with ledOn, which
-    // the AO posts.
-}
-//............................................................................
-static void Ui_barCreate_(lv_obj_t *parent) {
-    lv_obj_t *bar = lv_bar_create(parent);
-
-    lv_obj_set_size(bar, 96, 14);
-    lv_obj_set_pos(bar, 16, 302);
-    lv_bar_set_range(bar, 0, 100);
-    lv_obj_set_style_radius(bar, 6, 0);
-    lv_obj_set_style_border_width(bar, 0, 0);
-    lv_obj_set_style_shadow_width(bar, 0, 0);
-    lv_obj_set_style_bg_color(bar, lv_color_hex(0x1E2A32U), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(bar, lv_color_hex(0xC6FF3DU),
-                              LV_PART_INDICATOR);
-    Ui_bar_ = bar;
-}
-//............................................................................
-// Which page is up, in two dots at the bottom: the active one is bigger and
-// teal, the language the e-bike demo's bullets use for the same job.
-static void Ui_dots_(lv_obj_t *parent, uint32_t active) {
-    uint32_t i;
-
-    for (i = 0U; i < 2U; ++i) {
-        lv_obj_t *dot = lv_obj_create(parent);
-        lv_coord_t const size = (i == active) ? 6 : 4;
-
-        lv_obj_set_size(dot, size, size);
-        lv_obj_set_pos(dot, (lv_coord_t)(112 + (int32_t)i * 12),
-                       (lv_coord_t)((i == active) ? 309 : 310));
-        lv_obj_remove_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_border_width(dot, 0, 0);
-        lv_obj_set_style_shadow_width(dot, 0, 0);
-        lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
-        lv_obj_set_style_bg_color(dot,
-                                  lv_color_hex((i == active) ? 0x00C3BCU
-                                                             : 0x555F68U), 0);
-    }
-}
-//............................................................................
 // Page 1, the demo: the AO's own numbers - the ring follows its edge count,
-// the cards carry the LED state, the beat, the edge total and this frame's
-// cost. Absolute positions throughout, so nothing leans on the theme's
-// spacing (the layout is docs/diagrams/sketches/pages-two.html).
+// and the card carries the edge total and this frame's cost. The beat and the
+// LED state are the corner's business now (the topbar). Absolute positions
+// throughout, so nothing leans on the theme's spacing (the layout is
+// docs/diagrams/sketches/pages-two.html).
 static void Ui_buildDemo_(void) {
     lv_obj_t * const screen = lv_screen_active();
-    lv_obj_t *title = Ui_label_(screen, "sm_blinky", 0xE0E4E8U);
 
-    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 8, 6);
-
-    Ui_ring_(screen);
+    W_Topbar_create(&Ui_top_, screen, "sm_blinky");
+    W_Ring_create(&Ui_ring_, screen);
     // The ring is the beat made visible, not the raw count: seven steps per
     // LED edge is about 17 degrees, which the eye catches, and a full turn
-    // takes some seven seconds. The raw number stays on card B.
-    lv_label_set_text(Ui_unit_, "beat");
-    Ui_heartbeat_(screen);
-    // No LED text on this card any more: the led in the corner is that
-    // readout now, and it is the one that blinks. The freed pair stays blank
-    // (its two labels get an empty string) rather than inventing a value for
-    // it.
-    // No pair for the beat either: the blink in the corner is that readout,
-    // and it is the one the eye gets for free. Card A held nothing else, so
-    // it went with its last label instead of standing there empty.
-    Ui_card_(screen, 124, 204, "edges", "frame", &Ui_v3_, &Ui_v4_);
-    Ui_barCreate_(screen);
-    Ui_dots_(screen, 0U);
+    // takes some seven seconds. The raw number stays on the card.
+    W_Ring_setUnit(&Ui_ring_, "beat");
+    W_Card_create(&Ui_cardB_, screen, 124, 204, "edges", "frame");
+    W_Bar_create(&Ui_bar_, screen);
+    W_Dots_create(&Ui_dots_, screen, 0U);
 }
 //............................................................................
 // Page 2, the stats: the same screen and the same widget kinds, holding the
@@ -778,17 +567,14 @@ static void Ui_buildDemo_(void) {
 // a dashboard.
 static void Ui_buildStats_(void) {
     lv_obj_t * const screen = lv_screen_active();
-    lv_obj_t *title = Ui_label_(screen, "STATS", 0xE0E4E8U);
 
-    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 8, 6);
-
-    Ui_ring_(screen);
-    Ui_heartbeat_(screen);
+    W_Topbar_create(&Ui_top_, screen, "STATS");
+    W_Ring_create(&Ui_ring_, screen);
     // The pool's number gave up its slot to the tracer's watermark: the bar
     // along the bottom is the pool gauge, so the text was the duplicate.
-    lv_label_set_text(Ui_unit_, "%");
-    Ui_card_(screen, 12, 204, "stack free", "tracer nmin", &Ui_v1_, &Ui_v2_);
-    Ui_card_(screen, 124, 204, "frame min", "frame max", &Ui_v3_, &Ui_v4_);
-    Ui_barCreate_(screen);
-    Ui_dots_(screen, 1U);
+    W_Ring_setUnit(&Ui_ring_, "%");
+    W_Card_create(&Ui_cardA_, screen, 12, 204, "stack free", "tracer nmin");
+    W_Card_create(&Ui_cardB_, screen, 124, 204, "frame min", "frame max");
+    W_Bar_create(&Ui_bar_, screen);
+    W_Dots_create(&Ui_dots_, screen, 1U);
 }

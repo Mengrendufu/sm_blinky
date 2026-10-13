@@ -45,6 +45,12 @@ set(SRC_ALL
     ${CMAKE_SOURCE_DIR}/application/ui/thread/ui.c
     ${CMAKE_SOURCE_DIR}/application/ui/thread/ui_evt.c
     ${CMAKE_SOURCE_DIR}/application/ui/thread/ui_disp.c
+    ${CMAKE_SOURCE_DIR}/application/ui/widgets/widget_io_priv.c
+    ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_ring.c
+    ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_topbar.c
+    ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_card.c
+    ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_bar.c
+    ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_dots.c
     ${CMAKE_SOURCE_DIR}/application/ui/hsm/sm_ui.c
     ${CMAKE_SOURCE_DIR}/application/flash/thread/flash.c
     ${CMAKE_SOURCE_DIR}/application/flash/thread/flash_req.c
