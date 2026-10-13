@@ -33,11 +33,14 @@
 #define UI_STAT_MS 500U
 
 // The live page's arc, one flourish per visit: empty to full, then back down
-// to half, and that is where the page leaves it. Twenty steps up and ten down
-// at 240 ms is 7.2 seconds, inside UI_PAGE_MS. Each step is one whole-band
-// redraw, about 5 ms, so the flourish costs about 3 percent of the thread.
-#define SM_UI_DIAL_MS 240U
-#define SM_UI_DIAL_STEP 5U
+// to half, and that is where the page leaves it. The step is deliberately
+// small - two percent reads as a turning ring, five read as jumps - so the
+// period has to be short: fifty steps up and twenty five down at 100 ms is
+// 7.5 seconds, inside UI_PAGE_MS. Each step is one whole-band redraw, about
+// 5 ms, so the flourish costs about 5 percent of the thread while its page is
+// up.
+#define SM_UI_DIAL_MS 100U
+#define SM_UI_DIAL_STEP 2U
 #define SM_UI_DIAL_TOP 100U
 #define SM_UI_DIAL_HOLD 50U
 
