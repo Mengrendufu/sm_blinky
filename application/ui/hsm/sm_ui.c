@@ -32,12 +32,14 @@
 // cheap.
 #define UI_STAT_MS 500U
 
-// The live page's arc: one sweep from empty to full per visit, and the visit
-// is UI_PAGE_MS long. Twenty steps of five percent at 240 ms is 4.8 seconds,
-// which leaves the full ring on the glass for a moment before the page hands
-// over - and each step is one whole-band redraw, about 5 ms.
+// The live page's arc, one flourish per visit: empty to full, then back down
+// to half, and that is where the page leaves it. Twenty steps up and ten down
+// at 240 ms is 7.2 seconds, inside UI_PAGE_MS. Each step is one whole-band
+// redraw, about 5 ms, so the flourish costs about 3 percent of the thread.
 #define SM_UI_DIAL_MS 240U
 #define SM_UI_DIAL_STEP 5U
+#define SM_UI_DIAL_TOP 100U
+#define SM_UI_DIAL_HOLD 50U
 
 // The task rows of page 1's panel: five threads, then the two pools. Only the
 // order and the names are ours - the sizes come from the kernel, which
@@ -266,6 +268,7 @@ void Sm_Ui_init(Sm_Ui * const me) {
     W_Dial_init(&me->dial);
     me->dialAt = 0U;
     me->dialPct = 0U;
+    me->dialUp = true;
     W_Switch_init(&me->sw);
     W_History_init(&me->hist);
     SM_Hsm_init_(&me->sm_hsm_, (SM_InitHandler)Sm_Ui_TOP_initial_);
@@ -390,6 +393,7 @@ static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
     // Start the sweep empty, and let the first step come one period later:
     // the page always begins on an empty ring.
     self->dialPct = 0U;
+    self->dialUp = true;
     self->dialAt = (uint32_t)xTaskGetTickCount()
                    + pdMS_TO_TICKS(SM_UI_DIAL_MS);
     W_Dial_setValue(&self->dial, 0U);
@@ -424,8 +428,16 @@ static SM_RetState Sm_Ui_live_(void * const me,
                 W_History_push(&self->hist, (unsigned)self->cpuPct);
             }
             if ((int32_t)(now - self->dialAt) >= 0) {
-                self->dialPct = (uint16_t)((self->dialPct
-                                            + SM_UI_DIAL_STEP) % 101U);
+                if (self->dialUp) {
+                    self->dialPct += SM_UI_DIAL_STEP;
+                    if (self->dialPct >= SM_UI_DIAL_TOP) {
+                        self->dialPct = SM_UI_DIAL_TOP;
+                        self->dialUp = false;
+                    }
+                }
+                else if (self->dialPct > SM_UI_DIAL_HOLD) {
+                    self->dialPct -= SM_UI_DIAL_STEP;
+                }
                 self->dialAt = now + pdMS_TO_TICKS(SM_UI_DIAL_MS);
                 W_Dial_setValue(&self->dial, self->dialPct);
             }

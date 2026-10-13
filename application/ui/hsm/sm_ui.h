@@ -36,7 +36,8 @@
 // More pages (menu, diagnostics) grow as siblings of these two.
 
 #define UI_SPLASH_MS 1500U   // how long the boot image holds the glass
-#define UI_PAGE_MS   5000U   // how long a page holds the glass
+#define UI_PAGE_MS   8000U   // how long a page holds the glass (the live
+                             // page's arc needs 7.2 s: up, then down to half)
 
 typedef struct {
     SM_Hsm sm_hsm_;
@@ -70,6 +71,7 @@ typedef struct {
     // which is the fastest an arc may redraw here (see w_dial.h).
     uint32_t dialAt;
     uint16_t dialPct;
+    bool dialUp;         // the arc's direction: up to full, then to half
     uint32_t cpuIdle;
     uint32_t cpuTotal;
     uint32_t cpuPct;
