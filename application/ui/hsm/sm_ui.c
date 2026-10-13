@@ -43,8 +43,10 @@
 #define SM_UI_PANEL_ROWS W_BARPANEL_ROWS
 #define SM_UI_TASKS 8U
 
+// Short names on purpose: a label that reaches into its neighbour's box is
+// redrawn through a narrow area when the neighbour moves, and that tears.
 static char const * const Sm_Ui_panelNames_[SM_UI_PANEL_ROWS] = {
-    "ui", "flash", "ao", "Tmr Svc", "IDLE", "nmin", "ui inbox", "lvgl pool"
+    "ui", "flash", "ao", "tmr", "idle", "nmin", "inbox", "pool"
 };
 static char const * const Sm_Ui_panelUnits_[SM_UI_PANEL_ROWS] = {
     "w", "w", "w", "w", "w", "-", "-", "KB"
@@ -249,7 +251,7 @@ void Sm_Ui_init(Sm_Ui * const me) {
     W_Topbar_init(&me->top);
     W_Gauge_init(&me->gauge);
     W_BarPanel_init(&me->panel);
-    W_Spinner_init(&me->spin);
+    W_Pulse_init(&me->pulse);
     W_Switch_init(&me->sw);
     W_History_init(&me->hist);
     SM_Hsm_init_(&me->sm_hsm_, (SM_InitHandler)Sm_Ui_TOP_initial_);
@@ -367,7 +369,7 @@ static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
 
     Sm_Ui_chrome_(self, "live");
     Ui_dispPageBegin(UI_BG_SLOT_LIVE);
-    W_Spinner_create(&self->spin, Ui_dispPageRoot(), 16, 40, 96);
+    W_Pulse_create(&self->pulse, Ui_dispPageRoot(), 60, 52, 120);
     W_Switch_create(&self->sw, Ui_dispPageRoot(), 132, 56);
     W_History_create(&self->hist, Ui_dispPageRoot());
     W_Dots_create(&self->dots, Ui_dispPageRoot(), 1U);

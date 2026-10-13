@@ -32,16 +32,23 @@ void W_BarPanel_create(struct W_BarPanel *p, struct _lv_obj_t *parent,
 
     for (i = 0U; i < W_BARPANEL_ROWS; ++i) {
         p->unit[i] = units[i];
-        lv_coord_t const y = (lv_coord_t)(150 + (int32_t)i * 19);
+        // The pitch is the default font's line height plus a gap, and the
+        // columns keep a gap of their own: a label box that touches its
+        // neighbour gets redrawn through a narrow area when the neighbour
+        // moves, and LVGL 9.5 tears the overlapping glyphs (the same narrow
+        // redraw the arc suffers from - see w_ring.c). Nothing here may
+        // overlap anything else, and the names are kept short for that
+        // reason.
+        lv_coord_t const y = (lv_coord_t)(142 + (int32_t)i * 20);
         lv_obj_t *bar = lv_bar_create((lv_obj_t *)parent);
         char const * const name = (names[i] != (char const *)0) ? names[i]
                                                                : "-";
 
         p->name[i] = WidgetIO_label(parent, name, 0xC9D1D9U);
-        lv_obj_set_pos((lv_obj_t *)p->name[i], 20, y);
+        lv_obj_set_pos((lv_obj_t *)p->name[i], 18, y);
 
-        lv_obj_set_size(bar, 76, 9);
-        lv_obj_set_pos(bar, 78, (lv_coord_t)(y + 3));
+        lv_obj_set_size(bar, 74, 10);
+        lv_obj_set_pos(bar, 64, (lv_coord_t)(y + 4));
         lv_bar_set_range(bar, 0, 100);
         lv_obj_set_style_radius(bar, 5, 0);
         lv_obj_set_style_border_width(bar, 0, 0);
@@ -52,10 +59,13 @@ void W_BarPanel_create(struct W_BarPanel *p, struct _lv_obj_t *parent,
         p->bar[i] = (struct _lv_obj_t *)bar;
 
         p->pct[i] = WidgetIO_label(parent, "0%", 0xFFFFFFU);
-        lv_obj_set_pos((lv_obj_t *)p->pct[i], 158, y);
+        lv_obj_set_pos((lv_obj_t *)p->pct[i], 144, y);
+        lv_obj_set_width((lv_obj_t *)p->pct[i], 32);
+        lv_obj_set_style_text_align((lv_obj_t *)p->pct[i],
+                                    LV_TEXT_ALIGN_RIGHT, 0);
 
         p->val[i] = WidgetIO_label(parent, "-", 0x9AA3ACU);
-        lv_obj_set_pos((lv_obj_t *)p->val[i], 190, y);
+        lv_obj_set_pos((lv_obj_t *)p->val[i], 182, y);
     }
 }
 //............................................................................

@@ -7,21 +7,23 @@
 // To Public License, Version 2, as published by Sam Hocevar.
 // See http://www.wtfpl.net/ for more details.
 //============================================================================
-#ifndef W_SPINNER_H_
-#define W_SPINNER_H_
+#ifndef W_PULSE_H_
+#define W_PULSE_H_
 
 #include <stdint.h>
 
 struct _lv_obj_t;
 
-// The one thing on the glass that moves every frame: a small spinner. 36x36
-// is about 0.9 ms a frame, so 30 fps costs roughly 2 percent of the thread.
-struct W_Spinner {
-    struct _lv_obj_t *spin;
+// The live page's motion: a bar whose value sweeps to and fro on LVGL's own
+// animation. It is a bar on purpose - a bar redraws its indicator and never
+// garbles, while an arc (lv_spinner included) redraws a narrow area and tears
+// on this build (2026-10-13, both seen on the glass).
+struct W_Pulse {
+    struct _lv_obj_t *bar;
 };
 
-void W_Spinner_init(struct W_Spinner *w);
-void W_Spinner_create(struct W_Spinner *w, struct _lv_obj_t *parent,
-                      int32_t x, int32_t y, int32_t size);
+void W_Pulse_init(struct W_Pulse *w);
+void W_Pulse_create(struct W_Pulse *w, struct _lv_obj_t *parent,
+                    int32_t x, int32_t y, int32_t width);
 
-#endif // W_SPINNER_H_
+#endif // W_PULSE_H_
