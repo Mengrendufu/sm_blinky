@@ -81,6 +81,20 @@ unsigned SST_EvtPool_free(void)
     return free_;
 }
 
+unsigned SST_EvtPool_min(void)
+{
+    unsigned min_ = 0U;
+    uint8_t i;
+
+    SST_PORT_CRIT_ENTRY();
+    for (i = 0U; i < l_evtPoolsNum; ++i) {
+        min_ += (unsigned)l_evtPools[i].nMin;
+    }
+    SST_PORT_CRIT_EXIT();
+
+    return min_;
+}
+
 unsigned SST_EvtPool_total(void)
 {
     unsigned total = 0U;

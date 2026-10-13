@@ -231,15 +231,17 @@ static void Sm_Ui_panel_(Sm_Ui * const me) {
         W_BarPanel_setPair(&me->panel, SM_UI_TASK_ROWS + 1U,
                            WidgetIO_pct(freeSlots, len), freeSlots, len);
     }
-    // The SM (SST) static event pool: where the AOs' events come from. Free
-    // blocks, fuel-gauge style, like every other row.
+    // The SM (SST) static event pool, read the same way the tracer's ring is:
+    // the fewest free blocks it has ever had, not the current count. The AO's
+    // timeouts are static objects, so this stays at the full count until some
+    // AO starts allocating events from the pool - which is exactly what the
+    // row is there to show.
     {
         unsigned const total = SST_EvtPool_total();
-        unsigned const freeBlocks = SST_EvtPool_free();
+        unsigned const minFree = SST_EvtPool_min();
 
         W_BarPanel_setPair(&me->panel, SM_UI_TASK_ROWS + 2U,
-                           WidgetIO_pct(freeBlocks, total), freeBlocks,
-                           total);
+                           WidgetIO_pct(minFree, total), minFree, total);
     }
 }
 //............................................................................

@@ -15,6 +15,7 @@ void SST_EvtPool_init(void *sto, PoolCtr poolSize, PoolCtr blockSize);
 // that was initialised, under the port's own critical section.
 unsigned SST_EvtPool_free(void);
 unsigned SST_EvtPool_total(void);
+unsigned SST_EvtPool_min(void);   // the fewest free blocks ever seen
 void *SST_Evt_new(PoolCtr blockSize);
 void SST_Evt_gc(void *evt);
 
