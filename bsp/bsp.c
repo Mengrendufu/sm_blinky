@@ -27,6 +27,52 @@
 // a task (Application_dbgBootReport, from Blinky_init) and bring-up keeps its
 // own facts instead (BSP_dbgBootMark / BSP_dbgBootReport, the panel's and the
 // asset's own deferred reports). Pool and queue are file statics: no
+// The main stack's watermark. __get_MSP() inside the tick hook only ever
+// showed the tick's own frame (96 bytes on the glass, 2026-10-13): the deep
+// excursions happen in other interrupts, and no sample point can see them.
+// Painting can: everything below the current stack pointer is by definition
+// unused, so it can be filled with a pattern, and whatever is still painted
+// later is what the stack never reached.
+extern uint8_t _estack;
+extern uint32_t _Min_Stack_Size;
+
+#define BSP_MSP_PATTERN 0x5A5A5A5AU
+
+static uint8_t *Bsp_mspBase_;    // bottom of the reserved region
+static uint8_t *Bsp_mspPainted_; // highest painted byte
+static bool Bsp_mspReady_;
+
+void BSP_mspPaint(void) {
+    uint32_t *p;
+    // Everything below the current stack pointer is unused by definition, so
+    // it is safe to write to. The pointer is rounded down to a word boundary:
+    // only whole words are painted and only whole words are scanned.
+    uint32_t * const sp = (uint32_t *)(__get_MSP() & ~0x7U);
+
+    Bsp_mspBase_ = (uint8_t *)&_estack - (uint32_t)&_Min_Stack_Size;
+    for (p = (uint32_t *)Bsp_mspBase_; p < sp; ++p) {
+        *p = BSP_MSP_PATTERN;
+    }
+    Bsp_mspPainted_ = (uint8_t *)(sp - 1U);
+    Bsp_mspReady_ = true;
+}
+
+uint32_t BSP_mspPeakBytes(void) {
+    uint32_t const *p = (uint32_t const *)Bsp_mspBase_;
+
+    if (!Bsp_mspReady_) {
+        return 0U;
+    }
+
+    while (((uint8_t const *)p < Bsp_mspPainted_)
+           && (*p == BSP_MSP_PATTERN)) {
+        ++p;
+    }
+
+    return (uint32_t)((uint8_t const *)Bsp_mspPainted_
+                      - (uint8_t const *)p);
+}
+
 // allocation.
 void BSP_Tracer_init(void) {
     static bool done;

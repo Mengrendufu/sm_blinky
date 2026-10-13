@@ -447,11 +447,10 @@ static SM_RetState Sm_Ui_live_(void * const me,
             // The main stack's watermark: sampled in the tick hook, so it is
             // live, unlike the static figure above it.
             {
-                uint32_t const low = BSP_mspLow();
+                uint32_t const peak = BSP_mspPeakBytes();
 
-                if (low != 0U) {
-                    W_Ram_setMsp(&self->ram,
-                                 (uint32_t)((uintptr_t)&_estack - low),
+                if (peak != 0U) {
+                    W_Ram_setMsp(&self->ram, peak,
                                  (uint32_t)(uintptr_t)&_Min_Stack_Size);
                 }
             }

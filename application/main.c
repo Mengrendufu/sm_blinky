@@ -20,6 +20,12 @@ static void MX_USART1_UART_Init(void);
 static void SST_sysTimer_cb(TimerHandle_t xTimer);
 
 int main(void) {
+    // The main stack's watermark starts here: everything below this frame is
+    // painted, and BSP_mspPeakBytes() reads the deepest point the stack ever
+    // reached. First statement on purpose - it is the earliest the stack can
+    // be measured without touching what the startup code left on it.
+    BSP_mspPaint();
+
     // The app image lives at 0x08004000; the first 16 KB belong to the
     // bootloader. On a real reset the hardware loads MSP and PC from the
     // vector table at 0x08000000 - the bootloader's - so point VTOR at ours
