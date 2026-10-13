@@ -67,4 +67,32 @@ void SST_Evt_gc(void * const evt)
     SST_PORT_CRIT_EXIT();
 }
 
+unsigned SST_EvtPool_free(void)
+{
+    unsigned free_ = 0U;
+    uint8_t i;
+
+    SST_PORT_CRIT_ENTRY();
+    for (i = 0U; i < l_evtPoolsNum; ++i) {
+        free_ += (unsigned)l_evtPools[i].nFree;
+    }
+    SST_PORT_CRIT_EXIT();
+
+    return free_;
+}
+
+unsigned SST_EvtPool_total(void)
+{
+    unsigned total = 0U;
+    uint8_t i;
+
+    SST_PORT_CRIT_ENTRY();
+    for (i = 0U; i < l_evtPoolsNum; ++i) {
+        total += (unsigned)l_evtPools[i].nTot;
+    }
+    SST_PORT_CRIT_EXIT();
+
+    return total;
+}
+
 #endif

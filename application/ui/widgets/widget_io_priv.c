@@ -31,23 +31,6 @@ void WidgetIO_setMs(struct _lv_obj_t *label, uint32_t us) {
 }
 //............................................................................
 //............................................................................
-unsigned WidgetIO_poolFreeKb(void) {
-    lv_mem_monitor_t mon;
-
-    lv_mem_monitor(&mon);
-
-    return (unsigned)(mon.free_size / 1024U);
-}
-//............................................................................
-// The panel reads as a fuel gauge, so the pool's row wants what is left.
-unsigned WidgetIO_poolFreePct(void) {
-    lv_mem_monitor_t mon;
-
-    lv_mem_monitor(&mon);
-
-    return (unsigned)(100U - mon.used_pct);
-}
-//............................................................................
 uint32_t WidgetIO_pct(uint32_t used, uint32_t total) {
     uint32_t const pct = (total == 0U) ? 0U : ((used * 100U) / total);
 

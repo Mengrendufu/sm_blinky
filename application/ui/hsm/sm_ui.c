@@ -15,6 +15,7 @@
 #include "widgets/widget_io_priv.h"
 #include "bsp.h"
 #include "sm_tracer.h"
+#include "sst_port.h"   // defines SST_EVT_POOL_NUM, then the pool's API
 #include <string.h>
 #include "FreeRTOS.h"
 #include "task.h"
@@ -49,10 +50,10 @@
 // Short names on purpose: a label that reaches into its neighbour's box is
 // redrawn through a narrow area when the neighbour moves, and that tears.
 static char const * const Sm_Ui_panelNames_[SM_UI_PANEL_ROWS] = {
-    "ui", "flash", "ao", "tmr", "idle", "nmin", "inbox", "pool"
+    "ui", "flash", "ao", "tmr", "idle", "nmin", "inbox", "sst"
 };
 static char const * const Sm_Ui_panelUnits_[SM_UI_PANEL_ROWS] = {
-    "w", "w", "w", "w", "w", "-", "-", "KB"
+    "w", "w", "w", "w", "w", "-", "-", "-"
 };
 static char const * const Sm_Ui_stackNames_[SM_UI_TASK_ROWS] = {
     "ui", "flash", "ao", "Tmr Svc", "IDLE"
@@ -230,8 +231,16 @@ static void Sm_Ui_panel_(Sm_Ui * const me) {
         W_BarPanel_setPair(&me->panel, SM_UI_TASK_ROWS + 1U,
                            WidgetIO_pct(freeSlots, len), freeSlots, len);
     }
-    W_BarPanel_setWords(&me->panel, SM_UI_TASK_ROWS + 2U,
-                        WidgetIO_poolFreePct(), WidgetIO_poolFreeKb());
+    // The SM (SST) static event pool: where the AOs' events come from. Free
+    // blocks, fuel-gauge style, like every other row.
+    {
+        unsigned const total = SST_EvtPool_total();
+        unsigned const freeBlocks = SST_EvtPool_free();
+
+        W_BarPanel_setPair(&me->panel, SM_UI_TASK_ROWS + 2U,
+                           WidgetIO_pct(freeBlocks, total), freeBlocks,
+                           total);
+    }
 }
 //............................................................................
 //============================================================================
