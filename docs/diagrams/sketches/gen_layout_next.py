@@ -99,14 +99,17 @@ def page1():
     o.append(tagon(200, 4, "1"))
     o.append(gauge(0.38, "38 %", "cpu"))
     o.append(tagon(44, 44, "2"))
-    o.append('<div class="solid" style="left:12px;top:170px;width:216px;height:126px">'
+    o.append('<div class="solid" style="left:12px;top:140px;width:216px;height:164px">'
              '</div>')
-    o.append(row(180, "ui", 36, "728 w"))
-    o.append(row(198, "flash", 12, "212 w"))
-    o.append(row(216, "blinky", 44, "902 w"))
-    o.append(row(234, "nmin", 100, "16/16", fill_hex="#00C3BC"))
-    o.append(row(252, "evt", 75, "12/16", fill_hex="#FFD54F"))
-    o.append(tagon(14, 172, "3"))
+    o.append(row(150, "ui", 36, "1320 w"))
+    o.append(row(169, "flash", 50, "128 w"))
+    o.append(row(188, "blinky", 44, "143 w"))
+    o.append(row(207, "Tmr Svc", 25, "192 w"))
+    o.append(row(226, "IDLE", 12, "112 w"))
+    o.append(row(245, "nmin", 100, "16/16", fill_hex="#00C3BC"))
+    o.append(row(264, "sst evt", 75, "12/16", fill_hex="#FFD54F"))
+    o.append(row(283, "ui inbox", 88, "14/16", fill_hex="#C6FF3D"))
+    o.append(tagon(14, 142, "3"))
     o.append('<div class="dot" style="left:112px;top:310px;width:6px;height:6px"></div>')
     o.append('<div class="dot" style="left:124px;top:311px;width:4px;height:4px"></div>')
     o.append(tagon(96, 296, "4"))
@@ -179,7 +182,10 @@ HTML = """<!DOCTYPE html>
 <div style="font-size:13px;line-height:1.8;margin-top:14px">
 <b>①</b> 右上角：<code>cpu NN %</code> + led —— <b>两页都在</b>（页 1 的弧里也有一份，角落那个不取消 ✓）。<br>
 <b>②</b> cpu 用<b>半圆</b> <code>lv_arc</code>：bbox 156x78 &rArr; 整行带 3 条 &asymp; 10 ms/次，2 Hz &rArr; 占用 ~2%。<br>
-<b>③</b> 清单每行 = <b>条 + 百分比 + 数字</b>（mockup 原话）；这里示例 5 行：三个线程栈 + tracer nmin + 事件池空闲。<br>
+<b>③</b> 清单每行 = <b>条 + 百分比 + 数字</b>（mockup 原话）。<b>线程全放</b>：运行期就 5 个任务
+ —— <code>ui</code>(2048 w) / <code>flash</code>(256 w) / SST 的 AO 任务 / <code>Tmr Svc</code>(256 w) / <code>IDLE</code>(128 w)
+ —— 再加 <code>tracer nmin</code> + <code>SST 事件池</code> + <code>UI inbox</code> = <b>8 行</b>✓
+ （面板 164 px &divide; 8 行 = 20 px/行，还余 4 px；最多能到 8~9 行 ⇒ 以后加任务也放得下 ✓）。<br>
 <b>④</b> 页点保留（两页指示）。<br>
 <b>⑤⑥⑦⑧</b> 页 2「随便动起来」：<code>spinner</code>（连续转，36x36 区域，&asymp;0.9 ms/帧 &rArr; 30 fps &asymp; 2%）+
  <code>switch</code>（跟 <code>ledOn</code> 同步翻转，每次 &asymp;2 ms、2 Hz &rArr; 0.4%）+
@@ -212,14 +218,17 @@ HTML = """<!DOCTYPE html>
 </div>
 
 <h2>四、要你定的三件事</h2>
-<ol style="font-size:13px;line-height:1.7">
-<li><b>页 2 已定</b>：按你说的「随便放点组件 + 动效」= 上图 live 页（spinner + switch + 12 根 cpu 历史条 + led ✓，合计 &asymp;3% 占用）。</li>
-<li><b>今天 blinky 的那套东西去哪</b>：节拍环（七步/边沿）、<code>edges/frame</code> 卡、底栏帧时条 ——
- 新方案里<b>没有它们的位置</b>。选一个：<b>(a)</b> 搬到页 1 清单下面（要压掉 2 根条）；
- <b>(b)</b> 搬到页 2 换掉历史条；<b>(c)</b> 就删掉（板子上从此只看资源，不看 blinky 自己的节拍）。</li>
-<li><b>栈要列哪几行</b>：全部任务一行一行（最多 5~6 行）还是按占用取前 N + 其余合计？</li>
-<li><b>“sm 事件池”指哪个</b>：SST 静态事件池（字面 ✓，需加一个 free 读数）还是 UI inbox（现成 ✓）？</li>
-</ol>
+<div class="note"><b>已定（你这轮拍的）</b>
+<ul style="font-size:13px;line-height:1.7;margin:6px 0 0 0">
+<li><b>节拍那套删掉</b> ✓：页 1 的节拍环（七步/边沿）、<code>edges/frame</code> 卡、底栏帧时条全部下线
+（<code>ledEdges</code> 仍留在模型里，给 tracer/上报用，只是不再显示）。</li>
+<li><b>线程全放</b> ✓：5 个任务一行一个 + tracer nmin + 两个事件池 = 8 行 ⇒ 上图（面板 164 px，20 px/行，余 4 px ✓）。</li>
+<li><b>页 2 = live 页</b> ✓：spinner + switch + 12 根 cpu 历史条 + 角落 cpu/led，合计 &asymp;3% 占用。</li>
+<li><b>右上角 cpu 文本两页都留</b> ✓。</li>
+</ul>
+<div style="margin-top:8px;font-size:13px">剩两个实现细节我按下面默认执行，想改再说：<br>
+&middot; 事件池两个都放：<b>SST 静态池</b>（字面 ✓，要给它加一个 free 读数）+ <b>UI inbox</b>（<code>UI_INBOX_LEN 16</code> 现成 ✓）。<br>
+&middot; 开 <code>LV_USE_SPINNER</code> / <code>LV_USE_SWITCH</code>（+约 3 KB flash），<code>LV_USE_CHART</code> 不开。</div></div>
 <div style="font-size:12px;color:#666">（这版是草稿：只画了几何与数据源；你点头后我把它并回
  <code>gen_pages_two.py</code> 并动 <code>sm_ui.c</code> / <code>widgets/w_*</code>。）</div>
 </body></html>
