@@ -28,7 +28,6 @@
 // and the measured 914 words is inside the minimum but nowhere near the
 // recommendation, so the stack matches the recommendation. [MEM][STACK][UI]
 // is re-read whenever the UI changes.
-#define UI_STACK_WORDS  2048U // 2048 words = 8 KB
 #define UI_PRIORITY     23U  // under the Blinky AO (24): the heartbeat wins
 
 // LED edges between [MEM] reports, matching the AO's cadence so the two lines
@@ -112,10 +111,15 @@ static void Ui_thread_(void *arg) {
             Sm_Ui_dispatch(&Ui_sm_, &evt);
         }
 
-        // Nothing here touches the widgets while the boot image owns the
-        // glass: a widget drawn then would be a widget on top of the image.
-        if (!Ui_sm_.splashUp) {
-            Ui_dispRender(Ui_sm_.ledOn, Ui_sm_.ledEdges);
+        // The frame pulse. What a frame does is the current state's business,
+        // so the splash state is the one that ignores it - the widgets are
+        // the
+        // state machine's, not this loop's.
+        {
+            Ui_Evt evt;
+
+            evt.sig = UI_FRAME_SIG;
+            Sm_Ui_dispatch(&Ui_sm_, &evt);
         }
 
         wait = Ui_dispHeartbeat();

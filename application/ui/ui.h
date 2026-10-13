@@ -18,6 +18,10 @@
 // Called from main() before the scheduler starts: creates the static task and
 // binds the inbox to it. Events posted before that simply wait in the inbox.
 
+// The UI task's static stack, in words. The stats page reads its own
+// high-water mark against this, so the number lives in exactly one place.
+#define UI_STACK_WORDS 2048U
+
 void Ui_start(void);
 
 #endif // UI_H_

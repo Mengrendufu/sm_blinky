@@ -30,12 +30,6 @@
 #include "bsp_lcd.h"
 #include "sm_tracer.h"
 #include "ui_disp_priv.h"
-#include "widgets/w_bar.h"
-#include "widgets/w_card.h"
-#include "widgets/w_dots.h"
-#include "widgets/w_ring.h"
-#include "widgets/w_topbar.h"
-#include "widgets/widget_io_priv.h"
 #include "lvgl.h"
 #include "FreeRTOS.h"
 #include "task.h"
@@ -76,63 +70,23 @@
 // its coverage proof and the asset being current are the whole of it. Under
 // test (2026-10-12): the re-drive window was dropped, the glass is the judge.
 
-// Which background slot each page lays down. The burner writes three, in
-// this order: 0 = bg-a (夜色仪表), 1 = bg-b (网格科技), 2 = bg-logo, which is
-// the splash page's own and is not a page background.
-#define UI_BG_SLOT_DEMO  0U
-#define UI_BG_SLOT_STATS 1U
-
-// How often a page's slow readouts (frame time, stack, pool) are rewritten.
-// The fast ones follow the AO's events instead, so 2 Hz is where the numbers
-// stop being interesting and the redraws start being expensive.
-#define UI_STAT_MS        500U
-// The refresh period the frame readout is read against: a percentage that
-// means "how much of a 30 fps budget this frame took".
-#define UI_FRAME_BUDGET_US 33000U
-#define UI_STACK_WORDS    2048U   // the UI task's static stack, in words
 // How often the panel's inversion bit is re-sent. The clobber has no
 // schedule, so this one never stops - it is one command, and it is the only
 // panel register the run-time path touches (see BSP_lcdReassert).
 #define UI_INVON_MS       100U
 
-// The two content pages. The widgets are the same kinds on both, so one set
-// of handles serves whichever page is up (see Ui_pageBegin_).
-
-typedef enum {
-    UI_PAGE_DEMO = 0,
-    UI_PAGE_STATS
-} Ui_Page;
-
 static lv_display_t *Ui_disp_;
+// Everything a page builds lives under this one container, so a page change
+// can take the last page away without touching the chrome above it. The
+// state machine builds into it through Ui_dispPageRoot().
+static lv_obj_t *Ui_pageRoot_;
 static lv_image_dsc_t Ui_bgDsc_;      // the background of the page that is up
 static lv_image_dsc_t Ui_splashDsc_;  // boot image, slot 2
-static Ui_Page Ui_page_;              // which page owns the glass
-// The widgets own their own handles now (application/ui/widgets). These are
-// the instances the page that is up was built from, and they are the only
-// things the render writes through.
-static struct W_Topbar Ui_top_;       // title, cpu readout, heartbeat led
-static struct W_Ring Ui_ring_;        // the ring the art leaves room for
-static struct W_Card Ui_cardA_;       // card at (12,204)
-static struct W_Card Ui_cardB_;       // card at (124,204)
-static struct W_Bar Ui_bar_;          // the bottom bar
-static struct W_Dots Ui_dots_;        // the two page dots
 // One heartbeat's cost, measured, and the extremes it has shown: the stats
 // page reads them, so they are a readout and not a probe.
 static uint32_t Ui_frameUs_;
 static uint32_t Ui_frameMin_;
 static uint32_t Ui_frameMax_;
-static uint32_t Ui_statAt_;           // when the slow readouts were rewritten
-// CPU load over the last window: the tick hook's two counters, differenced
-// here (see BSP_cpuSample), and the percentage they come to.
-static uint32_t Ui_cpuIdle_;
-static uint32_t Ui_cpuTotal_;
-static uint32_t Ui_cpuPct_;
-
-// What the widgets currently show. Keeping it here means an unchanged state
-// costs nothing: no property writes, no invalidation, no redraw.
-static bool Ui_shownOn_;
-static uint16_t Ui_shownEdges_;
-static bool Ui_shownValid_;
 
 static uint16_t Ui_strip_[UI_STRIP_PX] LV_ATTRIBUTE_MEM_ALIGN;
 
@@ -150,17 +104,10 @@ static bool Ui_framePending_;
 // bring-up leaves the backlight off (BSP_lcdInit) and this is where it comes
 // on. The same schedule keeps bring-up's sentinel off the user's eye.
 static bool Ui_backlightOn_;
-// The widget tree is built once, by the demo page's entry action - never
-// earlier. While the splash holds the glass there is nothing to draw, so a
-// flag and a state disagreeing can no longer put widget pixels on the panel.
-static bool Ui_built_;
 
 // == DEBUG: whether the boot image holds the glass; read over J-Link. ==
 volatile uint8_t Ui_dbgSplashOk_;
 //============================================================================
-static void Ui_buildDemo_(void);
-static void Ui_buildStats_(void);
-static void Ui_pageBegin_(uint32_t slot, Ui_Page page);
 static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
                       uint8_t *px);
 static void Ui_flushDone_(void);
@@ -189,8 +136,17 @@ void Ui_dispInit(void) {
     lv_display_set_buffers(Ui_disp_, Ui_strip_, (void *)0, sizeof(Ui_strip_),
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
 
-    // No widgets here on purpose: the splash page owns the glass first, and
-    // its entry action is what brings the demo page's tree into being.
+    // The page container: one parent for every page's widgets, and the one
+    // thing a page change empties. It sits below the chrome, which the shared
+    // state builds once on the screen itself.
+    Ui_pageRoot_ = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(Ui_pageRoot_, UI_LCD_HOR, UI_LCD_VER);
+    lv_obj_set_pos(Ui_pageRoot_, 0, 0);
+    lv_obj_set_style_border_width(Ui_pageRoot_, 0, 0);
+    lv_obj_set_style_radius(Ui_pageRoot_, 0, 0);
+    lv_obj_set_style_pad_all(Ui_pageRoot_, 0, 0);
+    lv_obj_set_style_shadow_width(Ui_pageRoot_, 0, 0);
+    lv_obj_remove_flag(Ui_pageRoot_, LV_OBJ_FLAG_SCROLLABLE);
 }
 //............................................................................
 // Push the boot image and prove it: the frame is cleared first (and the clear
@@ -226,10 +182,66 @@ static void Ui_slotDesc_(lv_image_dsc_t * const dsc,
     dsc->data = (uint8_t const *)pixels;
 }
 
+//............................................................................
+// The parents the state machine draws into: the page root, which a page
+// change empties, and the screen above it, where the chrome stays put for the
+// whole run.
+struct _lv_obj_t *Ui_dispRoot(void) {
+    return (struct _lv_obj_t *)lv_screen_active();
+}
+//............................................................................
+struct _lv_obj_t *Ui_dispPageRoot(void) {
+    return (struct _lv_obj_t *)Ui_pageRoot_;
+}
+//............................................................................
+void Ui_dispPageEnd(void) {
+    lv_obj_clean(Ui_pageRoot_);
+}
+//............................................................................
+// One page entry, whichever page it is: the last page's tree goes, then the
+// background that page belongs to is laid down. The page's own state builds
+// its widgets on top of it.
+void Ui_dispPageBegin(uint32_t slot) {
+    Asset const * const asset = Asset_get();
+    void const * const bgPixels = Asset_slot(asset, slot);
+
+    Ui_dispPageEnd();
+    Ui_screenBase_(Ui_pageRoot_);
+
+    // The bootloader's asset, if it verified: the whole page becomes one
+    // image
+    // and the widgets sit on top of it. Without it the page keeps the black
+    // background, which is the degradation the design counts on.
+    if (bgPixels != (void const *)0) {
+        lv_obj_t *bg;
+
+        Ui_slotDesc_(&Ui_bgDsc_, bgPixels);
+
+        bg = lv_image_create(Ui_pageRoot_);
+        lv_image_set_src(bg, &Ui_bgDsc_);
+        lv_obj_align(bg, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_remove_flag(bg, LV_OBJ_FLAG_CLICKABLE);
+    }
+
+    Ui_framePending_ = true;   // this page starts with a whole screen
+}
+//............................................................................
+// The frame readouts the stats page carries: what the last heartbeat cost,
+// and
+// the extremes it has shown.
+uint32_t Ui_dispFrameUs(void) {
+    return Ui_frameUs_;
+}
+uint32_t Ui_dispFrameMin(void) {
+    return Ui_frameMin_;
+}
+uint32_t Ui_dispFrameMax(void) {
+    return Ui_frameMax_;
+}
+//............................................................................
 bool Ui_dispSplash(void) {
     Asset const * const asset = Asset_get();
     void const * const pixels = Asset_slot(asset, 2U);
-    lv_obj_t * const screen = lv_screen_active();
     lv_obj_t *img;
 
     Ui_dbgSplashOk_ = 0U;
@@ -238,8 +250,8 @@ bool Ui_dispSplash(void) {
     // panel: one writer on the glass, and the state machine owns it. The
     // frame's coverage proof still runs, in the heartbeat, on the first frame
     // this page draws.
-    lv_obj_clean(screen);
-    Ui_screenBase_(screen);
+    Ui_dispPageEnd();
+    Ui_screenBase_(Ui_pageRoot_);
 
     if (pixels == (void const *)0) {
         return false;   // no asset: the demo page comes up straight away
@@ -247,7 +259,7 @@ bool Ui_dispSplash(void) {
 
     Ui_slotDesc_(&Ui_splashDsc_, pixels);
 
-    img = lv_image_create(screen);
+    img = lv_image_create(Ui_pageRoot_);
     lv_image_set_src(img, &Ui_splashDsc_);
     lv_obj_align(img, LV_ALIGN_CENTER, 0, 0);
     lv_obj_remove_flag(img, LV_OBJ_FLAG_CLICKABLE);
@@ -258,53 +270,8 @@ bool Ui_dispSplash(void) {
     return true;
 }
 //............................................................................
-// One page entry, whichever page it is: clean the screen, lay the background
-// that page belongs to, hand the glass over, then let the page build its
-// tree. Nothing else draws while this runs - which is why it is an entry
-// action and not work the loop gets to later.
-static void Ui_pageBegin_(uint32_t slot, Ui_Page page) {
-    Asset const * const asset = Asset_get();
-    void const * const bgPixels = Asset_slot(asset, slot);
-    lv_obj_t * const screen = lv_screen_active();
 
-    // Nothing to stop by hand: LVGL clears an object's animations in its own
-    // delete path (lv_obj.c), and the led in the corner no longer animates.
-    // The clean below is what takes the old page's widgets away.
-    // Every page builds its own tree, from a clean screen: the page before it
-    // is gone before this one exists, so the two can never share the glass.
-    lv_obj_clean(screen);
-    Ui_screenBase_(screen);
-
-    // The bootloader's asset, if it verified: the whole screen becomes one
-    // image and the widgets sit on top of it. Without it the page keeps the
-    // black background, which is the degradation the design counts on.
-    if (bgPixels != (void const *)0) {
-        lv_obj_t *bg;
-
-        Ui_slotDesc_(&Ui_bgDsc_, bgPixels);
-
-        bg = lv_image_create(screen);
-        lv_image_set_src(bg, &Ui_bgDsc_);
-        lv_obj_align(bg, LV_ALIGN_CENTER, 0, 0);
-        lv_obj_remove_flag(bg, LV_OBJ_FLAG_CLICKABLE);
-    }
-
-    Ui_page_ = page;
-    Ui_built_ = true;
-    Ui_framePending_ = true;   // this page starts with a whole screen
-    Ui_shownValid_ = false;    // and the model gets written out again
-    Ui_statAt_ = 0U;           // slow readouts: rewrite next frame
-}
-
-void Ui_dispDemo(void) {
-    Ui_pageBegin_(UI_BG_SLOT_DEMO, UI_PAGE_DEMO);
-    Ui_buildDemo_();
-}
 //............................................................................
-void Ui_dispStats(void) {
-    Ui_pageBegin_(UI_BG_SLOT_STATS, UI_PAGE_STATS);
-    Ui_buildStats_();
-}
 //............................................................................
 TickType_t Ui_dispHeartbeat(void) {
     static TickType_t Ui_invonAt_;
@@ -351,100 +318,6 @@ TickType_t Ui_dispHeartbeat(void) {
     return pdMS_TO_TICKS((next == 0U) ? 1U : next);
 }
 //............................................................................
-// Which page is up, and what the widgets on it show. The two pages carry the
-// same widget kinds, so this is one function with a half each rather than two
-// entry points: Ui_page_ picks the half. The fast values follow the model,
-// the slow ones are rewritten on UI_STAT_MS at most - a label that is set
-// every heartbeat would redraw itself every heartbeat.
-void Ui_dispRender(bool ledOn, uint16_t edges) {
-    uint32_t const now = (uint32_t)xTaskGetTickCount();
-    bool const changed = (!Ui_shownValid_) || (ledOn != Ui_shownOn_)
-                         || (edges != Ui_shownEdges_);
-    bool const slow = (Ui_statAt_ == 0U)
-                      || ((int32_t)(now - Ui_statAt_)
-                          >= (int32_t)pdMS_TO_TICKS(UI_STAT_MS));
-
-    if (!Ui_built_) {
-        return;   // no widgets yet: the splash still owns the glass
-    }
-
-    if (changed) {
-        Ui_shownOn_ = ledOn;
-        Ui_shownEdges_ = edges;
-        Ui_shownValid_ = true;
-        W_Topbar_setLed(&Ui_top_, ledOn);
-    }
-
-    // One readout both pages share: the load over the window that just
-    // passed. The tick hook counts the ticks that found the idle task on the
-    // CPU, so everything else is work. At 10 ms a tick and a 500 ms window
-    // that is fifty samples - a percentage to the nearest two.
-    if (slow) {
-        uint32_t idle;
-        uint32_t total;
-
-        BSP_cpuSample(&idle, &total);
-        uint32_t const dIdle = idle - Ui_cpuIdle_;
-        uint32_t const dTotal = total - Ui_cpuTotal_;
-
-        Ui_cpuIdle_ = idle;
-        Ui_cpuTotal_ = total;
-        if (dTotal > 0U) {
-            Ui_cpuPct_ = 100U - ((dIdle * 100U) / dTotal);
-        }
-        W_Topbar_setCpu(&Ui_top_, (unsigned)Ui_cpuPct_);
-        Ui_statAt_ = now;
-    }
-
-    if (Ui_page_ == UI_PAGE_DEMO) {
-        // The ring follows the AO's edge count, wrapped to one turn, and the
-        // number in it spells the same value: a ring nobody can read is
-        // decoration, and decoration is what the background art already is.
-        if (changed) {
-            // Seven steps per edge, and not an lv_anim on purpose: an
-            // animated value would re-render the ring on every LVGL tick (10
-            // ms) at about 21 ms a frame, which saturates this thread. One
-            // update per LED event is 4% of a 500 ms period.
-            uint32_t const v = ((uint32_t)edges * 7U) % 101U;
-
-            W_Ring_setValue(&Ui_ring_, (uint16_t)v);
-            W_Card_setA(&Ui_cardB_, "%u", (unsigned)edges);
-        }
-        if (slow) {
-            uint32_t const load = WidgetIO_pct(Ui_frameUs_,
-                                               UI_FRAME_BUDGET_US);
-
-            W_Card_setBms(&Ui_cardB_, Ui_frameUs_);
-            W_Bar_setValue(&Ui_bar_, load);
-        }
-    }
-    else {
-        // The stats page is about what is left, so every readout on it is a
-        // watermark: the stack's, the trace ring's, the pool's, and the two
-        // frame times. The arc and the number inside the ring are the same
-        // quantity now - one gauge, one number.
-        if (slow) {
-            lv_mem_monitor_t mon;
-            uint32_t const stackFree =
-                (uint32_t)uxTaskGetStackHighWaterMark((TaskHandle_t)0);
-            uint32_t const stackPct =
-                WidgetIO_pct(UI_STACK_WORDS - stackFree, UI_STACK_WORDS);
-            // The tracer's own high-water mark: the fewest free record slots
-            // its ring has ever had. It only falls, and 0 means the pump fell
-            // behind far enough to drop records. Reading the byte is atomic
-            // on this core, and a read one window late costs nothing.
-            uint32_t const nMin = (uint32_t)SM_Tracer_inst.nMin;
-
-            lv_mem_monitor(&mon);   // the LVGL pool, in bytes
-            W_Ring_setValue(&Ui_ring_, (uint16_t)stackPct);
-            W_Card_setA(&Ui_cardA_, "%u w", (unsigned)stackFree);
-            W_Card_setB(&Ui_cardA_, "%u", (unsigned)nMin);
-            W_Card_setAms(&Ui_cardB_, Ui_frameMin_);
-            W_Card_setBms(&Ui_cardB_, Ui_frameMax_);
-            W_Bar_setValue(&Ui_bar_, mon.used_pct);
-        }
-    }
-}
 //............................................................................
 // LVGL hands over one dirty rectangle and the pixels for it. Setting the
 // window first makes the panel's address counter walk exactly that rectangle.
@@ -542,39 +415,4 @@ static uint32_t Ui_us_(void) {
     return ((uint32_t)HAL_GetTick() * 1000U) + (uint32_t)TIM1->CNT;
 }
 //............................................................................
-// Page 1, the demo: the AO's own numbers - the ring follows its edge count,
-// and the card carries the edge total and this frame's cost. The beat and the
-// LED state are the corner's business now (the topbar). Absolute positions
-// throughout, so nothing leans on the theme's spacing (the layout is
-// docs/diagrams/sketches/pages-two.html).
-static void Ui_buildDemo_(void) {
-    lv_obj_t * const screen = lv_screen_active();
-
-    W_Topbar_create(&Ui_top_, screen, "sm_blinky");
-    W_Ring_create(&Ui_ring_, screen);
-    // The ring is the beat made visible, not the raw count: seven steps per
-    // LED edge is about 17 degrees, which the eye catches, and a full turn
-    // takes some seven seconds. The raw number stays on the card.
-    W_Ring_setUnit(&Ui_ring_, "beat");
-    W_Card_create(&Ui_cardB_, screen, 124, 204, "edges", "frame");
-    W_Bar_create(&Ui_bar_, screen);
-    W_Dots_create(&Ui_dots_, screen, 0U);
-}
 //............................................................................
-// Page 2, the stats: the same screen and the same widget kinds, holding the
-// numbers that describe the firmware instead of the AO. Every one of them is
-// a real readout, so the page is a diagnostics view that happens to look like
-// a dashboard.
-static void Ui_buildStats_(void) {
-    lv_obj_t * const screen = lv_screen_active();
-
-    W_Topbar_create(&Ui_top_, screen, "STATS");
-    W_Ring_create(&Ui_ring_, screen);
-    // The pool's number gave up its slot to the tracer's watermark: the bar
-    // along the bottom is the pool gauge, so the text was the duplicate.
-    W_Ring_setUnit(&Ui_ring_, "%");
-    W_Card_create(&Ui_cardA_, screen, 12, 204, "stack free", "tracer nmin");
-    W_Card_create(&Ui_cardB_, screen, 124, 204, "frame min", "frame max");
-    W_Bar_create(&Ui_bar_, screen);
-    W_Dots_create(&Ui_dots_, screen, 1U);
-}

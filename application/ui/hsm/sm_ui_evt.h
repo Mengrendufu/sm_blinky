@@ -32,7 +32,10 @@ enum {
     // The same source and the same shape: the page that owns the glass has
     // held it for long enough, and the machine hands it to its sibling. Two
     // content pages take turns this way - demo, stats, demo, ...
-    UI_PAGE_SWITCH_SIG
+    UI_PAGE_SWITCH_SIG,
+    // The thread's frame pulse, not an inbox event: what a frame does is the
+    // current state's business, so the splash state simply ignores it.
+    UI_FRAME_SIG
 };
 
 #endif // SM_UI_EVT_H_

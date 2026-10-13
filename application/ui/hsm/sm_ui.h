@@ -12,6 +12,11 @@
 
 #include "sm_hsm.h"
 #include "sm_ui_evt.h"
+#include "widgets/w_bar.h"
+#include "widgets/w_card.h"
+#include "widgets/w_dots.h"
+#include "widgets/w_ring.h"
+#include "widgets/w_topbar.h"
 #include "FreeRTOS.h"   // TickType_t: the splash hold is measured in ticks
 
 //============================================================================
@@ -34,9 +39,33 @@
 typedef struct {
     SM_Hsm sm_hsm_;
     bool ledOn;          // last LED state posted by the Blinky AO
-    uint16_t ledEdges;   // LED transitions seen; the status page seed
+    uint16_t ledEdges;   // LED transitions seen; the ring counts these
     bool splashUp;       // the glass belongs to the boot image
     TickType_t splashUntil;  // when the hold ends, while splashUp
+
+    // The widgets this machine owns: the topbar once, for every page, and one
+    // set per page that the page's own state builds and drops. The handles
+    // live here because the states are the only thing that knows which page
+    // is up; the thin wrappers in application/ui/widgets do the LVGL work.
+    struct W_Topbar top;    // title, cpu readout, heartbeat led
+    struct W_Ring ring;     // the ring the art leaves room for
+    struct W_Card cardA;    // card at (12,204)
+    struct W_Card cardB;    // card at (124,204)
+    struct W_Bar bar;       // the bottom bar
+    struct W_Dots dots;     // the two page dots
+
+    // What the widgets last showed, so an unchanged model costs nothing: no
+    // property writes, no invalidation, no redraw.
+    bool shownOn;
+    uint16_t shownEdges;
+    bool shownValid;
+
+    // The slow window: when the readouts were last rewritten, and the CPU
+    // sampler's two tick counters with the percentage they come to.
+    uint32_t statAt;
+    uint32_t cpuIdle;
+    uint32_t cpuTotal;
+    uint32_t cpuPct;
 } Sm_Ui;
 
 void Sm_Ui_init(Sm_Ui * const me);
