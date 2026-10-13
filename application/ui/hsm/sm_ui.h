@@ -16,7 +16,7 @@
 #include "widgets/w_dots.h"
 #include "widgets/w_gauge.h"
 #include "widgets/w_history.h"
-#include "widgets/w_pulse.h"
+#include "widgets/w_dial.h"
 #include "widgets/w_switch.h"
 #include "widgets/w_topbar.h"
 #include "FreeRTOS.h"   // TickType_t: the splash hold is measured in ticks
@@ -53,7 +53,7 @@ typedef struct {
     struct W_Gauge gauge;     // page 1: the cpu half gauge
     struct W_BarPanel panel;  // page 1: one row per thread and per pool
     struct W_Dots dots;       // both pages: which page is up
-    struct W_Pulse pulse;     // page 2: the one piece that moves per frame
+    struct W_Dial dial;       // page 2: the arc that steps round
     struct W_Switch sw;       // page 2: flips with the AO's led
     struct W_History hist;    // page 2: cpu over the last twelve windows
 
@@ -66,6 +66,10 @@ typedef struct {
     // The slow window: when the readouts were last rewritten, and the CPU
     // sampler's two tick counters with the percentage they come to.
     uint32_t statAt;
+    // The dial's own clock and where it stands: it steps five times a second,
+    // which is the fastest an arc may redraw here (see w_dial.h).
+    uint32_t dialAt;
+    uint16_t dialPct;
     uint32_t cpuIdle;
     uint32_t cpuTotal;
     uint32_t cpuPct;

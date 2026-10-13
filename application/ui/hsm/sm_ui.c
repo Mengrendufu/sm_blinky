@@ -31,6 +31,11 @@
 // cheap.
 #define UI_STAT_MS 500U
 
+// How fast the live page's arc steps round. Each step redraws the ring's
+// whole bounding box as full-width bands, about 5 ms, so five a second is
+// roughly 2.5 percent of the thread; at 30 fps it would be 15.
+#define SM_UI_DIAL_MS 200U
+
 // The task rows of page 1's panel: five threads, then the two pools. The
 // kernel reports only how much of a stack is still free
 // (uxTaskGetSystemState -> usStackHighWaterMark), so the percentage needs the
@@ -251,7 +256,9 @@ void Sm_Ui_init(Sm_Ui * const me) {
     W_Topbar_init(&me->top);
     W_Gauge_init(&me->gauge);
     W_BarPanel_init(&me->panel);
-    W_Pulse_init(&me->pulse);
+    W_Dial_init(&me->dial);
+    me->dialAt = 0U;
+    me->dialPct = 0U;
     W_Switch_init(&me->sw);
     W_History_init(&me->hist);
     SM_Hsm_init_(&me->sm_hsm_, (SM_InitHandler)Sm_Ui_TOP_initial_);
@@ -369,7 +376,7 @@ static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
 
     Sm_Ui_chrome_(self, "live");
     Ui_dispPageBegin(UI_BG_SLOT_LIVE);
-    W_Pulse_create(&self->pulse, Ui_dispPageRoot(), 60, 52, 120);
+    W_Dial_create(&self->dial, Ui_dispPageRoot(), 72, 36, 96);
     W_Switch_create(&self->sw, Ui_dispPageRoot(), 132, 56);
     W_History_create(&self->hist, Ui_dispPageRoot());
     W_Dots_create(&self->dots, Ui_dispPageRoot(), 1U);
@@ -391,12 +398,19 @@ static SM_RetState Sm_Ui_live_(void * const me,
         }
         case UI_FRAME_SIG: {
             // The switch is the board's own beat, made visible: it flips when
-            // the AO's LED does. The history is one bar per slow window.
+            // the AO's LED does. The history is one bar per slow window, and
+            // the dial keeps a clock of its own.
+            uint32_t const now = (uint32_t)xTaskGetTickCount();
             if (Sm_Ui_fast_(self)) {
                 W_Switch_set(&self->sw, self->ledOn);
             }
             if (Sm_Ui_slow_(self)) {
                 W_History_push(&self->hist, (unsigned)self->cpuPct);
+            }
+            if ((int32_t)(now - self->dialAt) >= 0) {
+                self->dialPct = (uint16_t)((self->dialPct + 7U) % 101U);
+                self->dialAt = now + pdMS_TO_TICKS(SM_UI_DIAL_MS);
+                W_Dial_setValue(&self->dial, self->dialPct);
             }
             return _SM_HANDLED();
         }
