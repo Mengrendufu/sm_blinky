@@ -20,6 +20,10 @@ struct W_Ram {
     struct _lv_obj_t *lineA;   // "RAM 57.9 / 64.0 KB"
     struct _lv_obj_t *lineB;   // "free 6.1 KB"
     struct _lv_obj_t *lineC;   // "msp 412 / 1024 B"
+    // What lineC showed last. It lives here, not in a file static: the labels
+    // are made fresh on every page entry, so the memory of "what is already
+    // written" has to be dropped with them.
+    uint32_t shownMsp;
 };
 
 void W_Ram_init(struct W_Ram *r);
