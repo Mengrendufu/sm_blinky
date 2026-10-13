@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>sm_blinky 版面方案（下一版）</title>
+<style>
+body{background:#eef1f4;color:#1b1f23;font-family:"Segoe UI",sans-serif;margin:24px}
+h1{font-size:20px;margin:0 0 4px} h2{font-size:15px;margin:26px 0 10px;
+ border-bottom:1px solid #ddd;padding-bottom:4px}
+.panels{display:flex;gap:36px;flex-wrap:wrap;align-items:flex-start}
+.panel{position:relative;width:240px;height:320px;background:#0A0E12;
+ border:2px solid #222;border-radius:6px;overflow:hidden;flex:0 0 auto}
+.panel .cap{position:absolute;left:-2px;top:-24px;color:#1b1f23;font-size:13px}
+.sep{width:240px;text-align:center;color:#888;font-size:11px}
+.box{position:absolute;border:1px dashed #555F68;box-sizing:border-box;
+ color:#9AA3AC;font-size:11px;padding:2px 4px}
+.solid{position:absolute;background:#0A0E12;border:1px solid #1E2A32;
+ border-radius:8px;box-sizing:border-box}
+.row{position:absolute;height:18px;font-size:11px;color:#c9d1d9;
+ display:flex;align-items:center;gap:4px}
+.track{display:inline-block;width:96px;height:9px;background:#1E2A32;
+ border-radius:5px;overflow:hidden}
+.fill{display:block;height:100%;background:#C6FF3D}
+.pct{width:26px;text-align:right;color:#fff}
+.raw{color:#9AA3AC}
+.led{position:absolute;width:10px;height:10px;border-radius:50%;
+ background:#00C853;box-shadow:0 0 6px #00C853}
+.dot{position:absolute;border-radius:50%;background:#555F68}
+.tagon{position:absolute;width:16px;height:16px;border-radius:50%;background:#FFD54F;
+ color:#1b1f23;font-size:10px;text-align:center;line-height:16px;font-weight:600}
+.tag{position:absolute;color:#1b1f23;background:#fff8e1;border:1px solid #FFD54F;
+ font-size:10px;padding:1px 4px;border-radius:3px;max-width:190px}
+table{border-collapse:collapse;font-size:13px}
+th,td{border:1px solid #ccd2d8;padding:4px 8px;text-align:left;vertical-align:top}
+code{background:#e8ecf0;padding:0 3px;border-radius:3px}
+.note{background:#fff8e1;border-left:3px solid #FFD54F;padding:8px 10px;
+ font-size:13px;margin:10px 0}
+</style></head><body>
+<h1>sm_blinky 版面方案草图（按 midTran mockup）</h1>
+<div style="font-size:13px;color:#555">源图：/<code>midTran/tmp_agent/sm_blinky_layout.png</code>
+　本草图 = 我对那张图的理解 + 落到 240x320 与现有部件上的映射。</div>
+
+<h2>一、我从图里读到的</h2>
+<ul style="font-size:13px;line-height:1.7">
+<li><b>页 1 = 系统健康页</b>：上部一大块写 <code>cpu占用率 弧形</code> &rarr; <b>cpu 占用率用弧表显示</b>（弧内带百分比数字）。</li>
+<li>弧下面一个清单框，三项：<b>① FreeRTOS 栈占用率（各个线程）② SM_tracer 的 nmin ③ sm 事件池的空闲块</b>。</li>
+<li>箭头批注：<b>“都用条状的百分比+数字来显示”</b> &rarr; 清单里每一项 = <b>一条 + 百分比 + 数字</b>（不是纯文字）。</li>
+<li>右上角一个 <code>led灯</code> 框 &rarr; <b>led 保留在右上角</b>（现在那里还有 <code>cpu NN%</code> 文本 &rarr; 文本挪进弧里，角落只留灯）。</li>
+<li>页 2 在图上<b>是空的</b> &rarr; 内容待你定（我给了推荐）。</li>
+</ul>
+
+<h2>二、落到 240x320 与现有薄封装上</h2>
+<div class="panels"><div class="panel"><div class="cap">page 1 &middot; 系统健康（新）</div><div style="position:absolute;left:0;top:0;width:240px;height:24px;border-bottom:1px solid #1E2A32"></div><div style="position:absolute;left:8px;top:6px;color:#E0E4E8;font-size:14px">sys</div><div class="led" style="left:222px;top:7px"></div><div class="tagon" style="left:200px;top:4px">1</div><svg width="240" height="130" viewBox="0 0 240 130" style="position:absolute;left:0;top:26px"><path d="M 44.0 116.0 A 76 76 0 0 1 196.0 116.0" stroke="#1B2830" stroke-width="12" fill="none"/><path d="M 44.0 116.0 A 76 76 0 0 1 92.0 45.3" stroke="#00C3BC" stroke-width="12" fill="none"/></svg><div style="position:absolute;left:0;top:96px;width:240px;text-align:center;color:#fff;font-size:14px">38 %</div><div style="position:absolute;left:0;top:114px;width:240px;text-align:center;color:#9AA3AC;font-size:11px">cpu</div><div class="tagon" style="left:44px;top:44px">2</div><div class="solid" style="left:12px;top:170px;width:216px;height:126px"></div><div class="row" style="left:20px;top:180px"><span style="width:58px">ui</span><span class="track" style="width:76px"><span class="fill" style="width:36%;background:#C6FF3D"></span></span><span class="pct">36%</span><span class="raw">728 w</span></div><div class="row" style="left:20px;top:198px"><span style="width:58px">flash</span><span class="track" style="width:76px"><span class="fill" style="width:12%;background:#C6FF3D"></span></span><span class="pct">12%</span><span class="raw">212 w</span></div><div class="row" style="left:20px;top:216px"><span style="width:58px">blinky</span><span class="track" style="width:76px"><span class="fill" style="width:44%;background:#C6FF3D"></span></span><span class="pct">44%</span><span class="raw">902 w</span></div><div class="row" style="left:20px;top:234px"><span style="width:58px">nmin</span><span class="track" style="width:76px"><span class="fill" style="width:100%;background:#00C3BC"></span></span><span class="pct">100%</span><span class="raw">16/16</span></div><div class="row" style="left:20px;top:252px"><span style="width:58px">evt</span><span class="track" style="width:76px"><span class="fill" style="width:75%;background:#FFD54F"></span></span><span class="pct">75%</span><span class="raw">12/16</span></div><div class="tagon" style="left:14px;top:172px">3</div><div class="dot" style="left:112px;top:310px;width:6px;height:6px"></div><div class="dot" style="left:124px;top:311px;width:4px;height:4px"></div><div class="tagon" style="left:96px;top:296px">4</div></div><div class="panel"><div class="cap">page 2 &middot; 待定（图为空）</div><div class="box" style="left:12px;top:12px;width:216px;height:296px;border-color:#FFD54F;color:#FFD54F;padding:8px">方案 A（推荐）&mdash; 页 2 保持今天的 blinky demo：<br><br>&middot; 节拍环（七步/边沿，≈7 s 一圈）<br>&middot; 卡：edges + frame NN.N ms<br>&middot; 底栏条：帧时预算<br>&middot; 页点<br><br>好处：帧时读数留在板上；两页分工清楚（系统 / blinky）。<br><br>方案 B：页 2 继续堆诊断（帧时 min/max、池、栈按线程）&mdash; 会和页 1 的清单重复。</div></div></div>
+<div style="font-size:13px;line-height:1.8;margin-top:14px">
+<b>①</b> led 保留在右上角（跟板载同步闪）；原来的 <code>cpu NN%</code> 文本取消，数值进弧里。<br>
+<b>②</b> cpu 用<b>半圆</b> <code>lv_arc</code>：bbox 156x78 &rArr; 整行带 3 条 &asymp; 10 ms/次，2 Hz &rArr; 占用 ~2%。<br>
+<b>③</b> 清单每行 = <b>条 + 百分比 + 数字</b>（mockup 原话）；这里示例 5 行：三个线程栈 + tracer nmin + 事件池空闲。<br>
+<b>④</b> 页点保留（两页指示）。
+</div>
+
+<div class="note"><b>三、数据来源（都能拿到，且都便宜）</b>
+<table>
+<tr><th>显示</th><th>来源</th><th>成本 / 备注</th></tr>
+<tr><td>cpu 半圆弧 + 弧内 %</td><td><code>BSP_cpuSample()</code> 差分（已有 ✓）</td>
+<td>2 Hz 刷一次；弧 bbox 156x78 &rArr; 整行带 3 条 &asymp; 10 ms/次 &rArr; 占用 ~2% ✓</td></tr>
+<tr><td>各线程栈占用（每行一条）</td>
+<td><code>uxTaskGetSystemState()</code> + <code>usStackHighWaterMark</code>；
+ 本内核 <code>configUSE_TRACE_FACILITY=1</code> 已开 ✓</td>
+<td>一次调用给全部任务（名字 + 水位）；任务有 ui / flash / blinky / Tmr Svc / IDLE &rArr;
+ 建议按占用排序取前 3~4 行，其余折成一行<br>注意：水位是<b>历史峰值</b>（只升不降）✓</td></tr>
+<tr><td>tracer nmin</td><td><code>SM_Tracer_inst.nMin</code> / <code>nTot</code>(=16)</td>
+<td>一个字节读；0 = 泵落后到丢记录 &rArr; 那一条建议变红/黄</td></tr>
+<tr><td>事件池空闲块</td>
+<td>待接：SST 静态事件池（<code>ports/sst_port.h: SST_EVT_POOL_NUM 1</code>）需要一个 free 读数；
+ 另有一个候选是 UI inbox（<code>ui_evt.c: UI_INBOX_LEN 16</code> + <code>Ui_used_</code>，现成 ✓）</td>
+<td>一个计数读；接到后 1 行搞定</td></tr>
+</table>
+<div style="margin-top:6px">弧里那个数字用 <b>默认字体（14 px）</b>：放大曾被否
+（<code>lv_transform</code> 会走 layer 路径、要 ARGB8888，本构建关掉了）&rArr;
+真要大字号得做一份字体，不是一行代码的事。</div>
+</div>
+
+<h2>四、要你定的三件事</h2>
+<ol style="font-size:13px;line-height:1.7">
+<li><b>页 2 放什么</b>：我推荐“保持今天的 blinky demo”（方案 A，见上图）；或者你另有安排。</li>
+<li><b>栈要列哪几行</b>：全部任务一行行列（最多 5~6 行）还是按占用取前 N + 其余合计？</li>
+<li><b>“sm 事件池”指哪个</b>：SST 静态事件池（字面 ✓，需加一个 free 读数）还是 UI inbox（现成 ✓）？</li>
+</ol>
+<div style="font-size:12px;color:#666">（这版是草稿：只画了几何与数据源；你点头后我把它并回
+ <code>gen_pages_two.py</code> 并动 <code>sm_ui.c</code> / <code>widgets/w_*</code>。）</div>
+</body></html>
