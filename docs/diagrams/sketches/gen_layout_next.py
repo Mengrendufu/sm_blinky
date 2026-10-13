@@ -94,6 +94,8 @@ def page1():
     o.append('<div style="position:absolute;left:8px;top:6px;color:#E0E4E8;'
              'font-size:14px">sys</div>')
     o.append('<div class="led" style="left:222px;top:7px"></div>')
+    o.append('<div style="position:absolute;left:0;top:7px;width:214px;'
+             'text-align:right;color:#9AA3AC;font-size:11px">cpu 38 %</div>')
     o.append(tagon(200, 4, "1"))
     o.append(gauge(0.38, "38 %", "cpu"))
     o.append(tagon(44, 44, "2"))
@@ -113,17 +115,44 @@ def page1():
 
 
 def page2():
-    o = ['<div class="panel"><div class="cap">page 2 &middot; 待定（图为空）</div>']
-    o.append('<div class="box" style="left:12px;top:12px;width:216px;height:296px;'
-             'border-color:#FFD54F;color:#FFD54F;padding:8px">'
-             '方案 A（推荐）&mdash; 页 2 保持今天的 blinky demo：<br><br>'
-             '&middot; 节拍环（七步/边沿，≈7 s 一圈）<br>'
-             '&middot; 卡：edges + frame NN.N ms<br>'
-             '&middot; 底栏条：帧时预算<br>'
-             '&middot; 页点<br><br>'
-             '好处：帧时读数留在板上；两页分工清楚（系统 / blinky）。<br><br>'
-             '方案 B：页 2 继续堆诊断（帧时 min/max、池、栈按线程）'
-             '&mdash; 会和页 1 的清单重复。</div>')
+    o = ['<div class="panel"><div class="cap">page 2 &middot; live（原图为空，内容我提案）</div>']
+    o.append('<div style="position:absolute;left:0;top:0;width:240px;height:24px;'
+             'border-bottom:1px solid #1E2A32"></div>')
+    o.append('<div style="position:absolute;left:8px;top:6px;color:#E0E4E8;'
+             'font-size:14px">live</div>')
+    o.append('<div class="led" style="left:222px;top:7px"></div>')
+    o.append('<div style="position:absolute;left:0;top:7px;width:214px;'
+             'text-align:right;color:#9AA3AC;font-size:11px">cpu 38 %</div>')
+    o.append(tagon(200, 4, "5"))
+    # spinner: a ring with a gap
+    o.append('<svg width="96" height="96" viewBox="0 0 96 96" '
+             'style="position:absolute;left:16px;top:40px">'
+             '<circle cx="48" cy="48" r="30" stroke="#1B2830" stroke-width="8" '
+             'fill="none"/>'
+             '<path d="M 48 18 A 30 30 0 0 1 74 33" stroke="#00C3BC" '
+             'stroke-width="8" fill="none" stroke-linecap="round"/></svg>')
+    o.append('<div style="position:absolute;left:16px;top:138px;width:96px;'
+             'text-align:center;color:#9AA3AC;font-size:10px">spinner</div>')
+    o.append(tagon(104, 42, "6"))
+    # switch: track + knob, driven by ledOn
+    o.append('<div style="position:absolute;left:132px;top:56px;width:56px;'
+             'height:28px;border-radius:14px;background:#00C3BC"></div>')
+    o.append('<div style="position:absolute;left:162px;top:59px;width:22px;'
+             'height:22px;border-radius:50%;background:#fff"></div>')
+    o.append('<div style="position:absolute;left:132px;top:90px;width:88px;'
+             'color:#9AA3AC;font-size:10px">switch &larr; ledOn</div>')
+    o.append(tagon(190, 58, "7"))
+    # cpu history: 12 bars, one per 500 ms window
+    heights = [10, 14, 12, 18, 16, 22, 20, 26, 24, 30, 28, 32]
+    for i, h in enumerate(heights):
+        o.append('<div style="position:absolute;left:%dpx;top:%dpx;width:12px;'
+                 'height:%dpx;background:#C6FF3D;border-radius:2px"></div>'
+                 % (18 + i * 15, 226 - h, h))
+    o.append('<div style="position:absolute;left:18px;top:230px;width:186px;'
+             'color:#9AA3AC;font-size:10px">cpu 历史：每 500 ms 插一根（12 根 = 6 s）</div>')
+    o.append(tagon(206, 200, "8"))
+    o.append('<div class="dot" style="left:112px;top:311px;width:4px;height:4px"></div>')
+    o.append('<div class="dot" style="left:124px;top:310px;width:6px;height:6px"></div>')
     o.append('</div>')
     return "".join(o)
 
@@ -141,17 +170,23 @@ HTML = """<!DOCTYPE html>
 <li><b>页 1 = 系统健康页</b>：上部一大块写 <code>cpu占用率 弧形</code> &rarr; <b>cpu 占用率用弧表显示</b>（弧内带百分比数字）。</li>
 <li>弧下面一个清单框，三项：<b>① FreeRTOS 栈占用率（各个线程）② SM_tracer 的 nmin ③ sm 事件池的空闲块</b>。</li>
 <li>箭头批注：<b>“都用条状的百分比+数字来显示”</b> &rarr; 清单里每一项 = <b>一条 + 百分比 + 数字</b>（不是纯文字）。</li>
-<li>右上角一个 <code>led灯</code> 框 &rarr; <b>led 保留在右上角</b>（现在那里还有 <code>cpu NN%</code> 文本 &rarr; 文本挪进弧里，角落只留灯）。</li>
+<li>右上角一个 <code>led灯</code> 框 &rarr; <b>led 在右上角</b>；<b>角落的 <code>cpu NN %</code> 文本保留</b> —— 你后来明确了「页 2 的右上角要有 cpu 占用率」，所以两页角落都留着它（页 1 的弧里另有一份）。</li>
 <li>页 2 在图上<b>是空的</b> &rarr; 内容待你定（我给了推荐）。</li>
 </ul>
 
 <h2>二、落到 240x320 与现有薄封装上</h2>
 <div class="panels">@P1@@P2@</div>
 <div style="font-size:13px;line-height:1.8;margin-top:14px">
-<b>①</b> led 保留在右上角（跟板载同步闪）；原来的 <code>cpu NN%</code> 文本取消，数值进弧里。<br>
+<b>①</b> 右上角：<code>cpu NN %</code> + led —— <b>两页都在</b>（页 1 的弧里也有一份，角落那个不取消 ✓）。<br>
 <b>②</b> cpu 用<b>半圆</b> <code>lv_arc</code>：bbox 156x78 &rArr; 整行带 3 条 &asymp; 10 ms/次，2 Hz &rArr; 占用 ~2%。<br>
 <b>③</b> 清单每行 = <b>条 + 百分比 + 数字</b>（mockup 原话）；这里示例 5 行：三个线程栈 + tracer nmin + 事件池空闲。<br>
-<b>④</b> 页点保留（两页指示）。
+<b>④</b> 页点保留（两页指示）。<br>
+<b>⑤⑥⑦⑧</b> 页 2「随便动起来」：<code>spinner</code>（连续转，36x36 区域，&asymp;0.9 ms/帧 &rArr; 30 fps &asymp; 2%）+
+ <code>switch</code>（跟 <code>ledOn</code> 同步翻转，每次 &asymp;2 ms、2 Hz &rArr; 0.4%）+
+ <b>12 根 cpu 历史条</b>（每 500 ms 插一根，用现成的 <code>lv_bar</code>，每窗 &asymp;1.5 ms &rArr; 0.3%）+
+ led 闪烁。合计 &asymp;3%，不碰大动画。<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<b>代价</b>：需要开 <code>LV_USE_SPINNER</code> 与 <code>LV_USE_SWITCH</code>（<code>bsp/lvgl/lv_conf.h</code> 现在是 0 ⇒ +约 3 KB flash）；
+ <code>LV_USE_CHART</code> 建议<b>不开</b>（+6 KB 且走画线路径，历史条已经够用）。
 </div>
 
 <div class="note"><b>三、数据来源（都能拿到，且都便宜）</b>
@@ -178,8 +213,11 @@ HTML = """<!DOCTYPE html>
 
 <h2>四、要你定的三件事</h2>
 <ol style="font-size:13px;line-height:1.7">
-<li><b>页 2 放什么</b>：我推荐“保持今天的 blinky demo”（方案 A，见上图）；或者你另有安排。</li>
-<li><b>栈要列哪几行</b>：全部任务一行行列（最多 5~6 行）还是按占用取前 N + 其余合计？</li>
+<li><b>页 2 已定</b>：按你说的「随便放点组件 + 动效」= 上图 live 页（spinner + switch + 12 根 cpu 历史条 + led ✓，合计 &asymp;3% 占用）。</li>
+<li><b>今天 blinky 的那套东西去哪</b>：节拍环（七步/边沿）、<code>edges/frame</code> 卡、底栏帧时条 ——
+ 新方案里<b>没有它们的位置</b>。选一个：<b>(a)</b> 搬到页 1 清单下面（要压掉 2 根条）；
+ <b>(b)</b> 搬到页 2 换掉历史条；<b>(c)</b> 就删掉（板子上从此只看资源，不看 blinky 自己的节拍）。</li>
+<li><b>栈要列哪几行</b>：全部任务一行一行（最多 5~6 行）还是按占用取前 N + 其余合计？</li>
 <li><b>“sm 事件池”指哪个</b>：SST 静态事件池（字面 ✓，需加一个 free 读数）还是 UI inbox（现成 ✓）？</li>
 </ol>
 <div style="font-size:12px;color:#666">（这版是草稿：只画了几何与数据源；你点头后我把它并回
