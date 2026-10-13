@@ -129,7 +129,7 @@ flash 不只是 UI 的资产存储：它还要放**升级镜像**、**配置/KV*
 | 1 | 时序规格化 + 启动顺序归位 + tracer 归 BSP + idle 去环 | 开机位置出 DISPON/RDID、LED 心跳照旧、无断言 | 完成 `2cb48c3` |
 | 2 | `application/ui/` 骨架：静态 TCB + 栈 2 KB（增量 2 当时；LVGL 接入后抬到 8 KB）+ 收件箱 + 唤醒原语 + 单状态 HSM；`[MEM]` 按身份分（21 `[BLINKY]` / 24 `[UI]`） | 串口出 `[MEM][STACK][UI]` 且能读数；Blinky 不受影响 | 完成（上板验证） |
 | 3 | LVGL 加载 + 显示适配：`lv_init` + `lv_display_create(240,320)` + PARTIAL 单缓冲 15 KB + flush + 心跳切 B，外加一个跟 LED 走的 demo 控件（标题 + 方块 + edges 计数） | 屏上出现 LVGL 画面且随 `Ui_postLedOn/Off` 变化；`[TIME]` 给出三个实测数 | 完成（上板验证） |
-| 4 | 状态页 + 事件：把 demo 控件换成真正的状态页字段，补事件语义 | 状态页随事件变化；整屏重绘耗时符合预算 | 待做（demo 控件是它的一次预演） |
+| 4 | 状态页 + 事件：把 demo 控件换成真正的状态页字段，补事件语义 | 状态页随事件变化；整屏重绘耗时符合预算 | 完成（2026-10-13：两页资源视图 sys / live，控件所有权在 HSM，每帧 `UI_FRAME_SIG`；`addcdfa`…`6b26fb3`） | 待做（demo 控件是它的一次预演） |
 | 5 | 刷屏走 DMA（`DMA1_Ch6`、目的地址固定、字宽/半字自适应）+ 真阻塞等待 + 绘制单价实测 + `-O2 -flto` | 画面目视正确、flush 整屏 113 / 局部 119 ns/px、帧时 45.8 / 12.7 ms、0 断言 | 完成 `0ba4450`（快照 tag `dma-flush-v1`） |
 
 

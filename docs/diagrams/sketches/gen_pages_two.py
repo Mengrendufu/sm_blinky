@@ -1,178 +1,241 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""两页布局草图 v1：仪表页(bg-a) + 状态页(bg-b)，只用 LVGL 现成部件 + 背景图。
+"""The two pages as built (2026-10-13): page 1 = sys, page 2 = live.
 
-坐标全部按 gen_bg.py 里那套锚点（顶栏 y0-24 / 大环 (40,28)-(200,188) /
-卡片 A(12,204)-(116,296) / 卡片 B(124,204)-(228,296) / 底栏 (16,304) 与 (176,304)），
-所以两页共用同一套背景图锚点，换背景不换布局。
+Writes ./pages-two.html. Regenerate with: python3 gen_layout_next.py
+The panel is drawn at its own size (240x320), the same convention the other
+sketches in this directory use.
 """
-S = 2                      # 放大倍数（屏幕 240x320 -> 480x640）
-W, H = 240, 320
+import math
 
 CSS = """
- body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;background:#f5f5f5;color:#222;margin:0;padding:24px 32px 64px}
- h1{font-size:20px;margin:0 0 4px} h2{font-size:15px;margin:26px 0 10px;border-bottom:1px solid #ddd;padding-bottom:4px}
- .sub{color:#666;font-size:13px;margin-bottom:18px;line-height:1.8}
- .row{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-start}
- .frame{text-align:center}
- .screen{position:relative;width:480px;height:640px;border:1px solid #999;box-shadow:0 2px 10px rgba(0,0,0,.2);overflow:hidden;background:#000}
- .screen img.bgimg{position:absolute;left:0;top:0;width:480px;height:640px;image-rendering:pixelated}
- .w{position:absolute;box-sizing:border-box;font-family:Consolas,monospace;color:#E0E4E8}
- .tag{position:absolute;font-size:10.5px;font-family:Consolas,monospace;color:#fff;background:rgba(0,0,0,.6);padding:0 3px;border-radius:2px;white-space:nowrap}
- .topbar{display:flex;align-items:center;justify-content:space-between;padding:0 8px;font-size:13px;color:#E0E4E8}
- .ring{position:absolute;border-radius:50%;background:conic-gradient(from 210deg,#00C3BC 0deg 240deg,rgba(255,255,255,.10) 240deg 360deg);
-   mask:radial-gradient(farthest-side,transparent 0 58%,#000 59% 100%);-webkit-mask:radial-gradient(farthest-side,transparent 0 58%,#000 59% 100%)}
- .bignum{position:absolute;text-align:center;font-family:"Segoe UI",sans-serif;font-weight:600;color:#fff}
- .unit{position:absolute;text-align:center;font-size:12px;color:#9AA3AC}
- .card{position:absolute;border-radius:12px;background:rgba(10,14,18,.72);border:1px solid rgba(255,255,255,.10);padding:6px 8px}
- .card .k{font-size:10.5px;color:#8E97A0}
- .card .v{font-size:20px;color:#fff;font-weight:600;line-height:1.15}
- .card .v small{font-size:11px;color:#9AA3AC;font-weight:400}
- .bar{position:absolute;border-radius:6px;background:rgba(255,255,255,.12);overflow:hidden}
- .bar i{position:absolute;left:0;top:0;bottom:0;background:#C6FF3D}
- .led{position:absolute;border-radius:50%;background:#00C853}
- .dot{position:absolute;border-radius:50%;background:rgba(255,255,255,.35)}
- .dot.on{background:#00C3BC}
- table{border-collapse:collapse;font-size:12.5px;margin-top:6px;width:100%}
- th,td{border:1px solid #e3e3e3;padding:3px 8px;text-align:left;vertical-align:top}
- th{background:#f2f2f2;font-weight:600} td.num{text-align:right;font-family:Consolas,monospace;white-space:nowrap}
- code{background:#eee;padding:0 4px;border-radius:3px;font-size:12px}
- .note{font-size:12.5px;color:#555;line-height:1.85;margin-top:10px}
- .ok{background:#e6f4ea;color:#1e7a3c;border:1px solid #b7dfc4;padding:1px 6px;border-radius:3px;font-size:11px}
- .no{background:#fdecea;color:#a12a1c;border:1px solid #f2c0b8;padding:1px 6px;border-radius:3px;font-size:11px}
- .warn{background:#fff8e1;color:#8a6100;border:1px solid #f0dcab;padding:1px 6px;border-radius:3px;font-size:11px}
- .pick{background:#eef4fd;color:#1d4f91;border:1px solid #c6dbf7;padding:1px 6px;border-radius:3px;font-size:11px}
+body{background:#eef1f4;color:#1b1f23;font-family:"Segoe UI",sans-serif;margin:24px}
+h1{font-size:20px;margin:0 0 4px} h2{font-size:15px;margin:26px 0 10px;
+ border-bottom:1px solid #ddd;padding-bottom:4px}
+.panels{display:flex;gap:36px;flex-wrap:wrap;align-items:flex-start}
+.panel{position:relative;width:240px;height:320px;background:#0A0E12;
+ border:2px solid #222;border-radius:6px;overflow:hidden;flex:0 0 auto}
+.panel .cap{position:absolute;left:-2px;top:-24px;color:#1b1f23;font-size:13px}
+.sep{width:240px;text-align:center;color:#888;font-size:11px}
+.box{position:absolute;border:1px dashed #555F68;box-sizing:border-box;
+ color:#9AA3AC;font-size:11px;padding:2px 4px}
+.solid{position:absolute;background:#0A0E12;border:1px solid #1E2A32;
+ border-radius:8px;box-sizing:border-box}
+.row{position:absolute;height:18px;font-size:11px;color:#c9d1d9;
+ display:flex;align-items:center;gap:4px}
+.track{display:inline-block;width:96px;height:9px;background:#1E2A32;
+ border-radius:5px;overflow:hidden}
+.fill{display:block;height:100%;background:#C6FF3D}
+.pct{width:26px;text-align:right;color:#fff}
+.raw{color:#9AA3AC}
+.led{position:absolute;width:10px;height:10px;border-radius:50%;
+ background:#00C853;box-shadow:0 0 6px #00C853}
+.dot{position:absolute;border-radius:50%;background:#555F68}
+.tagon{position:absolute;width:16px;height:16px;border-radius:50%;background:#FFD54F;
+ color:#1b1f23;font-size:10px;text-align:center;line-height:16px;font-weight:600}
+.tag{position:absolute;color:#1b1f23;background:#fff8e1;border:1px solid #FFD54F;
+ font-size:10px;padding:1px 4px;border-radius:3px;max-width:190px}
+table{border-collapse:collapse;font-size:13px}
+th,td{border:1px solid #ccd2d8;padding:4px 8px;text-align:left;vertical-align:top}
+code{background:#e8ecf0;padding:0 3px;border-radius:3px}
+.note{background:#fff8e1;border-left:3px solid #FFD54F;padding:8px 10px;
+ font-size:13px;margin:10px 0}
 """
 
-def px(v): return v * S
 
-def div(x, y, w, h, cls, inner=""):
-    return (f'<div class="w {cls}" style="left:{px(x)}px;top:{px(y)}px;'
-            f'width:{px(w)}px;height:{px(h)}px">{inner}</div>')
+def arc_paths(cx, cy, r, frac):
+    """A 180 degree gauge: the track and the value arc, plus the value point."""
+    x0, y0 = cx - r, cy
+    th = math.radians(180.0 - frac * 180.0)
+    x1, y1 = cx + r * math.cos(th), cy - r * math.sin(th)
+    big = 1 if frac > 0.5 else 0
+    track = 'M %.1f %.1f A %d %d 0 0 1 %.1f %.1f' % (x0, y0, r, r, cx + r, cy)
+    val = 'M %.1f %.1f A %d %d 0 %d 1 %.1f %.1f' % (x0, y0, r, r, big, x1, y1)
+    return track, val
 
-def tag(x, y, text):
-    return f'<div class="tag" style="left:{px(x)+3}px;top:{px(y)+3}px">{text}</div>'
 
-def dots(active):
-    out = ""
-    for i in range(2):
-        cls = "dot on" if i == active else "dot"
-        size = 5 if i == active else 4
-        out += div(112 + i * 12, 309, size, size, cls)
-    return out
+def gauge(frac, pct_text, caption):
+    track, val = arc_paths(120, 116, 76, frac)
+    return ('<svg width="240" height="130" viewBox="0 0 240 130" '
+            'style="position:absolute;left:0;top:26px">'
+            '<path d="%s" stroke="#1B2830" stroke-width="12" fill="none"/>'
+            '<path d="%s" stroke="#00C3BC" stroke-width="12" fill="none"/>'
+            '</svg>'
+            '<div style="position:absolute;left:0;top:96px;width:240px;'
+            'text-align:center;color:#fff;font-size:14px">%s</div>'
+            '<div style="position:absolute;left:0;top:114px;width:240px;'
+            'text-align:center;color:#9AA3AC;font-size:11px">%s</div>'
+            % (track, val, pct_text, caption))
+
+
+def row(y, name, pct, raw, width=96, fill_hex="#C6FF3D"):
+    return ('<div class="row" style="left:20px;top:%dpx">'
+            '<span style="width:58px">%s</span>'
+            '<span class="track" style="width:76px">'
+            '<span class="fill" style="width:%d%%;'
+            'background:%s"></span></span>'
+            '<span class="pct">%d%%</span>'
+            '<span class="raw">%s</span></div>'
+            % (y, name, pct, fill_hex, pct, raw))
+
+
+def tagon(x, y, n):
+    return '<div class="tagon" style="left:%dpx;top:%dpx">%s</div>' % (x, y, n)
+
+
+def tagbox(x, y, text):
+    return '<div class="tag" style="left:%dpx;top:%dpx">%s</div>' % (x, y, text)
+
 
 def page1():
-    o = []
-    o.append(div(0, 0, 240, 24, "topbar", "<span>sm_blinky</span><span>cpu 26 %</span>"))
-    o.append(div(210, 7, 10, 10, "led"))
-    o.append(tag(0, 0, "顶栏 240x24 · title + cpu 读数 + lv_led(10x10) 闪烁（跟板载 LED 同步）"))
-    o.append(div(40, 28, 160, 160, "ring"))
-    o.append(tag(40, 28, "lv_arc 160x160 环宽12 扫角 210°→90°（240°）"))
-    o.append(div(60, 96, 120, 18, "bignum", '<div style="font-size:14px;text-align:center">72</div>'))
-    o.append(div(60, 140, 120, 16, "unit", "beat"))
-    o.append(tag(60, 96, "环内读数：默认字体 14 px（放大被否：变换走 layer 路径 ⇒ 要 ARGB8888，本构建关了）"))
-    o.append(tag(12, 204, "原卡 A 位置 · 已空（beat 读数删除，节拍看右上角的灯）"))
-    o.append(div(124, 204, 104, 92, "card", '<div class="k">edges</div><div class="v">1234</div>'
-                 '<div class="k" style="margin-top:6px">frame</div><div class="v">12.5<small> ms</small></div>'))
-    o.append(tag(124, 204, "卡 B 104x92 · 计数/帧时"))
-    o.append(div(16, 302, 96, 14, "bar", '<i style="width:38%"></i>'))
-    o.append(tag(16, 302, "底栏进度条 = 帧时预算（frameUs / 33 ms）· 无文字标注"))
-    o.append(dots(0))
+    o = ['<div class="panel"><div class="cap">page 1 &middot; 系统健康（新）</div>']
+    o.append('<div style="position:absolute;left:0;top:0;width:240px;height:24px;'
+             'border-bottom:1px solid #1E2A32"></div>')
+    o.append('<div style="position:absolute;left:8px;top:6px;color:#E0E4E8;'
+             'font-size:14px">sys</div>')
+    o.append('<div class="led" style="left:222px;top:7px"></div>')
+    o.append('<div style="position:absolute;left:0;top:7px;width:214px;'
+             'text-align:right;color:#9AA3AC;font-size:11px">cpu 38 %</div>')
+    o.append(tagon(200, 4, "1"))
+    o.append(gauge(0.38, "38 %", "cpu"))
+    o.append(tagon(44, 44, "2"))
+    o.append('<div class="solid" style="left:12px;top:140px;width:216px;height:164px">'
+             '</div>')
+    o.append(row(150, "ui", 36, "1320 w"))
+    o.append(row(169, "flash", 50, "128 w"))
+    o.append(row(188, "ao", 44, "143 w"))
+    o.append(row(207, "Tmr Svc", 25, "192 w"))
+    o.append(row(226, "IDLE", 12, "112 w"))
+    o.append(row(245, "nmin", 100, "16/16", fill_hex="#00C3BC"))
+    o.append(row(264, "sst evt", 75, "12/16", fill_hex="#FFD54F"))
+    o.append(row(283, "ui inbox", 88, "14/16", fill_hex="#C6FF3D"))
+    o.append(tagon(14, 142, "3"))
+    o.append('<div class="dot" style="left:112px;top:310px;width:6px;height:6px"></div>')
+    o.append('<div class="dot" style="left:124px;top:311px;width:4px;height:4px"></div>')
+    o.append(tagon(96, 296, "4"))
+    o.append('</div>')
     return "".join(o)
+
 
 def page2():
-    o = []
-    o.append(div(0, 0, 240, 24, "topbar", "<span>STATS</span><span>cpu 26 %</span>"))
-    o.append(div(210, 7, 10, 10, "led"))
-    o.append(tag(0, 0, "顶栏同页 1（cpu 读数两页共用 ✓）"))
-    o.append(div(40, 28, 160, 160, "ring"))
-    o.append(tag(40, 28, "同位置：环形/趋势图 160x160（值变时一次性重绘）"))
-    o.append(div(60, 96, 120, 18, "bignum", '<div style="font-size:14px;text-align:center">36</div>'))
-    o.append(div(60, 140, 120, 16, "unit", "%"))
-    o.append(div(12, 204, 104, 92, "card", '<div class="k">UI stack free</div><div class="v">1320<small> w</small></div>'
-                 '<div class="k" style="margin-top:6px">tracer nmin</div><div class="v">16</div>'))
-    o.append(tag(12, 204, "卡 A · 两个水位（栈余量 + tracer 环最小剩余条数）"))
-    o.append(div(124, 204, 104, 92, "card", '<div class="k">frame min</div><div class="v">11.9<small> ms</small></div>'
-                 '<div class="k" style="margin-top:6px">frame max</div><div class="v">46.3<small> ms</small></div>'))
-    o.append(tag(124, 204, "卡 B · 帧时统计"))
-    o.append(div(16, 302, 96, 14, "bar", '<i style="width:38%"></i>'))
-    o.append(tag(16, 302, "底栏进度条 = 池占用（lv_mem_monitor）· 池的唯一显示"))
-    o.append(dots(1))
+    o = ['<div class="panel"><div class="cap">page 2 &middot; live（原图为空，内容我提案）</div>']
+    o.append('<div style="position:absolute;left:0;top:0;width:240px;height:24px;'
+             'border-bottom:1px solid #1E2A32"></div>')
+    o.append('<div style="position:absolute;left:8px;top:6px;color:#E0E4E8;'
+             'font-size:14px">live</div>')
+    o.append('<div class="led" style="left:222px;top:7px"></div>')
+    o.append('<div style="position:absolute;left:0;top:7px;width:214px;'
+             'text-align:right;color:#9AA3AC;font-size:11px">cpu 38 %</div>')
+    o.append(tagon(200, 4, "5"))
+    # spinner: a ring with a gap
+    o.append('<svg width="96" height="96" viewBox="0 0 96 96" '
+             'style="position:absolute;left:16px;top:40px">'
+             '<circle cx="48" cy="48" r="30" stroke="#1B2830" stroke-width="8" '
+             'fill="none"/>'
+             '<path d="M 48 18 A 30 30 0 0 1 74 33" stroke="#00C3BC" '
+             'stroke-width="8" fill="none" stroke-linecap="round"/></svg>')
+    o.append('<div style="position:absolute;left:16px;top:138px;width:96px;'
+             'text-align:center;color:#9AA3AC;font-size:10px">spinner</div>')
+    o.append(tagon(104, 42, "6"))
+    # switch: track + knob, driven by ledOn
+    o.append('<div style="position:absolute;left:132px;top:56px;width:56px;'
+             'height:28px;border-radius:14px;background:#00C3BC"></div>')
+    o.append('<div style="position:absolute;left:162px;top:59px;width:22px;'
+             'height:22px;border-radius:50%;background:#fff"></div>')
+    o.append('<div style="position:absolute;left:132px;top:90px;width:88px;'
+             'color:#9AA3AC;font-size:10px">switch &larr; ledOn</div>')
+    o.append(tagon(190, 58, "7"))
+    # cpu history: 12 bars, one per 500 ms window
+    heights = [10, 14, 12, 18, 16, 22, 20, 26, 24, 30, 28, 32]
+    for i, h in enumerate(heights):
+        o.append('<div style="position:absolute;left:%dpx;top:%dpx;width:12px;'
+                 'height:%dpx;background:#C6FF3D;border-radius:2px"></div>'
+                 % (18 + i * 15, 226 - h, h))
+    o.append('<div style="position:absolute;left:18px;top:230px;width:186px;'
+             'color:#9AA3AC;font-size:10px">cpu 历史：每 500 ms 插一根（12 根 = 6 s）</div>')
+    o.append(tagon(206, 200, "8"))
+    o.append('<div class="dot" style="left:112px;top:311px;width:4px;height:4px"></div>')
+    o.append('<div class="dot" style="left:124px;top:310px;width:6px;height:6px"></div>')
+    o.append('</div>')
     return "".join(o)
 
-def screen(bg, widgets, title):
-    return (f'<div class="frame"><div class="screen">'
-            f'<img class="bgimg" src="bg/{bg}.png">'
-            f'{widgets}</div><div class="cap" style="font-size:12px;color:#555;margin-top:6px">{title}</div></div>')
 
-ROWS = [
-    ("1", "顶栏文字", "(0,0)-(240,24)", "常量", "不动", "-", "-"),
-    ("1+2", "lv_led（两页共用）", "(210,7) 10x10", "AO beat（ledOn）", "lv_led_on/off，跟板载 LED 同步闪烁（不再呼吸）", "100", "0.1 / 每 500 ms 一次"),
-    ("1", "lv_arc", "(40,28) 160x160", "edges 映射 0..100", "值变时一次性重绘（160x160 ⇒ 34.8 ms，太贵不补间）", "25,600", "34.8 / 105%"),
-    ("1", "环内读数 + 单位", "(60,96)/(60,140)", "(edges*7)%101 / 常量 beat", "文本替换（默认字体 14 px，不放大）", "~1,200", "1.4 / 4%"),
-        ("1", "（原卡 A 空位）", "(12,204) 104x92", "—", "已删除：节拍由右上角的灯体现", "—", "—"),
-    ("1", "卡 B 计数/帧时", "(124,204) 104x92", "edges + 自测帧时", "文本替换", "~2,000", "2.4 / 7%"),
-    ("1", "进度条 = 帧时预算", "(16,302) 96x14", "frameUs / 33000 µs", "lv_bar_set_value(..., LV_ANIM_ON)", "1,344", "1.6 / 5%"),
-    ("1", "页指示点 x2", "(112,309)", "当前页", "style transition（缩放/颜色）", "~200", "0.2 / 1%"),
-    ("2", "lv_arc = 栈占用", "(40,28) 160x160", "栈占用 %（栈高水位）", "值变时整行带重绘（Ui_ringRefresh_）", "25,600", "34.8 / 105%"),
-    ("2", "环内读数 + 单位", "(60,96)/(60,140)", "栈占用 %（与弧同量）/ 常量 %", "文本替换（默认字体 14 px）", "~1,200", "1.4 / 4%"),
-    ("2", "卡 A 两个水位", "(12,204) 104x92", "uxTaskGetStackHighWaterMark / SM_Tracer_inst.nMin", "文本替换", "~2,000", "2.4 / 7%"),
-    ("2", "卡 B 帧时统计", "(124,204) 104x92", "UI 线程自测 min/max", "文本替换", "~2,000", "2.4 / 7%"),
-    ("2", "进度条 = 池占用", "(16,302) 96x14", "lv_mem_monitor", "LV_ANIM_ON", "1,344", "1.6 / 5%"),
-]
-rows = "".join(
-    f'<tr><td class="num">{p}</td><td>{w}</td><td>{box}</td><td>{src}</td><td>{anim}</td>'
-    f'<td class="num">{dirty}</td><td class="num">{cost}</td></tr>' for p, w, box, src, anim, dirty, cost in ROWS)
-
-html = f"""<!DOCTYPE html>
+HTML = """<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
-<title>sm_blinky · 两页布局 v1（仪表 / 状态，来回切）</title>
-<style>{CSS}</style></head><body>
-<h1>sm_blinky · 两页布局 v1：仪表页 + 状态页（来回切）</h1>
-<div class="sub">
-<b>约束（按你的要求）</b>：只用 LVGL 现成部件 + 背景图；<b>不做资产动画</b>（无烘焙帧、无 Lottie）。
-两页共用 <code>gen_bg.py</code> 那套锚点（顶栏 y0–24 / 大环 (40,28)–(200,188) / 卡片 A、B y204–296 / 底栏 y304–320），
-所以两页可以直接换成不同背景图（<b>页 1 = 槽 0 bg-a</b>、<b>页 2 = 槽 1 bg-b</b> —— 槽 1 一直是空的，正好用上 ✓）。<br>
-<b>切换</b>：Splash（槽 2 logo，1.5 s）→ 页 1 → 页 2 → 页 1 …；板上没有按键也没接触摸，触发器只能用<b>定时或事件计数</b>（建议每 5 s，或每 8 个 LED 边沿）。<br>
-<span class="no">整屏动画不可能</span>（76,800 px ≈ 104 ms = 317% 周期，charter §6 已定）⇒ 切页 = <b>一次性整帧重画</b>（实测 34.8 / 46.3 ms），不做滑动/淡入。
+<title>sm_blinky 两页版面（当前）</title>
+<style>@CSS@</style></head><body>
+<h1>sm_blinky 两页版面（当前实现）</h1>
+<div style="font-size:13px;color:#555">页 2 的图形是示意（画的是旧 spinner 版）；代码里 dial 96x96 在 (72,40)、switch 在 (92,146)、历史条在 (30,200)、标题 "cpu history: 6 s" 在 y246。<br>源图：/<code>midTran/tmp_agent/sm_blinky_layout.png</code>
+　本草图 = 我对那张图的理解 + 落到 240x320 与现有部件上的映射。</div>
+
+<h2>一、我从图里读到的</h2>
+<ul style="font-size:13px;line-height:1.7">
+<li><b>页 1 = 系统健康页</b>：上部一大块写 <code>cpu占用率 弧形</code> &rarr; <b>cpu 占用率用弧表显示</b>（弧内带百分比数字）。</li>
+<li>弧下面一个清单框，三项：<b>① FreeRTOS 栈占用率（各个线程）② SM_tracer 的 nmin ③ sm 事件池的空闲块</b>。</li>
+<li>箭头批注：<b>“都用条状的百分比+数字来显示”</b> &rarr; 清单里每一项 = <b>一条 + 百分比 + 数字</b>（不是纯文字）。</li>
+<li>右上角一个 <code>led灯</code> 框 &rarr; <b>led 在右上角</b>；<b>角落的 <code>cpu NN %</code> 文本保留</b> —— 你后来明确了「页 2 的右上角要有 cpu 占用率」，所以两页角落都留着它（页 1 的弧里另有一份）。</li>
+<li>页 2 在图上<b>是空的</b> &rarr; 内容待你定（我给了推荐）。</li>
+</ul>
+
+<h2>二、落到 240x320 与现有薄封装上</h2>
+<div class="panels">@P1@@P2@</div>
+<div style="font-size:13px;line-height:1.8;margin-top:14px">
+<b>①</b> 右上角：<code>cpu NN %</code> + led —— <b>两页都在</b>（页 1 的弧里也有一份，角落那个不取消 ✓）。<br>
+<b>②</b> cpu 用<b>半圆</b> <code>lv_arc</code>：bbox 156x78 &rArr; 整行带 3 条 &asymp; 10 ms/次，2 Hz &rArr; 占用 ~2%。<br>
+<b>③</b> 清单每行 = <b>条 + 百分比 + 数字</b>（mockup 原话）。<b>线程全放</b>：运行期就 5 个任务
+ —— <code>ui</code>(2048 w) / <code>flash</code>(256 w) / <code>ao</code>(SST，所有 AO 共用一个入口，任务名就是 "ao"，见 <code>ports/sst_port.c:61</code>) / <code>Tmr Svc</code>(256 w) / <code>IDLE</code>(128 w)
+ —— 再加 <code>tracer nmin</code> + <code>SST 事件池</code> + <code>UI inbox</code> = <b>8 行</b>✓
+ （面板 164 px &divide; 8 行 = 20 px/行，还余 4 px；最多能到 8~9 行 ⇒ 以后加任务也放得下 ✓）。<br>
+<b>④</b> 页点保留（两页指示）。<br>
+<b>⑤⑥⑦⑧</b> 页 2「随便动起来」：<code>spinner</code>（连续转，36x36 区域，&asymp;0.9 ms/帧 &rArr; 30 fps &asymp; 2%）+
+ <code>switch</code>（跟 <code>ledOn</code> 同步翻转，每次 &asymp;2 ms、2 Hz &rArr; 0.4%）+
+ <b>12 根 cpu 历史条</b>（每 500 ms 插一根，用现成的 <code>lv_bar</code>，每窗 &asymp;1.5 ms &rArr; 0.3%）+
+ led 闪烁。合计 &asymp;3%，不碰大动画。<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<b>代价</b>：需要开 <code>LV_USE_SPINNER</code> 与 <code>LV_USE_SWITCH</code>（<code>bsp/lvgl/lv_conf.h</code> 现在是 0 ⇒ +约 3 KB flash）；
+ <code>LV_USE_CHART</code> 建议<b>不开</b>（+6 KB 且走画线路径，历史条已经够用）。
 </div>
 
-<h2>① 页 1「仪表」（背景 = 槽 0 bg-a 夜色仪表）</h2>
-<div class="row">{screen("bg-a", page1(), "页 1 · 仪表：大环 + 两个状态卡 + 进度条 + 页指示点")}</div>
-
-<h2>② 页 2「状态」（背景 = 槽 1 bg-b 网格科技）</h2>
-<div class="row">{screen("bg-b", page2(), "页 2 · 状态：同位置换内容（环形/趋势 + 两个统计卡）")}</div>
-
-<h2>③ 部件表（脏区与耗时按 charter §6 的估算系数：渲染 1.2 µs/px + 刷屏 0.16 µs/px）</h2>
+<div class="note"><b>三、数据来源（都能拿到，且都便宜）</b>
 <table>
-<tr><th>页</th><th>部件</th><th>像素框</th><th>值来源</th><th>动画（LVGL 能力内）</th><th>脏区 px</th><th>估算 ms / 33 ms</th></tr>
-{rows}
+<tr><th>显示</th><th>来源</th><th>成本 / 备注</th></tr>
+<tr><td>cpu 半圆弧 + 弧内 %</td><td><code>BSP_cpuSample()</code> 差分（已有 ✓）</td>
+<td>2 Hz 刷一次；弧 bbox 156x78 &rArr; 整行带 3 条 &asymp; 10 ms/次 &rArr; 占用 ~2% ✓</td></tr>
+<tr><td>各线程栈占用（每行一条）</td>
+<td><code>uxTaskGetSystemState()</code> + <code>usStackHighWaterMark</code>；
+ 本内核 <code>configUSE_TRACE_FACILITY=1</code> 已开 ✓</td>
+<td>一次调用给全部任务（名字 + 水位）；任务有 ui / flash / blinky / Tmr Svc / IDLE &rArr;
+ 建议按占用排序取前 3~4 行，其余折成一行<br>注意：水位是<b>历史峰值</b>（只升不降）✓</td></tr>
+<tr><td>tracer nmin</td><td><code>SM_Tracer_inst.nMin</code> / <code>nTot</code>(=16)</td>
+<td>一个字节读；0 = 泵落后到丢记录 &rArr; 那一条建议变红/黄</td></tr>
+<tr><td>事件池空闲块</td>
+<td>待接：SST 静态事件池（<code>ports/sst_port.h: SST_EVT_POOL_NUM 1</code>）需要一个 free 读数；
+ 另有一个候选是 UI inbox（<code>ui_evt.c: UI_INBOX_LEN 16</code> + <code>Ui_used_</code>，现成 ✓）</td>
+<td>一个计数读；接到后 1 行搞定</td></tr>
 </table>
-<div class="note">
-<span class="warn">动画要算总和</span>：页 1 若"环 + 卡 A + 进度条"同时动 = 36.4 ms/帧 ⇒ <b>111% ✗ 太紧</b>；同时 1~2 个才安全（环那一次性 34.8 ms 必须独占一帧）。
-⇒ 建议编排：<b>环只在数值变化时重绘（不补间）</b>；<b>进度条 + lv_led 常驻小动画</b>（1.7 ms / 5% ✓）；<b>卡 A 颜色过渡</b>跟着 ledOn 事件走。
+<div style="margin-top:6px">弧里那个数字用 <b>默认字体（14 px）</b>：放大曾被否
+（<code>lv_transform</code> 会走 layer 路径、要 ARGB8888，本构建关掉了）&rArr;
+真要大字号得做一份字体，不是一行代码的事。</div>
 </div>
 
-<h2>④ 切页时序（来回切就是这一条）</h2>
-<div class="note">
-<code>Splash(1.5 s, 槽 2)</code> → <b>页 1</b>（整帧 34.8 ms）→ <i>N s / N 个边沿</i> → <b>页 2</b>（整帧 ~46 ms）→ … → 回页 1。<br>
-每页 entry 老规矩不变：<code>lv_obj_clean</code> + 重建控件树 ⇒ 两页控件永不共存；背光已在首帧落定后点亮，切页不再动背光 ✓。
-</div>
+<h2>四、已定 / 默认执行</h2>
+<div class="note"><b>已定（你这轮拍的）</b>
+<ul style="font-size:13px;line-height:1.7;margin:6px 0 0 0">
+<li><b>节拍那套删掉</b> ✓：页 1 的节拍环（七步/边沿）、<code>edges/frame</code> 卡、底栏帧时条全部下线
+（<code>ledEdges</code> 仍留在模型里，给 tracer/上报用，只是不再显示）。</li>
+<li><b>线程全放</b> ✓：5 个任务一行一个 + tracer nmin + 两个事件池 = 8 行 ⇒ 上图（面板 164 px，20 px/行，余 4 px ✓）。</li>
+<li><b>页 2 = live 页</b> ✓：spinner + switch + 12 根 cpu 历史条 + 角落 cpu/led，合计 &asymp;3% 占用。</li>
+<li><b>右上角 cpu 文本两页都留</b> ✓。</li>
+</ul>
+<div style="margin-top:8px;font-size:13px">剩两个实现细节我按下面默认执行，想改再说：<br>
+&middot; 事件池两个都放：<b>SST 静态池</b>（字面 ✓，要给它加一个 free 读数）+ <b>UI inbox</b>（<code>UI_INBOX_LEN 16</code> 现成 ✓）。<br>
+&middot; 开 <code>LV_USE_SPINNER</code> / <code>LV_USE_SWITCH</code>（+约 3 KB flash），<code>LV_USE_CHART</code> 不开。</div></div>
+<div style="font-size:12px;color:#666">（这版是草稿：只画了几何与数据源；你点头后我把它并回
+ <code>gen_pages_two.py</code> 并动 <code>sm_ui.c</code> / <code>widgets/w_*</code>。）</div>
+</body></html>
+"""
 
-<h2>⑤ 开关与依赖</h2>
-<div class="note">
-<span class="ok">新增 lv_conf.h 开关：0 个</span> —— <code>LV_USE_ARC 1</code> 已开；<code>lv_bar</code> / <code>lv_led</code> / <code>lv_label</code> / <code>lv_obj</code> / <code>lv_image</code> 都是默认或已开；绘制注入（若要渐变填充）也只要核心功能。<br>
-<span class="warn">唯一可能花 flash 的项：大数字字体</span> —— 现在只有 14 px 那档。三选一：① 沿用 14 px；② <b>只烘数字的大字号点阵</b>（10 个字、48 px ≈ 3 KB 量级）；③ 自绘 7 段（0 flash，~40 行绘制代码）。<br>
-<span class="pick">背景槽</span>：页 1 = 槽 0、页 2 = 槽 1 ⇒ 要把 <code>UI_BG_SLOT</code> 从编译期常量改成"每页 entry 传入的槽号"（<code>Ui_dispDemo(slot)</code>），一行接口的事。
-</div>
-
-<h2>⑥ 要你拍的几件</h2>
-<div class="note">
-① <b>环的尺寸</b>：160×160（贴背景锚点，但只能"值变时重绘"）还是 96×96（可连续补间，但与背景画的环不同径）？<br>
-② <b>大数字</b>：14 px 沿用 / 烘数字专用大字号（≈3 KB flash）/ 自绘 7 段？<br>
-③ <b>页 2 的数据</b>：全用真值（总边沿、栈余量、帧时 min/max、池占用）还是掺假数据（更像仪表但没意义）？<br>
-④ <b>切换触发器与节奏</b>：每 5 s 自动切 / 每 8 个边沿切 / 两者可配？<br>
-⑤ <b>页 1 进度条表示什么</b>：beat 占空比（真值）/ 池占用（真值）/ assist 式装饰值（假）？
-</div>
-</body></html>"""
-open('./pages-two.html', 'w', encoding='utf-8').write(html)
-print("写出 ./pages-two.html")
+if __name__ == "__main__":
+    html = HTML.replace("@CSS@", CSS).replace("@P1@", page1()).replace("@P2@", page2())
+    with open("pages-two.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    print("写出 ./pages-two.html  (%d bytes)" % len(html.encode("utf-8")))

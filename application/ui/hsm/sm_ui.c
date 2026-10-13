@@ -36,14 +36,12 @@
 // roughly 2.5 percent of the thread; at 30 fps it would be 15.
 #define SM_UI_DIAL_MS 200U
 
-// The task rows of page 1's panel: five threads, then the two pools. The
-// kernel reports only how much of a stack is still free
-// (uxTaskGetSystemState -> usStackHighWaterMark), so the percentage needs the
-// other half of the sum from here. If a stack size changes, this table
-// changes
-// with it: ui.c UI_STACK_WORDS (2048), flash.c FLASH_STACK_WORDS (256),
-// blinky.c BLINKY_STACK_WORDS (256), configTIMER_TASK_STACK_DEPTH (256),
-// configMINIMAL_STACK_SIZE (128).
+// The task rows of page 1's panel: five threads, then the two pools. Only the
+// order and the names are ours - the sizes come from the kernel, which
+// records
+// each stack's high address (configRECORD_STACK_HIGH_ADDRESS) so a row's
+// total
+// is pxEndOfStack - pxStackBase + 1. Nothing to keep in step by hand.
 #define SM_UI_TASK_ROWS 5U
 #define SM_UI_PANEL_ROWS W_BARPANEL_ROWS
 #define SM_UI_TASKS 8U
@@ -58,9 +56,6 @@ static char const * const Sm_Ui_panelUnits_[SM_UI_PANEL_ROWS] = {
 };
 static char const * const Sm_Ui_stackNames_[SM_UI_TASK_ROWS] = {
     "ui", "flash", "ao", "Tmr Svc", "IDLE"
-};
-static uint16_t const Sm_Ui_stackWords_[SM_UI_TASK_ROWS] = {
-    2048U, 256U, 256U, 256U, 128U
 };
 
 //============================================================================
@@ -199,7 +194,9 @@ static void Sm_Ui_panel_(Sm_Ui * const me) {
 
         for (i = 0U; i < n; ++i) {
             if (strcmp(tasks[i].pcTaskName, Sm_Ui_stackNames_[row]) == 0) {
-                uint32_t const total = (uint32_t)Sm_Ui_stackWords_[row];
+                uint32_t const total =
+                    (uint32_t)(tasks[i].pxEndOfStack - tasks[i].pxStackBase)
+                    + 1U;
                 uint32_t const freeWords =
                     (uint32_t)tasks[i].usStackHighWaterMark;
                 // Fuel gauge: the bar and the number both say what is
