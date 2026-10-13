@@ -202,14 +202,13 @@ static void Sm_Ui_panel_(Sm_Ui * const me) {
                 uint32_t const total = (uint32_t)Sm_Ui_stackWords_[row];
                 uint32_t const freeWords =
                     (uint32_t)tasks[i].usStackHighWaterMark;
-                uint32_t used = 0U;
-
-                if (total > freeWords) {
-                    used = total - freeWords;
-                }
-
+                // Fuel gauge: the bar and the number both say what is
+                // left, so a full bar and a big number mean the same thing -
+                // healthy. (The panel used to mix the two directions, which
+                // made "0" unreadable: full bar, or nothing left?)
                 W_BarPanel_setWords(&me->panel, row,
-                                    WidgetIO_pct(used, total), freeWords);
+                                    WidgetIO_pct(freeWords, total),
+                                    freeWords);
                 break;
             }
         }
@@ -223,8 +222,7 @@ static void Sm_Ui_panel_(Sm_Ui * const me) {
         uint32_t const freeSlots = (uint32_t)SM_Tracer_inst.nMin;
 
         W_BarPanel_setPair(&me->panel, SM_UI_TASK_ROWS,
-                           WidgetIO_pct(total - freeSlots, total), freeSlots,
-                           total);
+                           WidgetIO_pct(freeSlots, total), freeSlots, total);
     }
 
     // The UI inbox, and the LVGL pool: both hand over their own numbers.
@@ -233,11 +231,10 @@ static void Sm_Ui_panel_(Sm_Ui * const me) {
         unsigned const freeSlots = Ui_evtInboxFree();
 
         W_BarPanel_setPair(&me->panel, SM_UI_TASK_ROWS + 1U,
-                           WidgetIO_pct(len - freeSlots, len), freeSlots,
-                           len);
+                           WidgetIO_pct(freeSlots, len), freeSlots, len);
     }
     W_BarPanel_setWords(&me->panel, SM_UI_TASK_ROWS + 2U,
-                        WidgetIO_poolUsedPct(), WidgetIO_poolFreeKb());
+                        WidgetIO_poolFreePct(), WidgetIO_poolFreeKb());
 }
 //............................................................................
 //============================================================================
