@@ -13,28 +13,18 @@
 
 
 //............................................................................
-// No value has been written yet: the peak only moves a handful of times in a
-// run, so the label is left alone unless it grows.
-#define W_RAM_MSP_UNSET 0xFFFFFFFFU
-
 //............................................................................
 void W_Ram_init(struct W_Ram *r) {
-    r->shownMsp = W_RAM_MSP_UNSET;
     r->lineA = (struct _lv_obj_t *)0;
     r->lineB = (struct _lv_obj_t *)0;
-    r->lineC = (struct _lv_obj_t *)0;
 }
 //............................................................................
 void W_Ram_create(struct W_Ram *r, struct _lv_obj_t *parent) {
-    r->shownMsp = W_RAM_MSP_UNSET;   // these labels are new, so this is too
     r->lineA = WidgetIO_label(parent, "-", 0xE0E4E8U);
     lv_obj_align((lv_obj_t *)r->lineA, LV_ALIGN_TOP_MID, 0, 232);
 
     r->lineB = WidgetIO_label(parent, "-", 0x9AA3ACU);
     lv_obj_align((lv_obj_t *)r->lineB, LV_ALIGN_TOP_MID, 0, 254);
-
-    r->lineC = WidgetIO_label(parent, "-", 0x9AA3ACU);
-    lv_obj_align((lv_obj_t *)r->lineC, LV_ALIGN_TOP_MID, 0, 276);
 }
 //............................................................................
 void W_Ram_set(struct W_Ram *r, uint32_t usedBytes, uint32_t totalBytes) {
@@ -51,15 +41,4 @@ void W_Ram_set(struct W_Ram *r, uint32_t usedBytes, uint32_t totalBytes) {
     lv_label_set_text_fmt((lv_obj_t *)r->lineB, "free %u.%u KB",
                           (unsigned)(freeTenths / 10U),
                           (unsigned)(freeTenths % 10U));
-}
-//............................................................................
-void W_Ram_setMsp(struct W_Ram *r, uint32_t peakBytes,
-                   uint32_t reservedBytes) {
-    if (peakBytes == r->shownMsp) {
-        return;
-    }
-    r->shownMsp = peakBytes;
-
-    lv_label_set_text_fmt((lv_obj_t *)r->lineC, "msp %u / %u B",
-                          (unsigned)peakBytes, (unsigned)reservedBytes);
 }
