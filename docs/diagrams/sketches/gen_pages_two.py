@@ -175,7 +175,7 @@ HTML = """<!DOCTYPE html>
 <title>sm_blinky 两页版面（当前）</title>
 <style>@CSS@</style></head><body>
 <h1>sm_blinky 两页版面（当前实现）</h1>
-<div style="font-size:13px;color:#555">页 2 的图形是示意（画的是旧 dial 弧 版）；代码里 dial 96x96 在 (72,40)、switch 在 (92,146)、历史条在 (30,200)、标题 "cpu history: 6 s" 在 y246。<br>源图：/<code>midTran/tmp_agent/sm_blinky_layout.png</code>
+<div style="font-size:13px;color:#555">页 2 的图形是示意；代码里的最新位置：dial 弧 96x96 在 (92,40)、switch 在 (12,74)（与弧同排、间隙 24 px）、NVM_Blinky 标签在 (12,181) 宽 220 px（2^32 的 10 位放得下）、RAM 两行在下方、页点在底部。<br>源图：/<code>midTran/tmp_agent/sm_blinky_layout.png</code>
 　本草图 = 我对那张图的理解 + 落到 240x320 与现有部件上的映射。</div>
 
 <h2>一、我从图里读到的</h2>
