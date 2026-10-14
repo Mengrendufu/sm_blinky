@@ -57,7 +57,7 @@ set(SRC_ALL
     ${CMAKE_SOURCE_DIR}/application/flash
     ${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/include
     ${CMAKE_SOURCE_DIR}/application/flash/thread/flash.c
-    ${CMAKE_SOURCE_DIR}/application/flash/thread/nvs_port_flash.c
+    ${CMAKE_SOURCE_DIR}/ports/nvs_port.c
     ${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/src/nvs.c
     ${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/src/nvs_crc.c
     ${CMAKE_SOURCE_DIR}/application/flash/thread/flash_req.c
