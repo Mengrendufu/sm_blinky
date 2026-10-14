@@ -81,6 +81,7 @@ typedef struct {
     // lives in the snapshot (application/nvm), where the flash task picks it
     // up every ten seconds.
     uint32_t nvmBlinky;
+    uint32_t nvmPublished;    // ledEdges as last handed to the snapshot
     uint32_t cpuIdle;
     uint32_t cpuTotal;
     uint32_t cpuPct;

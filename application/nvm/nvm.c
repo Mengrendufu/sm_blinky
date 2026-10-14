@@ -19,6 +19,12 @@ void Nvm_setBlinky(uint32_t value) {
     taskEXIT_CRITICAL();
 }
 
+void Nvm_addBlinky(uint32_t edges) {
+    taskENTER_CRITICAL();
+    Nvm_blinky_ += edges;
+    taskEXIT_CRITICAL();
+}
+
 uint32_t Nvm_blinky(void) {
     uint32_t value;
 

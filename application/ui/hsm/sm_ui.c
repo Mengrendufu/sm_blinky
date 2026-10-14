@@ -42,6 +42,10 @@ extern uint8_t _estack;
 // cheap.
 #define UI_STAT_MS 500U
 
+// The live page's entry action publishes its edges, so the helper is declared
+// ahead of it; its body sits further down beside the page actions it serves.
+static void Sm_Ui_publish_(Sm_Ui * const self);
+
 // The live page's arc, one flourish per visit: empty to full, then back down
 // to half, and that is where the page leaves it. The step is deliberately
 // small - two percent reads as a turning ring, five read as jumps - so the
@@ -413,9 +417,9 @@ static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
     W_Switch_create(&self->sw, Ui_dispPageRoot(), 12, 176);
     W_Nvm_create(&self->nvm, Ui_dispPageRoot(), 74, 181);
     // The snapshot, not the NOR: the flash task filled it at boot and writes
-    // it back every ten seconds, so the page only has to read it. Syncing it
-    // here catches up on the edges counted while other pages held the glass.
-    Nvm_setBlinky(self->ledEdges);
+    // it back every ten seconds. Syncing here catches up on the edges counted
+    // while other pages held the glass.
+    Sm_Ui_publish_(self);
     self->nvmBlinky = Nvm_blinky();
     W_Nvm_set(&self->nvm, self->nvmBlinky);
     // The RAM figure never moves: it is the static image against the top of
@@ -428,6 +432,21 @@ static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
     self->shownValid = false;   // the led gets written out again
     self->statAt = 0U;          // the first window lands right away
 }
+//............................................................................
+// Hand the snapshot every edge counted since the last hand-off. The snapshot
+// is cumulative - it was restored from the NOR at boot - so it takes a delta.
+// Writing ledEdges out as it stands would put this boot's small number over
+// the stored one, which is the bug this replaces (2026-10-13, seen on the
+// glass as the count restarting near zero after a reset).
+static void Sm_Ui_publish_(Sm_Ui * const self) {
+    uint32_t const d = self->ledEdges - self->nvmPublished;
+
+    if (d != 0U) {
+        Nvm_addBlinky(d);
+        self->nvmPublished = self->ledEdges;
+    }
+}
+//............................................................................
 static void Sm_Ui_live_exit_(SM_Hsm * const me) SM_HSM_RETT {
     (void)me;
 
@@ -453,7 +472,7 @@ static SM_RetState Sm_Ui_live_(void * const me,
                 W_Switch_set(&self->sw, self->ledOn);
                 // Publish: the snapshot is what the flash task writes out,
                 // so every edge the page sees goes into it.
-                Nvm_setBlinky(self->ledEdges);
+                Sm_Ui_publish_(self);
             }
             (void)Sm_Ui_slow_(self);   // the corner's cpu readout
 
