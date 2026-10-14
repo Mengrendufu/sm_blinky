@@ -118,54 +118,64 @@ def page1():
 
 
 def page2():
-    o = ['<div class="panel"><div class="cap">page 2 &middot; live（原图为空，内容我提案）</div>']
+    import math
+
+    def ring(a0, a1, colour):
+        cx, cy, r = 120, 88, 42
+
+        def pt(a):
+            th = math.radians(a)
+            return cx + r * math.cos(th), cy - r * math.sin(th)
+
+        x0, y0 = pt(a0)
+        x1, y1 = pt(a1)
+        large = 1 if abs(a1 - a0) > 180 else 0
+        sweep = 1 if a1 < a0 else 0
+        return ('<path d="M %.1f %.1f A %d %d 0 %d %d %.1f %.1f" stroke="%s" '
+                'stroke-width="12" fill="none"/>'
+                % (x0, y0, r, r, large, sweep, x1, y1, colour))
+
+    o = ['<div class="panel"><div class="cap">page 2 &middot; live（按代码 + NVM 计数）</div>']
     o.append('<div style="position:absolute;left:0;top:0;width:240px;height:24px;'
              'border-bottom:1px solid #1E2A32"></div>')
     o.append('<div style="position:absolute;left:8px;top:6px;color:#E0E4E8;'
              'font-size:14px">live</div>')
     o.append('<div class="led" style="left:222px;top:7px"></div>')
     o.append('<div style="position:absolute;left:0;top:7px;width:214px;'
-             'text-align:right;color:#9AA3AC;font-size:11px">cpu 38 %</div>')
-    o.append(tagon(200, 4, "5"))
-    # spinner: a ring with a gap
-    o.append('<svg width="96" height="96" viewBox="0 0 96 96" '
-             'style="position:absolute;left:16px;top:40px">'
-             '<circle cx="48" cy="48" r="30" stroke="#1B2830" stroke-width="8" '
-             'fill="none"/>'
-             '<path d="M 48 18 A 30 30 0 0 1 74 33" stroke="#00C3BC" '
-             'stroke-width="8" fill="none" stroke-linecap="round"/></svg>')
-    o.append('<div style="position:absolute;left:16px;top:138px;width:96px;'
-             'text-align:center;color:#9AA3AC;font-size:10px">spinner</div>')
-    o.append(tagon(104, 42, "6"))
-    # switch: track + knob, driven by ledOn
-    o.append('<div style="position:absolute;left:132px;top:56px;width:56px;'
+             'text-align:right;color:#9AA3AC;font-size:11px">cpu 26 %</div>')
+    o.append(tagon(200, 4, "a"))
+    o.append('<svg width="240" height="150" viewBox="0 0 240 150" '
+             'style="position:absolute;left:0;top:16px">')
+    o.append(ring(210, 90, "#1B2830"))
+    o.append(ring(210, 300, "#00C3BC"))
+    o.append('</svg>')
+    o.append('<div style="position:absolute;left:72px;top:76px;width:96px;'
+             'text-align:center;color:#fff;font-size:14px">62 %</div>')
+    o.append(tagon(60, 34, "b"))
+    o.append('<div style="position:absolute;left:52px;top:176px;width:56px;'
              'height:28px;border-radius:14px;background:#00C3BC"></div>')
-    o.append('<div style="position:absolute;left:162px;top:59px;width:22px;'
+    o.append('<div style="position:absolute;left:82px;top:179px;width:22px;'
              'height:22px;border-radius:50%;background:#fff"></div>')
-    o.append('<div style="position:absolute;left:132px;top:90px;width:88px;'
-             'color:#9AA3AC;font-size:10px">switch &larr; ledOn</div>')
-    o.append(tagon(190, 58, "7"))
-    # cpu history: 12 bars, one per 500 ms window
-    heights = [10, 14, 12, 18, 16, 22, 20, 26, 24, 30, 28, 32]
-    for i, h in enumerate(heights):
-        o.append('<div style="position:absolute;left:%dpx;top:%dpx;width:12px;'
-                 'height:%dpx;background:#C6FF3D;border-radius:2px"></div>'
-                 % (18 + i * 15, 226 - h, h))
-    o.append('<div style="position:absolute;left:18px;top:230px;width:186px;'
-             'color:#9AA3AC;font-size:10px">cpu 历史：每 500 ms 插一根（12 根 = 6 s）</div>')
-    o.append(tagon(206, 200, "8"))
+    o.append('<div style="position:absolute;left:122px;top:180px;color:#FFFFFF;'
+             'font-size:14px">NVM 12345</div>')
+    o.append(tagon(38, 182, "c"))
+    o.append(tagon(206, 182, "d"))
+    o.append('<div style="position:absolute;left:0;top:226px;width:240px;'
+             'text-align:center;color:#E0E4E8;font-size:14px">RAM 55.1 / 64.0 KB</div>')
+    o.append('<div style="position:absolute;left:0;top:248px;width:240px;'
+             'text-align:center;color:#9AA3AC;font-size:11px">free 8.9</div>')
+    o.append(tagon(14, 206, "e"))
     o.append('<div class="dot" style="left:112px;top:311px;width:4px;height:4px"></div>')
     o.append('<div class="dot" style="left:124px;top:310px;width:6px;height:6px"></div>')
     o.append('</div>')
     return "".join(o)
-
 
 HTML = """<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <title>sm_blinky 两页版面（当前）</title>
 <style>@CSS@</style></head><body>
 <h1>sm_blinky 两页版面（当前实现）</h1>
-<div style="font-size:13px;color:#555">页 2 的图形是示意（画的是旧 spinner 版）；代码里 dial 96x96 在 (72,40)、switch 在 (92,146)、历史条在 (30,200)、标题 "cpu history: 6 s" 在 y246。<br>源图：/<code>midTran/tmp_agent/sm_blinky_layout.png</code>
+<div style="font-size:13px;color:#555">页 2 的图形是示意（画的是旧 dial 弧 版）；代码里 dial 96x96 在 (72,40)、switch 在 (92,146)、历史条在 (30,200)、标题 "cpu history: 6 s" 在 y246。<br>源图：/<code>midTran/tmp_agent/sm_blinky_layout.png</code>
 　本草图 = 我对那张图的理解 + 落到 240x320 与现有部件上的映射。</div>
 
 <h2>一、我从图里读到的</h2>
@@ -187,7 +197,7 @@ HTML = """<!DOCTYPE html>
  —— 再加 <code>tracer nmin</code> + <code>SST 事件池</code> + <code>UI inbox</code> = <b>8 行</b>✓
  （面板 164 px &divide; 8 行 = 20 px/行，还余 4 px；最多能到 8~9 行 ⇒ 以后加任务也放得下 ✓）。<br>
 <b>④</b> 页点保留（两页指示）。<br>
-<b>⑤⑥⑦⑧</b> 页 2「随便动起来」：<code>spinner</code>（连续转，36x36 区域，&asymp;0.9 ms/帧 &rArr; 30 fps &asymp; 2%）+
+<b>⑤⑥⑦⑧</b> 页 2「随便动起来」：<code>dial 弧</code>（连续转，36x36 区域，&asymp;0.9 ms/帧 &rArr; 30 fps &asymp; 2%）+
  <code>switch</code>（跟 <code>ledOn</code> 同步翻转，每次 &asymp;2 ms、2 Hz &rArr; 0.4%）+
  <b>12 根 cpu 历史条</b>（每 500 ms 插一根，用现成的 <code>lv_bar</code>，每窗 &asymp;1.5 ms &rArr; 0.3%）+
  led 闪烁。合计 &asymp;3%，不碰大动画。<br>
@@ -223,7 +233,7 @@ HTML = """<!DOCTYPE html>
 <li><b>节拍那套删掉</b> ✓：页 1 的节拍环（七步/边沿）、<code>edges/frame</code> 卡、底栏帧时条全部下线
 （<code>ledEdges</code> 仍留在模型里，给 tracer/上报用，只是不再显示）。</li>
 <li><b>线程全放</b> ✓：5 个任务一行一个 + tracer nmin + 两个事件池 = 8 行 ⇒ 上图（面板 164 px，20 px/行，余 4 px ✓）。</li>
-<li><b>页 2 = live 页</b> ✓：spinner + switch + 12 根 cpu 历史条 + 角落 cpu/led，合计 &asymp;3% 占用。</li>
+<li><b>页 2 = live 页</b> ✓：dial 弧 + switch + 12 根 cpu 历史条 + 角落 cpu/led，合计 &asymp;3% 占用。</li>
 <li><b>右上角 cpu 文本两页都留</b> ✓。</li>
 </ul>
 <div style="margin-top:8px;font-size:13px">剩两个实现细节我按下面默认执行，想改再说：<br>
