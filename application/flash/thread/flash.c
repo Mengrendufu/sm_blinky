@@ -137,8 +137,7 @@ static void Flash_nvsBoot_(void) {
         }
         for (i = 0U; i < 16U; i++) {
             uint8_t rd[64];
-            unsigned const last = 300U - (300U % 16U)
-                                  + ((i + 16U - (300U % 16U)) % 16U);
+            unsigned const last = 299U - ((299U - i) % 16U);
 
             memset(rd, 0, sizeof(rd));
             if (nvs_read(&Flash_nvs_, (uint16_t)(0x100U + i), rd, sizeof(rd))
@@ -151,8 +150,9 @@ static void Flash_nvsBoot_(void) {
             }
         }
 
+        /* byte 0 in units of 100 ms: five erases alone are 800+ ms. */
         SM_TRACE_BEGIN(92U, 6)
-        SM_TRACE_PAYLOAD_BE(Flash_nvs_ms_(Flash_nvs_us_() - t0))
+        SM_TRACE_PAYLOAD_BE((unsigned char)((Flash_nvs_us_() - t0) / 100000U))
         SM_TRACE_PAYLOAD_BE((unsigned char)((Nvs_portErases() > 255U)
                                             ? 255U : Nvs_portErases()))
         SM_TRACE_PAYLOAD_BE((unsigned char)fails)
