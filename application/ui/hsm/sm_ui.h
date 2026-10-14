@@ -42,7 +42,10 @@
 typedef struct {
     SM_Hsm sm_hsm_;
     bool ledOn;          // last LED state posted by the Blinky AO
-    uint16_t ledEdges;   // LED transitions seen; the ring counts these
+    uint32_t ledEdges;   // LED transitions seen, and the NVM_Blinky value:
+                         // 32 bits on purpose - at two a second a 16 bit
+                         // counter wraps in nine hours, which would hide the
+                         // whole point of counting
     bool splashUp;       // the glass belongs to the boot image
     TickType_t splashUntil;  // when the hold ends, while splashUp
 
@@ -61,7 +64,7 @@ typedef struct {
     // What the widgets last showed, so an unchanged model costs nothing: no
     // property writes, no invalidation, no redraw.
     bool shownOn;
-    uint16_t shownEdges;
+    uint32_t shownEdges;
     bool shownValid;
 
     // The slow window: when the readouts were last rewritten, and the CPU
