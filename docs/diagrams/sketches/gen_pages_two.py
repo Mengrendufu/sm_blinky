@@ -121,7 +121,7 @@ def page2():
     import math
 
     def ring(a0, a1, colour):
-        cx, cy, r = 120, 88, 42
+        cx, cy, r = 140, 88, 42
 
         def pt(a):
             th = math.radians(a)
@@ -149,17 +149,17 @@ def page2():
     o.append(ring(210, 90, "#1B2830"))
     o.append(ring(210, 300, "#00C3BC"))
     o.append('</svg>')
-    o.append('<div style="position:absolute;left:72px;top:76px;width:96px;'
+    o.append('<div style="position:absolute;left:92px;top:76px;width:96px;'
              'text-align:center;color:#fff;font-size:14px">62 %</div>')
-    o.append(tagon(60, 34, "b"))
-    o.append('<div style="position:absolute;left:12px;top:176px;width:56px;'
+    o.append(tagon(74, 34, "b"))
+    o.append('<div style="position:absolute;left:12px;top:74px;width:56px;'
              'height:28px;border-radius:14px;background:#00C3BC"></div>')
-    o.append('<div style="position:absolute;left:42px;top:179px;width:22px;'
+    o.append('<div style="position:absolute;left:42px;top:77px;width:22px;'
              'height:22px;border-radius:50%;background:#fff"></div>')
-    o.append('<div style="position:absolute;left:74px;top:181px;color:#FFFFFF;'
-             'font-size:14px">NVM_Blinky 123456</div>')
-    o.append(tagon(38, 182, "c"))
-    o.append(tagon(206, 182, "d"))
+    o.append('<div style="position:absolute;left:12px;top:181px;color:#FFFFFF;'
+             'font-size:14px">NVM_Blinky 4294967295</div>')
+    o.append(tagon(38, 60, "c"))
+    o.append(tagon(216, 182, "d"))
     o.append('<div style="position:absolute;left:0;top:226px;width:240px;'
              'text-align:center;color:#E0E4E8;font-size:14px">RAM 55.1 / 64.0 KB</div>')
     o.append('<div style="position:absolute;left:0;top:248px;width:240px;'
