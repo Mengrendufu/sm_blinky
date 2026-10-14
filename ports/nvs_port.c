@@ -81,12 +81,19 @@ int flash_write(void *dev, off_t off, const void *buf, size_t len) {
     return 0;
 }
 
+/* Probe counter (TODO: remove with the flood probe in flash.c). */
+static unsigned Nvs_erases_;
+unsigned Nvs_portErases(void) {
+    return Nvs_erases_;
+}
+
 int flash_flatten(void *dev, off_t off, size_t len) {
     size_t done;
 
     (void)dev;
     for (done = 0U; done < len; done += NVS_ERASE_SIZE) {
         nvs_erase_let_go_(NVS_FLASH_BASE + (uint32_t)off + (uint32_t)done);
+        ++Nvs_erases_;
     }
     return 0;
 }

@@ -16,6 +16,11 @@
 #include "flash_req_priv.h"
 #include "nvs.h"
 #include "sm_tracer.h"
+#include <string.h>
+
+/* TODO(probe): remove with the flood below. The port counts erases for us. */
+unsigned Nvs_portErases(void);
+#define FLASH_NVS_FLOOD 1
 #include "FreeRTOS.h"
 #include "task.h"
 
@@ -116,6 +121,47 @@ static void Flash_nvsBoot_(void) {
     (void)nvs_write(&Flash_nvs_, 1U, &Flash_boot_, sizeof(Flash_boot_));
     writeUs = Flash_nvs_us_() - t0;
 
+#if FLASH_NVS_FLOOD
+    {
+        static uint8_t fbuf[64];
+        uint32_t const t0 = Flash_nvs_us_();
+        unsigned fails = 0U;
+        unsigned i;
+
+        for (i = 0U; i < 300U; i++) {
+            memset(fbuf, (int)(0x30 + (i % 32)), sizeof(fbuf));
+            fbuf[0] = (uint8_t)i;
+            fbuf[1] = (uint8_t)(i >> 8);
+            (void)nvs_write(&Flash_nvs_, (uint16_t)(0x100U + (i % 16U)), fbuf,
+                            sizeof(fbuf));
+        }
+        for (i = 0U; i < 16U; i++) {
+            uint8_t rd[64];
+            unsigned const last = 300U - (300U % 16U)
+                                  + ((i + 16U - (300U % 16U)) % 16U);
+
+            memset(rd, 0, sizeof(rd));
+            if (nvs_read(&Flash_nvs_, (uint16_t)(0x100U + i), rd, sizeof(rd))
+                != (ssize_t)sizeof(rd)) {
+                ++fails;
+            }
+            else if ((rd[0] != (uint8_t)last)
+                     || (rd[2] != (uint8_t)(0x30 + (last % 32)))) {
+                ++fails;
+            }
+        }
+
+        SM_TRACE_BEGIN(92U, 6)
+        SM_TRACE_PAYLOAD_BE(Flash_nvs_ms_(Flash_nvs_us_() - t0))
+        SM_TRACE_PAYLOAD_BE((unsigned char)((Nvs_portErases() > 255U)
+                                            ? 255U : Nvs_portErases()))
+        SM_TRACE_PAYLOAD_BE((unsigned char)fails)
+        SM_TRACE_PAYLOAD_BE(3U)   /* tag 3: the flood probe */
+        SM_TRACE_PAYLOAD_BE(0U)
+        SM_TRACE_PAYLOAD_BE(0U)
+        SM_TRACE_END(0)
+    }
+#endif
     SM_TRACE_BEGIN(91U, 6)
     SM_TRACE_PAYLOAD_BE(Flash_nvs_ms_(mountUs))
     SM_TRACE_PAYLOAD_BE(Flash_nvs_ms_(writeUs))
