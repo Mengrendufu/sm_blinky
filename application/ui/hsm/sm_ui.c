@@ -416,8 +416,6 @@ static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
     W_Dial_setValue(&self->dial, 0U);
     W_Switch_create(&self->sw, Ui_dispPageRoot(), 12, 176);
     W_Nvm_create(&self->nvm, Ui_dispPageRoot(), 74, 181);
-    /* TODO(probe): record 93, payload = tag, ok. Remove once the readout is
-     * known good on the glass. */
     {
         /* The counter is checkpointed when the page is left (see the exit
          * action), so a read that finds nothing is simply the first visit: put
@@ -434,10 +432,6 @@ static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
         if (ok) {
             W_Nvm_set(&self->nvm, self->nvmBlinky);
         }
-        SM_TRACE_BEGIN(93U, 2)
-        SM_TRACE_PAYLOAD_BE(1U)
-        SM_TRACE_PAYLOAD_BE(ok ? 1U : 0U)
-        SM_TRACE_END(0)
     }
     self->nvmAt = (uint32_t)xTaskGetTickCount() + pdMS_TO_TICKS(SM_UI_NVM_MS);
     // The RAM figure never moves: it is the static image against the top of
@@ -494,10 +488,6 @@ static SM_RetState Sm_Ui_live_(void * const me,
                     self->nvmBlinky = v;
                     W_Nvm_set(&self->nvm, v);
                 }
-                SM_TRACE_BEGIN(93U, 2)
-                SM_TRACE_PAYLOAD_BE(2U)
-                SM_TRACE_PAYLOAD_BE(ok ? 1U : 0U)
-                SM_TRACE_END(0)
                 self->nvmAt = now + pdMS_TO_TICKS(SM_UI_NVM_MS);
             }
 
