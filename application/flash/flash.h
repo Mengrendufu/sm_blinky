@@ -60,4 +60,16 @@ bool Flash_writeBlock(uint32_t address, void const *src, uint32_t len);
 // Erase one 4 KB sector: what a write needs first. Same sleeping wait.
 bool Flash_eraseSector(uint32_t address);
 
+// The NVS the flash task mounts at boot, as two requests: the caller blocks
+// on
+// its completion slot exactly like the block calls above. Read wants the
+// stored bytes, write the bytes to store; both want exactly len of them.
+bool Flash_nvsRead(uint16_t id, void *dst, uint32_t len);
+bool Flash_nvsWrite(uint16_t id, void const *src, uint32_t len);
+
+// What the AO's own dispatcher calls. Not for callers: they use the two
+// above.
+bool Flash_kvRead(uint16_t id, void *dst, uint32_t len);
+bool Flash_kvWrite(uint16_t id, void const *src, uint32_t len);
+
 #endif // FLASH_H_

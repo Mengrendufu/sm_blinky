@@ -49,7 +49,9 @@
 typedef enum {
     FLASH_OP_READ,
     FLASH_OP_WRITE,
-    FLASH_OP_ERASE
+    FLASH_OP_ERASE,
+    FLASH_OP_NVS_READ,    // address carries the key id, dst the buffer
+    FLASH_OP_NVS_WRITE
 } Flash_Op;
 
 typedef struct {

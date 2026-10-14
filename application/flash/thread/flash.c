@@ -129,6 +129,16 @@ static void Flash_nvsBoot_(void) {
     SM_TRACE_END(0)
 }
 
+// The KV side of the AO: the same store the boot code mounted, reached by the
+// two requests the HSM dispatches. Still one execution body, still one bus.
+bool Flash_kvWrite(uint16_t id, void const *src, uint32_t len) {
+    return (nvs_write(&Flash_nvs_, id, src, len) == (ssize_t)len);
+}
+
+bool Flash_kvRead(uint16_t id, void *dst, uint32_t len) {
+    return (nvs_read(&Flash_nvs_, id, dst, len) == (ssize_t)len);
+}
+
 static void Flash_thread_(void *arg) {
     (void)arg;
 

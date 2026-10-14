@@ -10,6 +10,7 @@
 #include "sm_port.h"
 #include "bsp_flash.h"
 #include "sm_flash.h"
+#include "flash.h"
 #include "flash_req.h"
 
 //============================================================================
@@ -208,6 +209,16 @@ static SM_RetState Sm_Flash_ready_(void * const me,
                 }
                 case FLASH_OP_ERASE: {
                     req->ok = Sm_Flash_erase_(req->address);
+                    break;
+                }
+                case FLASH_OP_NVS_READ: {
+                    req->ok = Flash_kvRead((uint16_t)req->address, req->dst,
+                                           req->len);
+                    break;
+                }
+                case FLASH_OP_NVS_WRITE: {
+                    req->ok = Flash_kvWrite((uint16_t)req->address, req->dst,
+                                            req->len);
                     break;
                 }
                 default: {

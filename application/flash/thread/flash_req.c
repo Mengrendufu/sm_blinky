@@ -154,3 +154,15 @@ bool Flash_writeBlock(uint32_t address, void const *src, uint32_t len) {
 bool Flash_eraseSector(uint32_t address) {
     return Flash_call_(FLASH_OP_ERASE, address, (void *)0, 0U);
 }
+//............................................................................
+// The key-value store the flash task owns, reached the same way as the rest:
+// a request in the queue, the AO executes it, the caller waits on its own
+// completion slot. id is the key, dst the buffer, len the value's length.
+bool Flash_nvsRead(uint16_t id, void *dst, uint32_t len) {
+    return Flash_call_(FLASH_OP_NVS_READ, (uint32_t)id, dst, len);
+}
+//............................................................................
+bool Flash_nvsWrite(uint16_t id, void const *src, uint32_t len) {
+    return Flash_call_(FLASH_OP_NVS_WRITE, (uint32_t)id,
+                       (void *)(uintptr_t)src, len);
+}
