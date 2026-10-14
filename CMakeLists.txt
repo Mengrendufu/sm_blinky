@@ -54,7 +54,12 @@ set(SRC_ALL
     ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_dial.c
     ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_ram.c
     ${CMAKE_SOURCE_DIR}/application/ui/hsm/sm_ui.c
+    ${CMAKE_SOURCE_DIR}/application/flash
+    ${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/include
     ${CMAKE_SOURCE_DIR}/application/flash/thread/flash.c
+    ${CMAKE_SOURCE_DIR}/application/flash/thread/nvs_port_flash.c
+    ${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/src/nvs.c
+    ${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/src/nvs_crc.c
     ${CMAKE_SOURCE_DIR}/application/flash/thread/flash_req.c
     ${CMAKE_SOURCE_DIR}/application/flash/hsm/sm_flash.c
 
@@ -85,6 +90,8 @@ set(SRC_ALL
 add_executable(${PROJECT_NAME}.elf ${SRC_ALL})
 
 target_include_directories(${PROJECT_NAME}.elf PRIVATE
+    ${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/include
+    ${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/src
     ${CMAKE_SOURCE_DIR}/application
     ${CMAKE_SOURCE_DIR}/application/ui
     ${CMAKE_SOURCE_DIR}/application/ui/thread

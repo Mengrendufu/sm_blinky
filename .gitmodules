@@ -22,3 +22,6 @@
 [submodule "3rd_party/lvgl"]
 	path = 3rd_party/lvgl
 	url = https://github.com/lvgl/lvgl.git
+[submodule "3rd_party/sm_nvs"]
+	path = 3rd_party/sm_nvs
+	url = https://github.com/Mengrendufu/sm_nvs.git
