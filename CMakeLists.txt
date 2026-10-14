@@ -87,9 +87,17 @@ set(SRC_ALL
     ${SRC_HAL}
 )
 
+
+# The vendored NVS keeps upstream's spelling; these two suppressions cover
+# exactly the warnings that come from that and nothing else.
+set_source_files_properties(${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/src/nvs.c
+    PROPERTIES COMPILE_OPTIONS "-Wno-sign-compare;-Wno-unused-parameter")
+
 add_executable(${PROJECT_NAME}.elf ${SRC_ALL})
 
 target_include_directories(${PROJECT_NAME}.elf PRIVATE
+    ${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/include
+    ${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/src
     ${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/include
     ${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/src
     ${CMAKE_SOURCE_DIR}/application
