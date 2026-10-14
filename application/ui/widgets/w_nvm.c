@@ -20,7 +20,11 @@ void W_Nvm_create(struct W_Nvm *w, struct _lv_obj_t *parent,
                   int32_t x, int32_t y) {
     w->label = WidgetIO_label(parent, "NVM_Blinky -", 0xFFFFFFU);
     lv_obj_set_pos((lv_obj_t *)w->label, (lv_coord_t)x, (lv_coord_t)y);
-    lv_obj_set_width((lv_obj_t *)w->label, 160);
+    // 220 px from x=12: the longest text is "NVM_Blinky 4294967295", twenty
+    // one characters, about 164 px at the default font, so every one of
+    // 2^32's
+    // decimal digits has room and the margin is still wide.
+    lv_obj_set_width((lv_obj_t *)w->label, 220);
     lv_label_set_long_mode((lv_obj_t *)w->label, LV_LABEL_LONG_MODE_CLIP);
 }
 //............................................................................

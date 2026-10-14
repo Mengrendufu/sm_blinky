@@ -406,7 +406,7 @@ static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
     // Stacked, never side by side: the switch used to sit inside the arc's
     // 96x96 box, and two boxes that overlap tear each other when one of them
     // is redrawn through a narrow area (2026-10-13, seen on the glass).
-    W_Dial_create(&self->dial, Ui_dispPageRoot(), 72, 40, 96);
+    W_Dial_create(&self->dial, Ui_dispPageRoot(), 92, 40, 96);
     // Start the sweep empty, and let the first step come one period later:
     // the page always begins on an empty ring.
     self->dialPct = 0U;
@@ -414,8 +414,10 @@ static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
     self->dialAt = (uint32_t)xTaskGetTickCount()
                    + pdMS_TO_TICKS(SM_UI_DIAL_MS);
     W_Dial_setValue(&self->dial, 0U);
-    W_Switch_create(&self->sw, Ui_dispPageRoot(), 12, 176);
-    W_Nvm_create(&self->nvm, Ui_dispPageRoot(), 74, 181);
+    // The switch rides beside the arc, centred on its middle: the two boxes
+    // never touch (68 < 92), and the bottom row is then free for the label.
+    W_Switch_create(&self->sw, Ui_dispPageRoot(), 12, 74);
+    W_Nvm_create(&self->nvm, Ui_dispPageRoot(), 12, 181);
     // The snapshot, not the NOR: the flash task filled it at boot and writes
     // it back every ten seconds. Syncing here catches up on the edges counted
     // while other pages held the glass.
