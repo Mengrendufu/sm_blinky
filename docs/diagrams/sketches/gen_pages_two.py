@@ -152,12 +152,12 @@ def page2():
     o.append('<div style="position:absolute;left:72px;top:76px;width:96px;'
              'text-align:center;color:#fff;font-size:14px">62 %</div>')
     o.append(tagon(60, 34, "b"))
-    o.append('<div style="position:absolute;left:52px;top:176px;width:56px;'
+    o.append('<div style="position:absolute;left:12px;top:176px;width:56px;'
              'height:28px;border-radius:14px;background:#00C3BC"></div>')
-    o.append('<div style="position:absolute;left:82px;top:179px;width:22px;'
+    o.append('<div style="position:absolute;left:42px;top:179px;width:22px;'
              'height:22px;border-radius:50%;background:#fff"></div>')
-    o.append('<div style="position:absolute;left:122px;top:180px;color:#FFFFFF;'
-             'font-size:14px">NVM 12345</div>')
+    o.append('<div style="position:absolute;left:74px;top:181px;color:#FFFFFF;'
+             'font-size:14px">NVM_Blinky 123456</div>')
     o.append(tagon(38, 182, "c"))
     o.append(tagon(206, 182, "d"))
     o.append('<div style="position:absolute;left:0;top:226px;width:240px;'
