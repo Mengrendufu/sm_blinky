@@ -81,7 +81,6 @@ int main(void) {
     SST_init();
     Ui_start();
     Flash_start();
-    Storage_start();
     AO_start();
     SST_start();
 

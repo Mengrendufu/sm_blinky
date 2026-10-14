@@ -14,6 +14,8 @@
 #include "flash.h"
 #include "sm_flash.h"
 #include "flash_req_priv.h"
+#include "nvs.h"
+#include "sm_tracer.h"
 #include "FreeRTOS.h"
 #include "task.h"
 
@@ -59,8 +61,75 @@ void Flash_start(void) {
 // No poll timeout: this thread has no periodic work at all, so it sleeps
 // until a request arrives. That is the difference from an AO, which would
 // have a beat to keep up with.
+// The NVS is a capability of this AO, not a second user of the flash: it
+// lives in this thread, and nvs_port_flash.c talks to the bus directly. On
+// the way up it mounts, reads the boot counter, writes it back one higher and
+// traces what each step cost (record 91: mount ms, write ms, read ms, boot
+// count low, boot count high, tag).
+//
+// Four sectors on purpose: the mount scans the ATE area of every sector in
+// 8-byte reads, so 16 sectors cost about 111 ms on the glass and four cost a
+// quarter of that, which is plenty of room for a key-value store this size.
+static struct nvs_fs Flash_nvs_;
+static uint32_t Flash_boot_;
+
+static uint32_t Flash_nvs_us_(void) {
+    return ((uint32_t)HAL_GetTick() * 1000U) + (uint32_t)TIM1->CNT;
+}
+
+static uint8_t Flash_nvs_ms_(uint32_t us) {
+    uint32_t const ms = us / 1000U;
+
+    return (ms > 255U) ? 255U : (uint8_t)ms;
+}
+
+static void Flash_nvsBoot_(void) {
+    uint32_t before = 0U;
+    uint32_t t0;
+    uint32_t mountUs;
+    uint32_t readUs;
+    uint32_t writeUs;
+    bool have;
+
+    Flash_nvs_.offset = 0U;
+    Flash_nvs_.sector_size = 4096U;   // the W25Q128's erasable sector
+    Flash_nvs_.sector_count = 4U;
+    Flash_nvs_.flash_device = nvs_port_device();
+
+    t0 = Flash_nvs_us_();
+    if (nvs_mount(&Flash_nvs_) != 0) {
+        (void)nvs_clear(&Flash_nvs_);
+        if (nvs_mount(&Flash_nvs_) != 0) {
+            return;   // nothing to report this boot
+        }
+    }
+    mountUs = Flash_nvs_us_() - t0;
+
+    t0 = Flash_nvs_us_();
+    have = (nvs_read(&Flash_nvs_, 1U, &before, sizeof(before))
+            == (ssize_t)sizeof(before));
+    readUs = Flash_nvs_us_() - t0;
+
+    Flash_boot_ = have ? (before + 1U) : 1U;
+
+    t0 = Flash_nvs_us_();
+    (void)nvs_write(&Flash_nvs_, 1U, &Flash_boot_, sizeof(Flash_boot_));
+    writeUs = Flash_nvs_us_() - t0;
+
+    SM_TRACE_BEGIN(91U, 6)
+    SM_TRACE_PAYLOAD_BE(Flash_nvs_ms_(mountUs))
+    SM_TRACE_PAYLOAD_BE(Flash_nvs_ms_(writeUs))
+    SM_TRACE_PAYLOAD_BE(Flash_nvs_ms_(readUs))
+    SM_TRACE_PAYLOAD_BE((unsigned char)(Flash_boot_ & 0xFFU))
+    SM_TRACE_PAYLOAD_BE((unsigned char)((Flash_boot_ >> 8) & 0xFFU))
+    SM_TRACE_PAYLOAD_BE(2U)   // tag 2: the NVS lives in the flash task now
+    SM_TRACE_END(0)
+}
+
 static void Flash_thread_(void *arg) {
     (void)arg;
+
+    Flash_nvsBoot_();
 
     for (;;) {
         // WAIT: nothing pending, so the thread parks here and the CPU goes

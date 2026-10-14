@@ -1,23 +1,29 @@
-/* The six functions of nvs_port.h, over this project's flash task.
+/* The six functions of nvs_port.h, in the task that owns the bus.
  *
- * Read, write and erase all go through Flash_readBlock/WriteBlock/EraseSector,
- * which are requests into the flash active object: the AO owns the SPI bus, so
- * "one execution body touches flash" stays true and NVS itself only has to be
- * called from one thread (see nvs_port.h, requirement 7).
+ * This file runs inside the flash thread (see Flash_nvsBoot_ in flash.c): the
+ * NVS is a capability of that AO, so there is no request/response in the way
+ * here - the primitives below are the same ones the AO's own operations use.
  *
- * Page splitting is not repeated here on purpose: Sm_Flash_writeDma_ already
- * splits at page boundaries (measured on the board: 5 bytes in-page and 300
- * bytes across pages read back byte for byte). A cross-page program would wrap
- * around silently on the W25Q128, so that split is load bearing - it just
- * lives one layer down, where the DMA already has to know about it.
+ * Two things are load bearing and easy to get wrong:
+ *   - the page split in flash_write. BSP_flashProgramPage writes one page and
+ *     the W25Q128 wraps a crossing program around to the start of the page,
+ *     silently. The split loop is the whole defence.
+ *   - the erase lets the CPU go. BSP_flashEraseSectorStart plus a poll of
+ *     BSP_flashIsReady with vTaskDelay is what keeps the idle task (and the
+ *     tracer pump in it) alive through the 167 ms of device time. The blocking
+ *     BSP_flashEraseSector would spin instead, which was measured to starve
+ *     idle long ago.
  */
 #include "nvs_port.h"
-#include "flash.h"
+#include "bsp.h"
+#include "bsp_flash.h"
 
 #define NVS_FLASH_BASE   0x00100000U   /* the NOR region NVS was given */
 #define NVS_ERASE_SIZE   4096U
 #define NVS_PAGE_SIZE    256U
 #define NVS_WBS          4U
+#define NVS_ERASE_POLL_MS 2U
+#define NVS_ERASE_DEADLINE_MS 3000U
 
 static const struct flash_parameters nvs_flash_par_ = {
     NVS_WBS,
@@ -28,23 +34,49 @@ void *nvs_port_device(void) {
     return (void *)0;
 }
 
+static void nvs_erase_let_go_(uint32_t address) {
+    uint32_t waited = 0U;
+
+    (void)BSP_flashEraseSectorStart(address);
+    while (!BSP_flashIsReady()) {
+        vTaskDelay(pdMS_TO_TICKS(NVS_ERASE_POLL_MS));
+        waited += NVS_ERASE_POLL_MS;
+        if (waited > NVS_ERASE_DEADLINE_MS) {
+            break;
+        }
+    }
+}
+
 int flash_read(void *dev, off_t off, void *buf, size_t len) {
     (void)dev;
-    if (!Flash_readBlock(NVS_FLASH_BASE + (uint32_t)off, buf,
-                         (uint32_t)len)) {
+    if (!BSP_flashRead(NVS_FLASH_BASE + (uint32_t)off, (uint8_t *)buf,
+                       (uint32_t)len)) {
         return -5;
     }
     return 0;
 }
 
 int flash_write(void *dev, off_t off, const void *buf, size_t len) {
+    const uint8_t *p = (const uint8_t *)buf;
+    uint32_t addr = NVS_FLASH_BASE + (uint32_t)off;
+
     (void)dev;
     if ((len == 0U) || ((len % NVS_WBS) != 0U)) {
         return -22;
     }
-    if (!Flash_writeBlock(NVS_FLASH_BASE + (uint32_t)off, buf,
-                          (uint32_t)len)) {
-        return -5;
+
+    while (len > 0U) {
+        size_t chunk = NVS_PAGE_SIZE - (size_t)(addr % NVS_PAGE_SIZE);
+
+        if (chunk > len) {
+            chunk = len;
+        }
+        if (!BSP_flashProgramPage(addr, p, (uint32_t)chunk)) {
+            return -5;
+        }
+        addr += (uint32_t)chunk;
+        p += chunk;
+        len -= chunk;
     }
     return 0;
 }
@@ -54,10 +86,7 @@ int flash_flatten(void *dev, off_t off, size_t len) {
 
     (void)dev;
     for (done = 0U; done < len; done += NVS_ERASE_SIZE) {
-        if (!Flash_eraseSector(NVS_FLASH_BASE + (uint32_t)off
-                               + (uint32_t)done)) {
-            return -5;
-        }
+        nvs_erase_let_go_(NVS_FLASH_BASE + (uint32_t)off + (uint32_t)done);
     }
     return 0;
 }
