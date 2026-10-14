@@ -15,6 +15,7 @@
 #include "widgets/w_barpanel.h"
 #include "widgets/w_dots.h"
 #include "widgets/w_gauge.h"
+#include "widgets/w_nvm.h"
 #include "widgets/w_ram.h"
 #include "widgets/w_dial.h"
 #include "widgets/w_switch.h"
@@ -60,6 +61,7 @@ typedef struct {
     struct W_Dial dial;       // page 2: the arc that steps round
     struct W_Switch sw;       // page 2: flips with the AO's led
     struct W_Ram ram;         // page 2: the on-chip RAM, from the linker
+    struct W_Nvm nvm;         // page 2: the blinky count, out of the NOR
 
     // What the widgets last showed, so an unchanged model costs nothing: no
     // property writes, no invalidation, no redraw.
@@ -75,6 +77,12 @@ typedef struct {
     uint32_t dialAt;
     uint16_t dialPct;
     bool dialUp;         // the arc's direction: up to full, then to half
+    // NVM_Blinky: the LED edge count as last written to the NOR, and when the
+    // next write is due. Ten seconds between writes is the throttle: two a
+    // second would spend the NOR's 100k cycles in about three years, while at
+    // ten seconds an 8-byte entry takes the store out past a century.
+    uint32_t nvmBlinky;
+    uint32_t nvmAt;
     uint32_t cpuIdle;
     uint32_t cpuTotal;
     uint32_t cpuPct;

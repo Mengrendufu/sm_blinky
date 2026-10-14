@@ -16,6 +16,7 @@
 #include "bsp.h"
 #include "sm_tracer.h"
 #include "sst_port.h"   // defines SST_EVT_POOL_NUM, then the pool's API
+#include "flash.h"        // the AO's key-value requests
 
 // The internal SRAM as the linker script laid it out: the static image ends
 // at _ebss, the stack starts at the top (_estack). The gap between them is
@@ -40,6 +41,10 @@ extern uint8_t _estack;
 // ones; 2 Hz is where numbers stop being interesting and redraws stop being
 // cheap.
 #define UI_STAT_MS 500U
+
+// NVM_Blinky: the key it lives under in the NOR, and how often it is written.
+#define NVM_BLINKY_KEY 2U
+#define SM_UI_NVM_MS  10000U
 
 // The live page's arc, one flourish per visit: empty to full, then back down
 // to half, and that is where the page leaves it. The step is deliberately
@@ -409,7 +414,13 @@ static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
     self->dialAt = (uint32_t)xTaskGetTickCount()
                    + pdMS_TO_TICKS(SM_UI_DIAL_MS);
     W_Dial_setValue(&self->dial, 0U);
-    W_Switch_create(&self->sw, Ui_dispPageRoot(), 92, 176);
+    W_Switch_create(&self->sw, Ui_dispPageRoot(), 12, 176);
+    W_Nvm_create(&self->nvm, Ui_dispPageRoot(), 74, 181);
+    if (Flash_nvsRead(NVM_BLINKY_KEY, &self->nvmBlinky,
+                      sizeof(self->nvmBlinky))) {
+        W_Nvm_set(&self->nvm, self->nvmBlinky);
+    }
+    self->nvmAt = (uint32_t)xTaskGetTickCount() + pdMS_TO_TICKS(SM_UI_NVM_MS);
     // The RAM figure never moves: it is the static image against the top of
     // the stack, so the page sets it once, on the way in.
     W_Ram_create(&self->ram, Ui_dispPageRoot());
@@ -442,6 +453,19 @@ static SM_RetState Sm_Ui_live_(void * const me,
                 W_Switch_set(&self->sw, self->ledOn);
             }
             (void)Sm_Ui_slow_(self);   // the corner's cpu readout
+
+            // NVM_Blinky: hand the edge count to the flash AO every ten
+            // seconds. The readout only moves when the write came back true,
+            // so what it shows is what the NOR holds, not what RAM hopes.
+            if ((int32_t)(now - self->nvmAt) >= 0) {
+                uint32_t const v = self->ledEdges;
+
+                if (Flash_nvsWrite(NVM_BLINKY_KEY, &v, sizeof(v))) {
+                    self->nvmBlinky = v;
+                    W_Nvm_set(&self->nvm, v);
+                }
+                self->nvmAt = now + pdMS_TO_TICKS(SM_UI_NVM_MS);
+            }
 
             if ((int32_t)(now - self->dialAt) >= 0) {
                 if (self->dialUp) {

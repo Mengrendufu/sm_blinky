@@ -52,6 +52,7 @@ set(SRC_ALL
     ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_barpanel.c
     ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_switch.c
     ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_dial.c
+    ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_nvm.c
     ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_ram.c
     ${CMAKE_SOURCE_DIR}/application/ui/hsm/sm_ui.c
     ${CMAKE_SOURCE_DIR}/application/flash
