@@ -16,7 +16,7 @@
 #include "bsp.h"
 #include "sm_tracer.h"
 #include "sst_port.h"   // defines SST_EVT_POOL_NUM, then the pool's API
-#include "flash.h"        // the AO's key-value requests
+#include "nvm.h"          // the snapshot both sides meet in
 
 // The internal SRAM as the linker script laid it out: the static image ends
 // at _ebss, the stack starts at the top (_estack). The gap between them is
@@ -41,10 +41,6 @@ extern uint8_t _estack;
 // ones; 2 Hz is where numbers stop being interesting and redraws stop being
 // cheap.
 #define UI_STAT_MS 500U
-
-// NVM_Blinky: the key it lives under in the NOR, and how often it is written.
-#define NVM_BLINKY_KEY 2U
-#define SM_UI_NVM_MS  10000U
 
 // The live page's arc, one flourish per visit: empty to full, then back down
 // to half, and that is where the page leaves it. The step is deliberately
@@ -416,24 +412,12 @@ static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
     W_Dial_setValue(&self->dial, 0U);
     W_Switch_create(&self->sw, Ui_dispPageRoot(), 12, 176);
     W_Nvm_create(&self->nvm, Ui_dispPageRoot(), 74, 181);
-    {
-        /* The counter is checkpointed when the page is left (see the exit
-         * action), so a read that finds nothing is simply the first visit: put
-         * the current count in and show it. */
-        bool ok = Flash_nvsRead(NVM_BLINKY_KEY, &self->nvmBlinky,
-                                sizeof(self->nvmBlinky));
-
-        if (!ok) {
-            uint32_t const v = self->ledEdges;
-
-            ok = Flash_nvsWrite(NVM_BLINKY_KEY, &v, sizeof(v));
-            self->nvmBlinky = v;
-        }
-        if (ok) {
-            W_Nvm_set(&self->nvm, self->nvmBlinky);
-        }
-    }
-    self->nvmAt = (uint32_t)xTaskGetTickCount() + pdMS_TO_TICKS(SM_UI_NVM_MS);
+    // The snapshot, not the NOR: the flash task filled it at boot and writes
+    // it back every ten seconds, so the page only has to read it. Syncing it
+    // here catches up on the edges counted while other pages held the glass.
+    Nvm_setBlinky(self->ledEdges);
+    self->nvmBlinky = Nvm_blinky();
+    W_Nvm_set(&self->nvm, self->nvmBlinky);
     // The RAM figure never moves: it is the static image against the top of
     // the stack, so the page sets it once, on the way in.
     W_Ram_create(&self->ram, Ui_dispPageRoot());
@@ -445,15 +429,10 @@ static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
     self->statAt = 0U;          // the first window lands right away
 }
 static void Sm_Ui_live_exit_(SM_Hsm * const me) SM_HSM_RETT {
-    Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
+    (void)me;
 
-    /* NVM_Blinky's checkpoint: leaving the page is the one moment that always
-     * comes while the page is up. Ten seconds inside the page would never
-     * happen - the page only holds the glass for eight - which is exactly the
-     * bug this replaces (2026-10-13). One write per visit is every sixteen
-     * seconds, which the wear account in AGENTS.md covers. */
-    (void)Flash_nvsWrite(NVM_BLINKY_KEY, &self->ledEdges,
-                         sizeof(self->ledEdges));
+    /* The write to the NOR is the flash task's, on a deadline of its own:
+     * every ten seconds, as the wear account in AGENTS.md covers. */
     Ui_dispPageEnd();
 }
 static SM_RetState Sm_Ui_live_(void * const me,
@@ -472,23 +451,21 @@ static SM_RetState Sm_Ui_live_(void * const me,
             uint32_t const now = (uint32_t)xTaskGetTickCount();
             if (Sm_Ui_fast_(self)) {
                 W_Switch_set(&self->sw, self->ledOn);
+                // Publish: the snapshot is what the flash task writes out,
+                // so every edge the page sees goes into it.
+                Nvm_setBlinky(self->ledEdges);
             }
             (void)Sm_Ui_slow_(self);   // the corner's cpu readout
 
-            // NVM_Blinky: hand the edge count to the flash AO every ten
-            // seconds. The readout only moves when the write came back true,
-            // so what it shows is what the NOR holds, not what RAM hopes.
-            if ((int32_t)(now - self->nvmAt) >= 0) {
-                uint32_t const v = self->ledEdges;
+            // NVM_Blinky reads the snapshot: the number on the glass is the
+            // count as it stands, and the flash task moves it to the NOR.
+            {
+                uint32_t const v2 = Nvm_blinky();
 
-                bool const ok = Flash_nvsWrite(NVM_BLINKY_KEY, &v,
-                                               sizeof(v));
-
-                if (ok) {
-                    self->nvmBlinky = v;
-                    W_Nvm_set(&self->nvm, v);
+                if (v2 != self->nvmBlinky) {
+                    self->nvmBlinky = v2;
+                    W_Nvm_set(&self->nvm, v2);
                 }
-                self->nvmAt = now + pdMS_TO_TICKS(SM_UI_NVM_MS);
             }
 
             if ((int32_t)(now - self->dialAt) >= 0) {

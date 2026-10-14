@@ -15,6 +15,7 @@
 #include "sm_flash.h"
 #include "flash_req_priv.h"
 #include "nvs.h"
+#include "nvm.h"
 #include "sm_tracer.h"
 #include <string.h>
 
@@ -31,6 +32,14 @@
 // sit below its callers: a notification wait has no priority inheritance, so
 // a middle-priority task in between would stretch every caller's block.
 #define FLASH_PRIORITY    23U
+
+// The application snapshot is written out this often. The deadline is checked
+// on every wake, not only on a timeout: tying the write to a page's life is
+// what made the first version never checkpoint at all (2026-10-13).
+#define FLASH_NVM_MS      10000U
+
+// NVM_Blinky lives under this key in the store.
+#define NVM_BLINKY_KEY    2U
 
 // Completed requests between [MEM][STACK][FLASH] reports. The first request
 // reports as well, so a boot that issues a single one still says how much
@@ -75,6 +84,7 @@ void Flash_start(void) {
 // quarter of that, which is plenty of room for a key-value store this size.
 static struct nvs_fs Flash_nvs_;
 static uint32_t Flash_boot_;
+static TickType_t Flash_nvmAt_;   // when the next checkpoint is due
 
 static uint32_t Flash_nvs_us_(void) {
     return ((uint32_t)HAL_GetTick() * 1000U) + (uint32_t)TIM1->CNT;
@@ -127,6 +137,17 @@ static void Flash_nvsBoot_(void) {
     SM_TRACE_PAYLOAD_BE((unsigned char)((Flash_boot_ >> 8) & 0xFFU))
     SM_TRACE_PAYLOAD_BE(2U)   // tag 2: the NVS lives in the flash task now
     SM_TRACE_END(0)
+
+    // NVM_Blinky: what the last run left behind goes into the snapshot the UI
+    // reads. A first power-up finds nothing, and the snapshot starts at zero.
+    {
+        uint32_t blinky = 0U;
+
+        if (nvs_read(&Flash_nvs_, NVM_BLINKY_KEY, &blinky, sizeof(blinky))
+            == (ssize_t)sizeof(blinky)) {
+            Nvm_setBlinky(blinky);
+        }
+    }
 }
 
 // The KV side of the AO: the same store the boot code mounted, reached by the
@@ -144,11 +165,24 @@ static void Flash_thread_(void *arg) {
 
     Flash_nvsBoot_();
 
+    Flash_nvmAt_ = xTaskGetTickCount();
+
     for (;;) {
         // WAIT: nothing pending, so the thread parks here and the CPU goes
-        // elsewhere until a producer writes slot 0.
-        (void)ulTaskNotifyTakeIndexed(FLASH_REQ_INDEX, pdTRUE, portMAX_DELAY);
+        // elsewhere until a producer writes slot 0 - or until a second has
+        // gone by, which is when the checkpoint's deadline is looked at. The
+        // deadline is absolute, so a busy stretch cannot starve it.
+        (void)ulTaskNotifyTakeIndexed(FLASH_REQ_INDEX, pdTRUE,
+                                      pdMS_TO_TICKS(1000U));
         Flash_drain_();
+
+        if ((int32_t)(xTaskGetTickCount() - Flash_nvmAt_)
+            >= (int32_t)pdMS_TO_TICKS(FLASH_NVM_MS)) {
+            uint32_t const v = Nvm_blinky();
+
+            Flash_nvmAt_ = xTaskGetTickCount();
+            (void)nvs_write(&Flash_nvs_, NVM_BLINKY_KEY, &v, sizeof(v));
+        }
     }
 }
 //............................................................................

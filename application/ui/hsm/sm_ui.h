@@ -77,12 +77,10 @@ typedef struct {
     uint32_t dialAt;
     uint16_t dialPct;
     bool dialUp;         // the arc's direction: up to full, then to half
-    // NVM_Blinky: the LED edge count as last written to the NOR, and when the
-    // next write is due. Ten seconds between writes is the throttle: two a
-    // second would spend the NOR's 100k cycles in about three years, while at
-    // ten seconds an 8-byte entry takes the store out past a century.
+    // NVM_Blinky as the page last put it on the glass. The count itself
+    // lives in the snapshot (application/nvm), where the flash task picks it
+    // up every ten seconds.
     uint32_t nvmBlinky;
-    uint32_t nvmAt;
     uint32_t cpuIdle;
     uint32_t cpuTotal;
     uint32_t cpuPct;

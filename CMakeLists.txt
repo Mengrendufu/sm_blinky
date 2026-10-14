@@ -55,6 +55,7 @@ set(SRC_ALL
     ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_nvm.c
     ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_ram.c
     ${CMAKE_SOURCE_DIR}/application/ui/hsm/sm_ui.c
+    ${CMAKE_SOURCE_DIR}/application/nvm/nvm.c
     ${CMAKE_SOURCE_DIR}/application/flash
     ${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/include
     ${CMAKE_SOURCE_DIR}/application/flash/thread/flash.c
@@ -103,6 +104,7 @@ target_include_directories(${PROJECT_NAME}.elf PRIVATE
     ${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/src
     ${CMAKE_SOURCE_DIR}/application
     ${CMAKE_SOURCE_DIR}/application/ui
+    ${CMAKE_SOURCE_DIR}/application/nvm
     ${CMAKE_SOURCE_DIR}/application/ui/thread
     ${CMAKE_SOURCE_DIR}/application/ui/hsm
     ${CMAKE_SOURCE_DIR}/application/flash
