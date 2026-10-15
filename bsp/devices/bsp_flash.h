@@ -86,6 +86,14 @@ typedef void (*BSP_flashDoneCb)(bool ok);
 // the page). The page itself, datasheet 7.2.x.
 #define FLASH_DEV_PAGE 256UL
 
+// Device geometry as the W25Q128 datasheet states it: properties of the
+// part, not of any one user of it, so they are declared once here and
+// every caller takes them from here - the NVS port among them.
+#define FLASH_DEV_SECTOR  4096UL          /* erasable unit */
+#define FLASH_DEV_SECTORS 4096U           /* 16 MB / 4 KB */
+#define FLASH_DEV_SIZE    (FLASH_DEV_SECTOR * FLASH_DEV_SECTORS)
+#define FLASH_DEV_ERASED  0xFFU           /* erased byte reads back */
+
 // One arm moves this much and no more. 32 KB is ~15 ms on the wire, which is
 // the window the caller gets between chunks; the size is here because the
 // caller is the one that loops. Raising it to the channel's own 16 bit limit

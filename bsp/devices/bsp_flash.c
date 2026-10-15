@@ -42,9 +42,6 @@
 // any budget here has to be 200 ms rather than 30.
 // (not FLASH_PAGE_SIZE: the HAL already uses that name for the internal
 //  flash page size, and redefining it would lie to the HAL's own driver)
-#define FLASH_SECTOR_SIZE   4096UL
-#define FLASH_SECTORS       4096U // 16 MB / 4 KB
-#define FLASH_SIZE          (FLASH_SECTOR_SIZE * FLASH_SECTORS)
 #define FLASH_ERASE_MS      2000U
 #define FLASH_PROGRAM_MS    100U
 
@@ -183,8 +180,8 @@ bool BSP_flashRead(uint32_t address, uint8_t *dst, uint32_t len) {
 
     BSP_flashAddr_(addr, address);
 
-    if ((dst == (uint8_t *)0) || (len == 0U) || (address >= FLASH_SIZE)
-        || (len > (FLASH_SIZE - address))) {
+    if ((dst == (uint8_t *)0) || (len == 0U) || (address >= FLASH_DEV_SIZE)
+        || (len > (FLASH_DEV_SIZE - address))) {
         return false;
     }
 
@@ -270,8 +267,8 @@ void BSP_flashReadDma(uint32_t address, uint8_t *dst, uint32_t len,
     BSP_flashAddr_(addr, address);
 
     if ((dst == (uint8_t *)0) || (len == 0U) || (len > FLASH_DMA_CHUNK)
-        || flashDmaBusy_ || (address >= FLASH_SIZE)
-        || (len > (FLASH_SIZE - address))) {
+        || flashDmaBusy_ || (address >= FLASH_DEV_SIZE)
+        || (len > (FLASH_DEV_SIZE - address))) {
         // A refusal is reported the way a failed transfer is, so a caller
         // that waits on the callback always reads the truth out of
         // BSP_flashDmaFailed().
@@ -323,8 +320,8 @@ void BSP_flashProgramPageDma(uint32_t address, uint8_t const *data,
     if ((data == (uint8_t const *)0) || (len == 0U)
         || (len > FLASH_DEV_PAGE)
         || ((address % FLASH_DEV_PAGE) + len > FLASH_DEV_PAGE)
-        || flashDmaBusy_ || (address >= FLASH_SIZE)
-        || (len > (FLASH_SIZE - address))) {
+        || flashDmaBusy_ || (address >= FLASH_DEV_SIZE)
+        || (len > (FLASH_DEV_SIZE - address))) {
         flashDmaFailed_ = true;
         if (done != (BSP_flashDoneCb)0) {
             done(false);
@@ -635,7 +632,7 @@ bool BSP_flashEraseSectorStart(uint32_t address) {
 
     BSP_flashAddr_(addr, address);
 
-    if ((address % FLASH_SECTOR_SIZE) != 0U) {
+    if ((address % FLASH_DEV_SECTOR) != 0U) {
         return false;
     }
 

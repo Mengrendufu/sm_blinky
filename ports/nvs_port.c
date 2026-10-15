@@ -19,15 +19,13 @@
 #include "bsp_flash.h"
 
 #define NVS_FLASH_BASE   0x00100000U   /* the NOR region NVS was given */
-#define NVS_ERASE_SIZE   4096U
-#define NVS_PAGE_SIZE    256U
 #define NVS_WBS          4U
 #define NVS_ERASE_POLL_MS 2U
 #define NVS_ERASE_DEADLINE_MS 3000U
 
 static const struct flash_parameters nvs_flash_par_ = {
     NVS_WBS,
-    0xFFU,
+    FLASH_DEV_ERASED,   /* what an erased byte reads back as */
 };
 
 void *nvs_port_device(void) {
@@ -66,7 +64,7 @@ int flash_write(void *dev, off_t off, const void *buf, size_t len) {
     }
 
     while (len > 0U) {
-        size_t chunk = NVS_PAGE_SIZE - (size_t)(addr % NVS_PAGE_SIZE);
+        size_t chunk = FLASH_DEV_PAGE - (size_t)(addr % FLASH_DEV_PAGE);
 
         if (chunk > len) {
             chunk = len;
@@ -85,7 +83,7 @@ int flash_flatten(void *dev, off_t off, size_t len) {
     size_t done;
 
     (void)dev;
-    for (done = 0U; done < len; done += NVS_ERASE_SIZE) {
+    for (done = 0U; done < len; done += FLASH_DEV_SECTOR) {
         nvs_erase_let_go_(NVS_FLASH_BASE + (uint32_t)off + (uint32_t)done);
     }
     return 0;
@@ -104,8 +102,8 @@ size_t flash_get_write_block_size(void *dev) {
 int flash_get_page_info_by_offs(void *dev, off_t off,
                                 struct flash_pages_info *info) {
     (void)dev;
-    info->start_offset = (off_t)((uint32_t)off & ~(NVS_ERASE_SIZE - 1U));
-    info->size = NVS_ERASE_SIZE;
-    info->index = (uint32_t)(info->start_offset / (off_t)NVS_ERASE_SIZE);
+    info->start_offset = (off_t)((uint32_t)off & ~(FLASH_DEV_SECTOR - 1U));
+    info->size = FLASH_DEV_SECTOR;
+    info->index = (uint32_t)(info->start_offset / (off_t)FLASH_DEV_SECTOR);
     return 0;
 }
