@@ -21,7 +21,7 @@
 #define ASSET_DATA   (ASSET_BASE + 0x1000U)
 #define ASSET_SRAM   BSP_SRAM_BASE  // external IS62WV51216, FSMC bank 3
 #define ASSET_MAGIC  0x41535431U    // "AST1", the word the bootloader writes
-#define ASSET_MAX    0x00080000U    // 512 KB: three fixed-size slots today
+#define ASSET_MAX         NOR_ASSET_SIZE   /* the three slots: 460,800 B */
 #define ASSET_TRACE  45U
 
 static Asset Asset_;

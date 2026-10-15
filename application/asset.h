@@ -29,12 +29,13 @@
 
 // Where the image sits in the NOR: the bootloader's layout, in the one place
 // both the loader here and the run time read back agree on.
-#define ASSET_NOR_BASE 0x00081000U
+#include "nor_partitions.h"   /* the board NOR map */
+#define ASSET_NOR_BASE    NOR_ASSET_BASE   /* from nor_partitions.h */
 
 // One slot per background. The images are all the same size today, so the
 // payload is just slots laid end to end; a table with per-slot lengths is the
 // step after this one (it only earns its keep once they differ).
-#define ASSET_SLOT_BYTES  153600U   // 240 x 320 x 2, RGB565
+#define ASSET_SLOT_BYTES  NOR_ASSET_SLOT   /* from nor_partitions.h */
 
 typedef struct {
     bool present;               // header sane and the payload CRC matched
