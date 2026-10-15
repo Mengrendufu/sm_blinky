@@ -19,3 +19,18 @@ CompileFlags:
 Diagnostics:
   Suppress:
     - drv_unknown_argument
+
+# The component keeps a second, host-side implementation of the port for its
+# own tests (ports/nvs_port_template.h declares it, tests/nvs_port_host.c
+# defines it, tests/nor_sim.* simulates the part). None of that is a
+# participant in this project's CMakeLists - those files are not compiled here
+# and do not appear in the database - but they carry the same function names
+# as the real port, so an index that includes them sends go-to-definition into
+# the wrong tree. This keeps clangd out of them.
+---
+If:
+  PathMatch: 3rd_party/sm_nvs/(tests|ports)/.*
+Index:
+  Background: Skip
+Diagnostics:
+  Suppress: '*'
