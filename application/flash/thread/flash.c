@@ -106,7 +106,9 @@ static void Flash_nvsBoot_(void) {
 
     Flash_nvs_.offset = 0U;
     Flash_nvs_.sector_size = 4096U;   // the W25Q128's erasable sector
-    Flash_nvs_.sector_count = 4U;
+    Flash_nvs_.sector_count = 64U;  // 256 KB of log: sixteen times the
+                                    // sectors means sixteen times
+                                    // the erases each one may take
     Flash_nvs_.flash_device = nvs_port_device();
 
     t0 = Flash_nvs_us_();
