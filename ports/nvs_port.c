@@ -18,9 +18,10 @@
 #include "bsp.h"
 #include "bsp_flash.h"
 
-#include "nor_w25q128.h"             /* the part's geometry, straight from the datasheet */
+#include "nor_w25q128.h"       /* the part's geometry, from the datasheet */
+#include "nor_partitions.h"    /* and where this board put the log */
 
-#define NVS_FLASH_BASE   0x00100000U   /* the NOR region NVS was given */
+#define NVS_FLASH_BASE   NOR_NVS_BASE   /* the NOR region NVS was given */
 #define NVS_WBS          4U
 #define NVS_ERASE_POLL_MS 2U
 #define NVS_ERASE_DEADLINE_MS 3000U

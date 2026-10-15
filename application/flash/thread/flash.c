@@ -16,6 +16,7 @@
 #include "flash_req_priv.h"
 #include "nvs.h"
 #include "nvm.h"
+#include "nor_partitions.h"   // where the log lives and how many sectors
 #include "sm_tracer.h"
 #include <string.h>
 
@@ -106,9 +107,9 @@ static void Flash_nvsBoot_(void) {
 
     Flash_nvs_.offset = 0U;
     Flash_nvs_.sector_size = 4096U;   // the W25Q128's erasable sector
-    Flash_nvs_.sector_count = 64U;  // 256 KB of log: sixteen times the
-                                    // sectors means sixteen times
-                                    // the erases each one may take
+    Flash_nvs_.sector_count = NOR_NVS_SECTORS;   // 256 KB: sixteen times
+                                                 // the sectors, sixteen
+                                                 // times the erase budget
     Flash_nvs_.flash_device = nvs_port_device();
 
     t0 = Flash_nvs_us_();
