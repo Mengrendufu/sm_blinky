@@ -11,8 +11,8 @@
 //
 // No code, no dependencies, nothing to link: the BSP driver and the NVS port
 // both include this, and neither should have to pull in the other's header to
-// learn how big a page is. Geometry only - command opcodes and timings are the
-// driver's business and stay there.
+// learn how big a page is. Geometry only: command opcodes and timings are
+// the driver's business and stay there.
 
 #ifndef NOR_W25Q128_H_
 #define NOR_W25Q128_H_
