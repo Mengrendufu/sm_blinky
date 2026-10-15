@@ -18,6 +18,8 @@
 #include "bsp.h"
 #include "bsp_flash.h"
 
+#include "nor_w25q128.h"             /* the part's geometry, straight from the datasheet */
+
 #define NVS_FLASH_BASE   0x00100000U   /* the NOR region NVS was given */
 #define NVS_WBS          4U
 #define NVS_ERASE_POLL_MS 2U
