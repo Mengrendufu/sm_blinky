@@ -87,6 +87,10 @@ static lv_image_dsc_t Ui_splashDsc_;  // boot image, slot 2
 static uint32_t Ui_frameUs_;
 static uint32_t Ui_frameMin_;
 static uint32_t Ui_frameMax_;
+// Only the last strip counts: one completed refresh, even with many areas.
+static uint32_t Ui_frames_;
+static uint32_t Ui_fpsAt_;
+static uint32_t Ui_fps_;
 
 static uint16_t Ui_strip_[UI_STRIP_PX] LV_ATTRIBUTE_MEM_ALIGN;
 
@@ -120,6 +124,7 @@ static uint32_t Ui_us_(void);
 void Ui_dispInit(void) {
     lv_init();
     lv_tick_set_cb(Ui_tick_);
+    Ui_fpsAt_ = lv_tick_get();
 
     Ui_disp_ = lv_display_create(UI_LCD_HOR, UI_LCD_VER);
     configASSERT(Ui_disp_ != (lv_display_t *)0);
@@ -229,6 +234,9 @@ void Ui_dispPageBegin(uint32_t slot) {
 // The frame readouts the stats page carries: what the last heartbeat cost,
 // and
 // the extremes it has shown.
+uint32_t Ui_dispFps(void) {
+    return Ui_fps_;
+}
 uint32_t Ui_dispFrameUs(void) {
     return Ui_frameUs_;
 }
@@ -311,6 +319,15 @@ TickType_t Ui_dispHeartbeat(void) {
     }
     Ui_frameUs_ = dt;
 
+    uint32_t const fpsNow = lv_tick_get();
+    uint32_t const elapsed = fpsNow - Ui_fpsAt_;
+
+    if (elapsed >= 1000U) {
+        Ui_fps_ = (Ui_frames_ * 1000U + elapsed / 2U) / elapsed;
+        Ui_frames_ = 0U;
+        Ui_fpsAt_ = fpsNow;
+    }
+
     if ((next == LV_NO_TIMER_READY) || (next > UI_FALLBACK_MS)) {
         return pdMS_TO_TICKS(UI_FALLBACK_MS);
     }
@@ -340,6 +357,10 @@ static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
     __DSB();
     BSP_lcdWritePixelsDma((uint16_t const *)(void const *)px, width * height);
     Ui_dmaWait_(UI_DMA_TIMEOUT_MS);
+
+    if (lv_display_flush_is_last(disp)) {
+        ++Ui_frames_;
+    }
 
     // The page's first frame is complete once its last dirty area is on the
     // glass. That is the moment the light can come on - bring-up left the

@@ -15,6 +15,7 @@
 //............................................................................
 void W_Topbar_init(struct W_Topbar *bar) {
     bar->title = (struct _lv_obj_t *)0;
+    bar->fps = (struct _lv_obj_t *)0;
     bar->cpu = (struct _lv_obj_t *)0;
     bar->led = (struct _lv_obj_t *)0;
 }
@@ -32,14 +33,19 @@ void W_Topbar_create(struct W_Topbar *bar, struct _lv_obj_t *parent,
     lv_led_on(led);
     bar->led = (struct _lv_obj_t *)led;
 
-    // The corner carries one number that belongs to the system rather than to
-    // a page: the CPU load, left of the led.
+    // Shared readouts, from left to right: FPS, CPU load, heartbeat led.
+    bar->fps = WidgetIO_label(parent, "fps --", 0x9AA3ACU);
+    lv_obj_align((lv_obj_t *)bar->fps, LV_ALIGN_TOP_RIGHT, -96, 6);
     bar->cpu = WidgetIO_label(parent, "cpu --%", 0x9AA3ACU);
     lv_obj_align((lv_obj_t *)bar->cpu, LV_ALIGN_TOP_RIGHT, -24, 6);
 }
 //............................................................................
 void W_Topbar_setTitle(struct W_Topbar *bar, char const *title) {
     lv_label_set_text((lv_obj_t *)bar->title, title);
+}
+//............................................................................
+void W_Topbar_setFps(struct W_Topbar *bar, unsigned fps) {
+    lv_label_set_text_fmt((lv_obj_t *)bar->fps, "fps %u", fps);
 }
 //............................................................................
 void W_Topbar_setCpu(struct W_Topbar *bar, unsigned pct) {

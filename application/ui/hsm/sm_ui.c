@@ -195,6 +195,7 @@ static bool Sm_Ui_slow_(Sm_Ui * const me) {
         if (dTotal > 0U) {
             me->cpuPct = 100U - ((dIdle * 100U) / dTotal);
         }
+        W_Topbar_setFps(&me->top, (unsigned)Ui_dispFps());
         W_Topbar_setCpu(&me->top, (unsigned)me->cpuPct);
         me->statAt = now;
     }

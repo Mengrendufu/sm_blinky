@@ -53,6 +53,8 @@ TickType_t Ui_dispHeartbeat(void);
 
 // What the last heartbeat cost, and the extremes it has shown. The stats page
 // carries them; the measurement is the adapter's.
+// Completed refreshes per second over the last one-second window.
+uint32_t Ui_dispFps(void);
 uint32_t Ui_dispFrameUs(void);
 uint32_t Ui_dispFrameMin(void);
 uint32_t Ui_dispFrameMax(void);
