@@ -200,6 +200,7 @@ struct _lv_obj_t *Ui_dispPageRoot(void) {
 }
 //............................................................................
 void Ui_dispPageEnd(void) {
+    lv_obj_set_style_bg_image_src(Ui_pageRoot_, (void const *)0, 0);
     lv_obj_clean(Ui_pageRoot_);
 }
 //............................................................................
@@ -218,14 +219,8 @@ void Ui_dispPageBegin(uint32_t slot) {
     // and the widgets sit on top of it. Without it the page keeps the black
     // background, which is the degradation the design counts on.
     if (bgPixels != (void const *)0) {
-        lv_obj_t *bg;
-
         Ui_slotDesc_(&Ui_bgDsc_, bgPixels);
-
-        bg = lv_image_create(Ui_pageRoot_);
-        lv_image_set_src(bg, &Ui_bgDsc_);
-        lv_obj_align(bg, LV_ALIGN_CENTER, 0, 0);
-        lv_obj_remove_flag(bg, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_style_bg_image_src(Ui_pageRoot_, &Ui_bgDsc_, 0);
     }
 
     Ui_framePending_ = true;   // this page starts with a whole screen
@@ -250,14 +245,11 @@ uint32_t Ui_dispFrameMax(void) {
 bool Ui_dispSplash(void) {
     Asset const * const asset = Asset_get();
     void const * const pixels = Asset_slot(asset, 2U);
-    lv_obj_t *img;
 
     Ui_dbgSplashOk_ = 0U;
 
-    // The boot image is an ordinary widget now, not a push straight to the
-    // panel: one writer on the glass, and the state machine owns it. The
-    // frame's coverage proof still runs, in the heartbeat, on the first frame
-    // this page draws.
+    // The boot image is the page container's background, with the same
+    // single flush writer as the content pages.
     Ui_dispPageEnd();
     Ui_screenBase_(Ui_pageRoot_);
 
@@ -267,10 +259,7 @@ bool Ui_dispSplash(void) {
 
     Ui_slotDesc_(&Ui_splashDsc_, pixels);
 
-    img = lv_image_create(Ui_pageRoot_);
-    lv_image_set_src(img, &Ui_splashDsc_);
-    lv_obj_align(img, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_remove_flag(img, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_bg_image_src(Ui_pageRoot_, &Ui_splashDsc_, 0);
 
     Ui_framePending_ = true;   // this page starts with a whole screen
     Ui_dbgSplashOk_ = 1U;
