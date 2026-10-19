@@ -46,17 +46,13 @@ extern uint8_t _estack;
 // ahead of it; its body sits further down beside the page actions it serves.
 static void Sm_Ui_publish_(Sm_Ui * const self);
 
-// The live page's arc, one flourish per visit: empty to full, then back down
-// to half, and that is where the page leaves it. The step is deliberately
-// small - two percent reads as a turning ring, five read as jumps - so the
-// period has to be short: fifty steps up and twenty five down at 100 ms is
-// 7.5 seconds, inside UI_PAGE_MS. Each step is one whole-band redraw, about
-// 5 ms, so the flourish costs about 5 percent of the thread while its page is
-// up.
-#define SM_UI_DIAL_MS 100U
+// == DEBUG: sustained single-widget refresh experiment. ==
+// Request a two-percent step every 30 ms, cycling from empty to full and
+// back to empty until the live page exits.
+#define SM_UI_DIAL_MS 30U
 #define SM_UI_DIAL_STEP 2U
 #define SM_UI_DIAL_TOP 100U
-#define SM_UI_DIAL_HOLD 50U
+#define SM_UI_DIAL_BOTTOM 0U
 
 // The task rows of page 1's panel: five threads, then the two pools. Only the
 // order and the names are ours - the sizes come from the kernel, which
@@ -498,8 +494,11 @@ static SM_RetState Sm_Ui_live_(void * const me,
                         self->dialUp = false;
                     }
                 }
-                else if (self->dialPct > SM_UI_DIAL_HOLD) {
+                else if (self->dialPct > SM_UI_DIAL_BOTTOM) {
                     self->dialPct -= SM_UI_DIAL_STEP;
+                    if (self->dialPct <= SM_UI_DIAL_BOTTOM) {
+                        self->dialUp = true;
+                    }
                 }
                 self->dialAt = now + pdMS_TO_TICKS(SM_UI_DIAL_MS);
                 W_Dial_setValue(&self->dial, self->dialPct);
