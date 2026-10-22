@@ -32,6 +32,7 @@
 //============================================================================
 #include "stm32f1xx_hal.h"
 #include "bsp_flash.h"
+#include "sm_assert.h"
 #include "sm_tracer.h"
 
 #include <stdbool.h>
@@ -182,6 +183,15 @@ void Error_Handler(void) {
     }
 }
 //............................................................................
+// A lost DMA completion cannot return a buffer that hardware may still own.
+void SM_onAssert(char const *module, int label) {
+    (void)module;
+    (void)label;
+    NVIC_SystemReset();
+    for (;;) {
+    }
+}
+//............................................................................
 // The TIM1 time base (bsp/platform/stm32f1xx_hal_timebase_tim.c) starts the
 // timer and enables the interrupt, but the callback that actually feeds
 // HAL_IncTick() has to come from the image: the HAL's own is an empty weak
@@ -325,6 +335,54 @@ static void Bl_nak_(void) {
     (void)HAL_UART_Transmit(&Bl_uart_, &n, 1U, 100U);
 }
 //............................................................................
+// Bare-metal wait capabilities: DMA completion is latched, then consumed
+// by a busy wait. Burn mode runs in main with interrupts and HAL tick live.
+typedef struct {
+    volatile bool done;
+} Bl_FlashWait;
+
+static Bl_FlashWait Bl_flashWait_;
+
+static bool Bl_flashIsCaller_(void *context) {
+    return (context == &Bl_flashWait_) && (__get_IPSR() == 0U);
+}
+
+static bool Bl_flashWaitDone_(void *context, uint32_t timeoutMs) {
+    Bl_FlashWait * const wait = (Bl_FlashWait *)context;
+    uint32_t const started = HAL_GetTick();
+
+    while (!wait->done) {
+        if ((uint32_t)(HAL_GetTick() - started) >= timeoutMs) {
+            return false;
+        }
+    }
+    wait->done = false;
+    return true;
+}
+
+static void Bl_flashNotifyDone_(void *context) {
+    Bl_FlashWait * const wait = (Bl_FlashWait *)context;
+
+    wait->done = true;
+}
+
+static void Bl_flashSleepMs_(void *context, uint32_t delayMs) {
+    (void)context;
+    HAL_Delay(delayMs);
+}
+
+static void Bl_flashBindWait_(void) {
+    BSP_flashWaitOps const ops = {
+        .context = &Bl_flashWait_,
+        .isCaller = &Bl_flashIsCaller_,
+        .waitDone = &Bl_flashWaitDone_,
+        .notifyDone = &Bl_flashNotifyDone_,
+        .sleepMs = &Bl_flashSleepMs_,
+    };
+
+    BSP_flashBindWait(&ops);
+}
+
 // Program one block into the NOR and read it back. Same bus, so the read-back
 // is a check of what the device kept, not of what we think we sent.
 static bool Bl_writeBlock_(uint32_t idx, uint32_t len) {
@@ -332,20 +390,17 @@ static bool Bl_writeBlock_(uint32_t idx, uint32_t len) {
     uint32_t off;
     uint32_t n;
 
-    if (!BSP_flashEraseSector(addr)) {
+    if (!BSP_flashEraseSectorWait(addr)) {
+        return false;
+    }
+
+    if (!BSP_flashWriteWait(addr, Bl_block_, len)) {
         return false;
     }
 
     for (off = 0U; off < len; off += BL_PAGE_BYTES) {
         n = ((len - off) > BL_PAGE_BYTES) ? BL_PAGE_BYTES : (len - off);
-        if (!BSP_flashProgramPage(addr + off, &Bl_block_[off], n)) {
-            return false;
-        }
-    }
-
-    for (off = 0U; off < len; off += BL_PAGE_BYTES) {
-        n = ((len - off) > BL_PAGE_BYTES) ? BL_PAGE_BYTES : (len - off);
-        if (!BSP_flashRead(addr + off, Bl_page_, n)) {
+        if (!BSP_flashReadWait(addr + off, Bl_page_, n)) {
             return false;
         }
         if (memcmp(Bl_page_, &Bl_block_[off], n) != 0) {
@@ -370,13 +425,13 @@ static bool Bl_commit_(void) {
     hdr[14] = 0U;
     hdr[15] = 0U;
 
-    if (!BSP_flashEraseSector(BL_ASSET_BASE)) {
+    if (!BSP_flashEraseSectorWait(BL_ASSET_BASE)) {
         return false;
     }
-    if (!BSP_flashProgramPage(BL_ASSET_BASE, hdr, BL_HDR_BYTES)) {
+    if (!BSP_flashWriteWait(BL_ASSET_BASE, hdr, BL_HDR_BYTES)) {
         return false;
     }
-    if (!BSP_flashRead(BL_ASSET_BASE, Bl_page_, BL_HDR_BYTES)) {
+    if (!BSP_flashReadWait(BL_ASSET_BASE, Bl_page_, BL_HDR_BYTES)) {
         return false;
     }
 
@@ -415,6 +470,7 @@ static void Bl_burn_(void) {
 
     Bl_say_("[bootloader] burn mode: handshake, blocks, then the header\r\n");
     BSP_flashInit();
+    Bl_flashBindWait_();
 
     for (;;) {
         // Polling: burn mode has nothing else to do and the app is not

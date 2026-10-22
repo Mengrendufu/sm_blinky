@@ -10,8 +10,6 @@
 #ifndef BSP_FLASH_H_
 #define BSP_FLASH_H_
 
-#include "nor_w25q128.h"   // the part's geometry, shared with the NVS port
-
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -37,86 +35,43 @@ void BSP_flashInit(void);
 // address itself, so len has no page boundary to respect - only the array
 // size.
 //
-// Block wise: the command and address stay byte at a time, the data goes out
-// through HAL_SPI_Receive() in blocks of FLASH_BLOCK_MAX. Whoever calls this
-// owns SPI2 for the duration: at run time that is the flash thread, and
-// nothing else may touch the bus meanwhile.
+// Boot-only polling read, before the run-time owner starts using the bus.
+// No wait capability binding is needed; the CPU polls the SPI throughout.
 bool BSP_flashRead(uint32_t address, uint8_t *dst, uint32_t len);
 
 // The same read moved by DMA, waited out by polling a flag instead of a task
 // notification: the boot path (Asset_load) has no task to notify, but it does
-// have interrupts now. Any length; it splits into FLASH_DMA_CHUNK pieces
-// itself. Blocking, so it is for the boot path only.
+// have interrupts now. Any length; the driver splits the transfer internally.
+// Blocking, so it is for the boot path only.
 bool BSP_flashReadDmaWait(uint32_t address, uint8_t *dst, uint32_t len);
 
-// Erase one 4 KB sector. `address` must be sector aligned (a misaligned one
-// would erase the sector around it), and this form spins on the device until
-// it is done - blockingly, for the bootloader and the self test. Measured
-// ~130 to 160 ms on this part.
-bool BSP_flashEraseSector(uint32_t address);
+// Waiting capabilities required by the BSP, implemented by the caller.
+// context is opaque to the BSP and must outlive every transfer. isCaller
+// accepts only the owning execution context, never an ISR. waitDone consumes
+// a completion notification (including one posted before waiting); false is
+// timeout. notifyDone must work both in an ISR and on inline start failure.
+// sleepMs delays execution (busy delay or yielding). Times are milliseconds.
+typedef struct {
+    void *context;
+    bool (*isCaller)(void *context);
+    bool (*waitDone)(void *context, uint32_t timeoutMs);
+    void (*notifyDone)(void *context);
+    void (*sleepMs)(void *context, uint32_t delayMs);
+} BSP_flashWaitOps;
 
-// The same erase without the wait: it starts the erase, and the caller polls
-// BSP_flashIsReady(). A run time caller uses this one, because the erase is
-// the device's time and a yielding wait costs no CPU at all.
-bool BSP_flashEraseSectorStart(uint32_t address);
+// Bind once from the owner before first use. Copies the structure; no queue
+// or mutex is provided. Only the caller accepted by isCaller may use waits.
+void BSP_flashBindWait(BSP_flashWaitOps const *ops);
 
-// Program up to one 256 B page: `address` must be page aligned and the range
-// must stay inside that page. Waits the device out before returning.
-bool BSP_flashProgramPage(uint32_t address, uint8_t const *data,
-                          uint32_t len);
+// Synchronous completion; DMA data transfer waits use the bound capability.
+// Buffers are borrowed until return. Writes split at page boundaries and
+// use sleepMs while the device programs. Destination must be erased.
+// False reports transfer/device failure. Lost DMA completion is fail-stop:
+// returning then could release a buffer still owned by the DMA.
+bool BSP_flashReadWait(uint32_t address, void *dst, uint32_t len);
+bool BSP_flashWriteWait(uint32_t address, void const *src, uint32_t len);
 
-// Read/write self test: it erases every sector, writes a signature and reads
-// it back. Start it once - it spins up its own task, because a multi minute
-// sweep has no business running in an AO whose event queue holds 8 entries.
-// (the write path self test that used to live here was removed 2026-10-10:
-// it drove SPI2 from a second context; see the note in bsp_flash.c)
-
-// Run time read, moved by DMA and finished in its interrupt: the caller is
-// not held on the bus, it is called back when the data has landed. The boot
-// path (BSP_flashRead above) stays the blocking one, because before the
-// scheduler interrupts are off and nothing interrupt driven can complete.
-//
-// One read at a time, and at most FLASH_DMA_CHUNK bytes: a longer read is the
-// caller's loop over chunks (which is where a yield between them belongs). A
-// second call while one is in flight, or an oversized one, is refused with
-// done(false). The callback runs in interrupt context - keep it short, and do
-// not call anything that blocks, and do not start another read from it.
-typedef void (*BSP_flashDoneCb)(bool ok);
-
-// The NOR program page: a write may be 1 to this many bytes, and it must not
-// cross one of these boundaries (the device wraps and reprograms the start of
-// the page). The page itself, datasheet 7.2.x.
-#define FLASH_DEV_PAGE 256UL
-
-// The geometry that used to sit here now lives in nor_w25q128.h, which this
-// header includes: it is a property of the part, and the NVS port wants it
-// without the driver's API.
-
-// One arm moves this much and no more. 32 KB is ~15 ms on the wire, which is
-// the window the caller gets between chunks; the size is here because the
-// caller is the one that loops. Raising it to the channel's own 16 bit limit
-// (65,535) was tried against the boot asset load and moved nothing: the per
-// arm cost is not where that time goes.
-#define FLASH_DMA_CHUNK 32768UL
-
-void BSP_flashReadDma(uint32_t address, uint8_t *dst, uint32_t len,
-                      BSP_flashDoneCb done);
-
-// One page at most, moved by DMA, for the run time writer. Same guard as the
-// blocking BSP_flashProgramPage (page aligned, never across a boundary), same
-// one-transaction-per-arm rule, same callback context. The device is still
-// programming when the callback fires, so the caller waits for
-// BSP_flashIsReady() afterwards - that wait is a spin here, and the caller is
-// the one that gets to block instead of spinning.
-void BSP_flashProgramPageDma(uint32_t address, uint8_t const *data,
-                             uint32_t len, BSP_flashDoneCb done);
-
-// One poll of the device's status register, true when it is done with its own
-// work (page program, sector erase). Nothing else: the waiting policy lives
-// above this layer, on purpose - see the note next to the implementation.
-bool BSP_flashIsReady(void);
-
-bool BSP_flashDmaBusy(void);
-bool BSP_flashDmaFailed(void);
-
+// One aligned 4 KB sector, using sleepMs between BUSY polls. False reports a
+// start failure or device timeout; it does not cancel an ongoing erase.
+bool BSP_flashEraseSectorWait(uint32_t address);
 #endif // BSP_FLASH_H_

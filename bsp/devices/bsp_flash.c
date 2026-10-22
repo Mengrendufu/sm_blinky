@@ -7,10 +7,10 @@
 // To Public License, Version 2, as published by Sam Hocevar.
 // See http://www.wtfpl.net/ for more details.
 //============================================================================
-#include "bsp.h"
+#include "stm32f1xx_hal.h"
 #include "bsp_flash.h"
-
-#include <string.h>
+#include "nor_w25q128.h"
+#include "sm_assert.h"
 
 //============================================================================
 #define FLASH_CS_PORT   GPIOB
@@ -34,22 +34,6 @@
 // 2.25 MB/s the bus carries at 18 MHz, so blocks land on the wire limit.
 #define FLASH_BLOCK_MAX     32768UL
 
-// Geometry and the waits that matter, out of the part's own datasheet
-// (W25Q128BV Rev E, AC characteristics): a 4 KB sector erase is 30 ms
-// typical, 200 ms max below 50k erase cycles and 400 ms above it; a 256 byte
-// page program 0.7 ms typical / 3 ms max. This board measures 130 to 160 ms
-// per erase - slower than that typical, still inside the below-50k max, so
-// any budget here has to be 200 ms rather than 30.
-// (not FLASH_PAGE_SIZE: the HAL already uses that name for the internal
-//  flash page size, and redefining it would lie to the HAL's own driver)
-#define FLASH_ERASE_MS      2000U
-#define FLASH_PROGRAM_MS    100U
-
-// Signature written by the self test: the sector index in it says where the
-// bytes landed, which is what catches an addressing fault (the SRAM line walk
-// did the same job). Sixteen bytes never cross a page on a 4 KB aligned
-// start.
-
 // Operating clock: PCLK1 / 2 = 18 MHz, the fastest the peripheral offers. A
 // sweep of all four dividers (2.25, 4.5, 9, 18 MHz) came back clean at every
 // step - sixteen reads of the same address per clock, all identical and all
@@ -60,6 +44,11 @@
 // ==FLASH==[ARRAY][<six bytes at address 0>]==. The second is the "this is
 // memory and it reads" line; the first one is identity only.
 
+
+// One DMA transaction is at most 32 KB. Chunking stays inside this driver.
+#define FLASH_DMA_CHUNK 32768UL
+
+typedef void (*BSP_flashDoneCb)(bool ok);
 
 static SPI_HandleTypeDef flash_spi_;
 
@@ -80,18 +69,12 @@ static bool BSP_flashExchange_(uint8_t cmd, uint8_t const *tx, uint32_t txLen,
                                uint8_t *rx, uint32_t rxLen);
 static uint8_t BSP_flashReadStatus_(void);
 static bool BSP_flashWriteEnable_(void);
-static bool BSP_flashWaitReady_(uint32_t timeoutMs);
-static bool BSP_flashEraseSector_(uint32_t address);
-static bool BSP_flashProgram_(uint32_t address, uint8_t const *data,
-                              uint32_t len);
 
 
 //============================================================================
-// DMA read path, for the run time. The boot window cannot use it: before the
-// scheduler the tracer's critical section leaves interrupts disabled (see
-// AGENTS.md), so an interrupt driven transfer has no way to complete there.
-// Asset_load() therefore uses the blocking BSP_flashRead() above, and this
-// path serves the flash thread, which has a scheduler to block on.
+// DMA primitives shared by boot loading and the bound wait API.
+// Wait capabilities choose flag polling or task notifications. Every DMA
+// path needs interrupts enabled.
 //
 // Shape: one call, one transaction - CS low, command and address from the
 // CPU, the data moved by the channel, CS raised and the caller called back
@@ -121,7 +104,7 @@ static bool BSP_flashProgram_(uint32_t address, uint8_t const *data,
 static volatile bool flashDmaFlag_;
 
 static void BSP_flashDmaFlagCb_(bool ok) {
-    (void)ok; // BSP_flashDmaFailed() carries the answer to the waiter
+    (void)ok; // flashDmaFailed_ carries the answer to the waiter
 
     flashDmaFlag_ = true;
 }
@@ -155,26 +138,6 @@ void BSP_flashInit(void) {
 // transaction covers the whole block. No overrun to clean up either: the
 // byte-wise exchange reads the receive register on every unit, so RXNE
 // never stays set.
-// The two write primitives the asset burner needs, exposed for the bootloader
-// (the app's own write path stays the wear self test). Thin wrappers: the
-// ordering rules - write enable, wait for the device, no page crossing - are
-// the private ones' business, and they are the ones already exercised.
-bool BSP_flashEraseSector(uint32_t address) {
-    return BSP_flashEraseSector_(address);
-}
-//............................................................................
-bool BSP_flashProgramPage(uint32_t address, uint8_t const *data,
-                          uint32_t len) {
-    // One page at most, and never across a boundary: the device would
-    // wrap and silently program the start of the page again.
-    if ((len == 0U) || (len > FLASH_DEV_PAGE)
-        || ((address % FLASH_DEV_PAGE) + len > FLASH_DEV_PAGE)) {
-        return false;
-    }
-
-    return BSP_flashProgram_(address, data, len);
-}
-//............................................................................
 bool BSP_flashRead(uint32_t address, uint8_t *dst, uint32_t len) {
     uint8_t addr[3];
 
@@ -260,7 +223,7 @@ static void BSP_flashDmaFinish_(bool ok) {
     }
 }
 //............................................................................
-void BSP_flashReadDma(uint32_t address, uint8_t *dst, uint32_t len,
+static void BSP_flashReadDma_(uint32_t address, uint8_t *dst, uint32_t len,
                       BSP_flashDoneCb done) {
     uint8_t addr[3];
 
@@ -271,7 +234,7 @@ void BSP_flashReadDma(uint32_t address, uint8_t *dst, uint32_t len,
         || (len > (FLASH_DEV_SIZE - address))) {
         // A refusal is reported the way a failed transfer is, so a caller
         // that waits on the callback always reads the truth out of
-        // BSP_flashDmaFailed().
+        // flashDmaFailed_.
         flashDmaFailed_ = true;
         if (done != (BSP_flashDoneCb)0) {
             done(false);
@@ -292,31 +255,23 @@ void BSP_flashReadDma(uint32_t address, uint8_t *dst, uint32_t len,
     BSP_flashDmaChunk_();
 }
 //............................................................................
-bool BSP_flashDmaBusy(void) {
-    return flashDmaBusy_;
-}
-//............................................................................
-bool BSP_flashDmaFailed(void) {
-    return flashDmaFailed_;
-}
-//............................................................................
 // One page, moved by DMA: the write side of BSP_flashReadDma above, for a run
 // time writer. One arm is one transaction (write enable, then command and
 // address from the CPU, the payload from the channel, chip select raised in
 // the completion interrupt).
 //
 // The device is still programming when that interrupt fires - tPP is 0.7 to
-// 3 ms - so the caller waits afterwards with BSP_flashIsReady(). That is
+// 3 ms - so the caller waits afterwards with BSP_flashIsReady_(). That is
 // deliberate: polling the device from the interrupt would hold the CPU for
 // milliseconds inside an ISR, and the caller is where the yield belongs.
-void BSP_flashProgramPageDma(uint32_t address, uint8_t const *data,
+static void BSP_flashProgramPageDma_(uint32_t address, uint8_t const *data,
                              uint32_t len, BSP_flashDoneCb done) {
     uint8_t addr[3];
 
     BSP_flashAddr_(addr, address);
 
-    // Same page guard as the blocking BSP_flashProgramPage: the device wraps
-    // inside a page and would silently program the start of it again.
+    // The device wraps inside a page and would silently program its start
+    // again, so one DMA transaction must never cross the page boundary.
     if ((data == (uint8_t const *)0) || (len == 0U)
         || (len > FLASH_DEV_PAGE)
         || ((address % FLASH_DEV_PAGE) + len > FLASH_DEV_PAGE)
@@ -368,7 +323,7 @@ bool BSP_flashReadDmaWait(uint32_t address, uint8_t *dst, uint32_t len) {
         uint32_t const deadline = HAL_GetTick() + FLASH_DMA_BOOT_MS;
 
         flashDmaFlag_ = false;
-        BSP_flashReadDma(address, dst, n, &BSP_flashDmaFlagCb_);
+        BSP_flashReadDma_(address, dst, n, &BSP_flashDmaFlagCb_);
 
         while (!flashDmaFlag_) {
             if ((int32_t)(HAL_GetTick() - deadline) >= 0) {
@@ -377,7 +332,7 @@ bool BSP_flashReadDmaWait(uint32_t address, uint8_t *dst, uint32_t len) {
             }
         }
 
-        ok = ok && !BSP_flashDmaFailed();
+        ok = ok && !flashDmaFailed_;
         address += n;
         dst += n;
         len -= n;
@@ -387,10 +342,9 @@ bool BSP_flashReadDmaWait(uint32_t address, uint8_t *dst, uint32_t len) {
 }
 //............................................................................
 // One poll of the status register: the caller owns how long to wait and
-// whether to yield while it does. The waiting policy stays out of this file
-// because the bootloader links it too, and the bootloader has no scheduler
-// (and no FreeRTOS) to delay on.
-bool BSP_flashIsReady(void) {
+// whether to yield while it does. The boot path polls without a scheduler;
+// the bound wait API below sleeps between polls.
+static bool BSP_flashIsReady_(void) {
     return ((BSP_flashReadStatus_() & 0x01U) == 0U);
 }
 //............................................................................
@@ -598,36 +552,9 @@ static bool BSP_flashWriteEnable_(void) {
     return ((BSP_flashReadStatus_() & 0x02U) != 0U);
 }
 //............................................................................
-// Poll BUSY until it clears. Timed off the HAL tick, so it behaves the same
-// before and after the scheduler starts.
-//
-// SPIN: a deadline loop, not a block - the CPU is held for as long as the
-// device needs (a sector erase measures ~130 ms here, up to FLASH_ERASE_MS).
-// The self test's vTaskDelay(1) per sector is what gives idle a chance to
-// keep pumping the tracer; a WAIT here would come with the DMA/IRQ path.
-static bool BSP_flashWaitReady_(uint32_t timeoutMs) {
-    uint32_t const deadline = HAL_GetTick() + timeoutMs;
-
-    for (;;) {
-        if ((BSP_flashReadStatus_() & 0x01U) == 0U) {
-            return true;
-        }
-        if ((int32_t)(HAL_GetTick() - deadline) >= 0) {
-            return false;
-        }
-    }
-}
-//............................................................................
-// Start one sector erase and return: the device is erasing when this comes
-// back, so the caller polls BSP_flashIsReady() for as long as it likes. That
-// split is what lets a run time caller sleep through the device's time
-// instead of spinning in it (see sm_flash.c); the blocking form below is this
-// plus the spin, which is what the bootloader needs - it has no scheduler.
-//
-// The alignment guard is here and not in the old blocking path: a sector
-// erase command with any other address erases the sector that contains it,
-// which is a silent way to lose data next door.
-bool BSP_flashEraseSectorStart(uint32_t address) {
+// Start one aligned sector erase. Completion is polled by the wait API;
+// a misaligned address would erase the surrounding sector, so reject it.
+static bool BSP_flashEraseSectorStart_(uint32_t address) {
     uint8_t addr[3];
 
     BSP_flashAddr_(addr, address);
@@ -645,32 +572,105 @@ bool BSP_flashEraseSectorStart(uint32_t address) {
     return true;
 }
 //............................................................................
-static bool BSP_flashEraseSector_(uint32_t address) {
-    return BSP_flashEraseSectorStart(address)
-           && BSP_flashWaitReady_(FLASH_ERASE_MS);
+
+//============================================================================
+// Wait API: scheduling capabilities are supplied by the caller.
+#define FLASH_WAIT_DMA_MS 200U
+#define FLASH_WAIT_DEVICE_MS 3000U
+#define FLASH_WAIT_ERASE_STEP_MS 2U
+#define FLASH_WAIT_PROGRAM_STEP_MS 1U
+
+SM_DEFINE_MODULE("flashwait")
+
+static BSP_flashWaitOps flashWait_;
+static bool flashWaitBound_;
+
+static void BSP_flashWaitRequireOwner_(void) {
+    SM_REQUIRE(flashWaitBound_);
+    SM_REQUIRE(flashWait_.isCaller(flashWait_.context));
 }
-//............................................................................
-static bool BSP_flashProgram_(uint32_t address, uint8_t const *data,
-                              uint32_t len) {
-    uint8_t addr[3];
 
-    BSP_flashAddr_(addr, address);
-    uint32_t i;
+void BSP_flashBindWait(BSP_flashWaitOps const *ops) {
+    SM_REQUIRE(!flashWaitBound_);
+    SM_REQUIRE(ops != (BSP_flashWaitOps const *)0);
+    SM_REQUIRE(ops->isCaller != 0);
+    SM_REQUIRE(ops->waitDone != 0);
+    SM_REQUIRE(ops->notifyDone != 0);
+    SM_REQUIRE(ops->sleepMs != 0);
+    SM_REQUIRE(ops->isCaller(ops->context));
+    flashWait_ = *ops;
+    flashWaitBound_ = true;
+}
 
-    if (!BSP_flashWriteEnable_()) {
+// DMA completion is an ISR; a refused or failed start calls back inline.
+static void BSP_flashWaitDone_(bool ok) {
+    (void)ok; // flashDmaFailed_ holds the transfer result.
+    flashWait_.notifyDone(flashWait_.context);
+}
+
+static bool BSP_flashWaitDma_(void) {
+    if (!flashWait_.waitDone(flashWait_.context, FLASH_WAIT_DMA_MS)) {
+        // Do not return a buffer that the DMA may still be using.
+        SM_onAssert("fdma", __LINE__);
         return false;
     }
-
-    HAL_GPIO_WritePin(FLASH_CS_PORT, FLASH_CS_PIN, GPIO_PIN_RESET);
-    (void)BSP_flashXfer_(FLASH_PROGRAM_CMD);
-    for (i = 0U; i < 3U; ++i) {
-        (void)BSP_flashXfer_(addr[i]);
-    }
-    for (i = 0U; i < len; ++i) {
-        (void)BSP_flashXfer_(data[i]);
-    }
-    HAL_GPIO_WritePin(FLASH_CS_PORT, FLASH_CS_PIN, GPIO_PIN_SET);
-
-    return BSP_flashWaitReady_(FLASH_PROGRAM_MS);
+    return !flashDmaFailed_;
 }
-//............................................................................
+
+static bool BSP_flashWaitDevice_(uint32_t stepMs) {
+    uint32_t const started = HAL_GetTick();
+
+    while (!BSP_flashIsReady_()) {
+        if ((uint32_t)(HAL_GetTick() - started) >= FLASH_WAIT_DEVICE_MS) {
+            return false;
+        }
+        flashWait_.sleepMs(flashWait_.context, stepMs);
+    }
+    return true;
+}
+
+bool BSP_flashReadWait(uint32_t address, void *dst, uint32_t len) {
+    uint8_t *out = (uint8_t *)dst;
+
+    BSP_flashWaitRequireOwner_();
+    while (len > 0U) {
+        uint32_t const n = (len > FLASH_DMA_CHUNK) ? FLASH_DMA_CHUNK : len;
+
+        BSP_flashReadDma_(address, out, n, &BSP_flashWaitDone_);
+        if (!BSP_flashWaitDma_()) {
+            return false;
+        }
+        address += n;
+        out += n;
+        len -= n;
+    }
+    return true;
+}
+
+bool BSP_flashWriteWait(uint32_t address, void const *src, uint32_t len) {
+    uint8_t const *in = (uint8_t const *)src;
+
+    BSP_flashWaitRequireOwner_();
+    while (len > 0U) {
+        uint32_t const room = FLASH_DEV_PAGE - (address % FLASH_DEV_PAGE);
+        uint32_t const n = (len > room) ? room : len;
+
+        BSP_flashProgramPageDma_(address, in, n, &BSP_flashWaitDone_);
+        if (!BSP_flashWaitDma_()
+            || !BSP_flashWaitDevice_(FLASH_WAIT_PROGRAM_STEP_MS)) {
+            return false;
+        }
+        address += n;
+        in += n;
+        len -= n;
+    }
+    return true;
+}
+
+bool BSP_flashEraseSectorWait(uint32_t address) {
+    BSP_flashWaitRequireOwner_();
+    if (!BSP_flashEraseSectorStart_(address)) {
+        return false;
+    }
+    return BSP_flashWaitDevice_(FLASH_WAIT_ERASE_STEP_MS);
+}

@@ -12,6 +12,7 @@
 
 #include "bsp.h"
 #include "flash.h"
+#include "bsp_flash.h"
 #include "sm_flash.h"
 #include "flash_req_priv.h"
 #include "nvs.h"
@@ -163,9 +164,58 @@ bool Flash_kvRead(uint16_t id, void *dst, uint32_t len) {
     return (nvs_read(&Flash_nvs_, id, dst, len) == (ssize_t)len);
 }
 
+// BSP waiting capabilities: task handles and FreeRTOS stay in this layer.
+// Slot 0 wakes the inbox; slot 1 completes this task's hardware transfer.
+#define FLASH_DMA_DONE_INDEX 1U
+
+static bool Flash_waitIsCaller_(void *context) {
+    return (context != (void *)0)
+           && (xPortIsInsideInterrupt() == pdFALSE)
+           && (xTaskGetCurrentTaskHandle() == (TaskHandle_t)context);
+}
+
+static bool Flash_waitDone_(void *context, uint32_t timeoutMs) {
+    (void)context; // Notifications are taken on the current task.
+    return ulTaskNotifyTakeIndexed(FLASH_DMA_DONE_INDEX, pdTRUE,
+                                   pdMS_TO_TICKS(timeoutMs)) != 0U;
+}
+
+static void Flash_notifyDone_(void *context) {
+    TaskHandle_t const waiter = (TaskHandle_t)context;
+
+    if (xPortIsInsideInterrupt() != pdFALSE) {
+        BaseType_t woken = pdFALSE;
+
+        (void)vTaskNotifyGiveIndexedFromISR(waiter, FLASH_DMA_DONE_INDEX,
+                                           &woken);
+        portYIELD_FROM_ISR(woken);
+    }
+    else {
+        (void)xTaskNotifyGiveIndexed(waiter, FLASH_DMA_DONE_INDEX);
+    }
+}
+
+static void Flash_sleepMs_(void *context, uint32_t delayMs) {
+    (void)context;
+    vTaskDelay(pdMS_TO_TICKS(delayMs));
+}
+
+static void Flash_bindWait_(void) {
+    BSP_flashWaitOps const ops = {
+        .context = (void *)xTaskGetCurrentTaskHandle(),
+        .isCaller = &Flash_waitIsCaller_,
+        .waitDone = &Flash_waitDone_,
+        .notifyDone = &Flash_notifyDone_,
+        .sleepMs = &Flash_sleepMs_,
+    };
+
+    BSP_flashBindWait(&ops);
+}
+
 static void Flash_thread_(void *arg) {
     (void)arg;
 
+    Flash_bindWait_();
     Flash_nvsBoot_();
 
     Flash_nvmAt_ = xTaskGetTickCount();
