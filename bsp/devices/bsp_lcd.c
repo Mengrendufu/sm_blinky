@@ -7,7 +7,9 @@
 // To Public License, Version 2, as published by Sam Hocevar.
 // See http://www.wtfpl.net/ for more details.
 //============================================================================
-#include "bsp.h"
+#include "stm32f1xx_hal.h"
+#include "sm_assert.h"
+#include "sm_tracer.h"
 #include "bsp_lcd.h"
 
 //============================================================================
@@ -119,7 +121,8 @@ typedef struct {
 } BSP_lcdInitStep_;
 
 static DMA_HandleTypeDef lcdDma_;
-static void (*lcdDmaDone_)(void);
+static BSP_lcdWaitOps lcdWait_;
+static bool lcdWaitBound_;
 static volatile bool lcdDmaFailed_;
 static BSP_lcdInitStep_ const lcdInitSeq_[] = {
     // MADCTL: BGR bit set. Measured, not inherited: with 0x00 the panel swaps
@@ -151,6 +154,9 @@ static BSP_lcdInitStep_ const lcdInitSeq_[] = {
 static void BSP_lcdGpioInit_(void);
 static void BSP_lcdFsmcInit_(void);
 static void BSP_lcdDmaInit_(void);
+static void BSP_lcdWaitRequireOwner_(void);
+static void BSP_lcdSetWindow_(uint16_t xs, uint16_t ys,
+                               uint16_t xe, uint16_t ye);
 static void BSP_lcdDmaCplt_(DMA_HandleTypeDef *hdma);
 static void BSP_lcdDmaError_(DMA_HandleTypeDef *hdma);
 static void BSP_lcdWriteCmd_(uint16_t cmd);
@@ -206,7 +212,7 @@ void BSP_lcdInit(void) {
     BSP_lcdGpioInit_();
     BSP_lcdFsmcInit_();
     // The channel comes up with the bus it serves. Nothing is armed until the
-    // display layer asks, and the completion hook is registered later, by the
+    // display layer asks, and the wait capabilities are bound later by the
     // UI thread that will do the waiting.
     BSP_lcdDmaInit_();
 
@@ -311,6 +317,7 @@ void BSP_lcdInit(void) {
 //............................................................................
 // The light, on the display layer's schedule. Idempotent, one GPIO write.
 void BSP_lcdBacklight(bool on) {
+    BSP_lcdWaitRequireOwner_();
     HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN,
                       on ? GPIO_PIN_SET : GPIO_PIN_RESET);
 }
@@ -350,6 +357,10 @@ static void BSP_lcdPanelInit_(void) {
 // exactly what it looked like on the bench (2026-10-12). It is now re-sent
 // forever, slowly, because that clobber has no schedule of its own.
 void BSP_lcdReassert(void) {
+    BSP_lcdWaitRequireOwner_();
+    if (lcdDma_.State != HAL_DMA_STATE_READY) {
+        SM_onAssert("lcd", __LINE__);
+    }
     BSP_lcdWriteCmd_(LCD_INVON_CMD);
 }
 //............................................................................
@@ -363,7 +374,7 @@ void BSP_lcdReassert(void) {
 // off. Run-time frames are trusted: BSP_lcdInit() proved, before it returned,
 // that this panel takes writes over the whole frame.
 //............................................................................
-void BSP_lcdSetWindow(uint16_t xs, uint16_t ys,
+static void BSP_lcdSetWindow_(uint16_t xs, uint16_t ys,
                       uint16_t xe, uint16_t ye) {
     BSP_lcdWriteCmd_(LCD_CASET_CMD);
     BSP_lcdWriteDat_(xs >> 8U);
@@ -385,7 +396,7 @@ void BSP_lcdSetWindow(uint16_t xs, uint16_t ys,
 static void BSP_lcdFill_(uint16_t colour) {
     uint32_t px;
 
-    BSP_lcdSetWindow(0U, 0U, LCD_WIDTH - 1U, LCD_HEIGHT - 1U);
+    BSP_lcdSetWindow_(0U, 0U, LCD_WIDTH - 1U, LCD_HEIGHT - 1U);
 
     for (px = 0U; px < ((uint32_t)LCD_WIDTH * LCD_HEIGHT); ++px) {
         LCD_DAT = colour;  // straight to the bus: a call per pixel shows up
@@ -400,9 +411,7 @@ static void BSP_lcdDmaInit_(void) {
     __HAL_RCC_DMA1_CLK_ENABLE();
 
     lcdDma_.Instance = LCD_DMA_CHANNEL;
-    // M2M puts the source in the peripheral address register and the
-    // destination in its memory register (stm32f1xx_hal_dma.c:858-884), so
-    // both sides walk: the strip, and the panel's window.
+    // M2M puts the source in CPAR and the destination in CMAR.
     lcdDma_.Init.Direction = DMA_MEMORY_TO_MEMORY;
     // M2M puts the source in CPAR and the destination in CMAR
     // (stm32f1xx_hal_dma.c:858-884), so PINC walks the strip - and the
@@ -437,14 +446,14 @@ static void BSP_lcdDmaInit_(void) {
     HAL_NVIC_EnableIRQ(LCD_DMA_IRQN);
 }
 //............................................................................
-// Push pixels into the window BSP_lcdSetWindow() just opened, by channel
+// Push pixels into the window BSP_lcdSetWindow_() just opened, by channel
 // instead of by CPU. That loop was retired with this path; charter §6 keeps
 // its 169 ns/px as the baseline the channel has to beat.
 //
 // The caller has already opened the window, so the panel's address counter
 // sits where the first pixel has to land: the transfer only has to push them
-// in order, which is what the incrementing destination does.
-void BSP_lcdWritePixelsDma(uint16_t const *pixels, uint32_t count) {
+// in order, with an incrementing source and fixed destination.
+static void BSP_lcdWritePixelsDma_(uint16_t const *pixels, uint32_t count) {
     uint32_t transfers = count;
     uint32_t size = DMA_PDATAALIGN_HALFWORD;
 
@@ -492,30 +501,13 @@ void BSP_lcdWritePixelsDma(uint16_t const *pixels, uint32_t count) {
     }
 }
 //............................................................................
-// Is the channel still moving pixels? Kept for the adapter's defensive wait
-// path; the ordinary wait is the transfer's interrupt (see charter §11 for
-// what is being tested and why).
-bool BSP_lcdDmaBusy(void) {
-    return (LCD_DMA_CHANNEL->CNDTR != 0U);
-}
-//............................................................................
-void BSP_lcdDmaSetDoneHook(void (*hook)(void)) {
-    lcdDmaDone_ = hook;
-}
-//............................................................................
-bool BSP_lcdDmaFailed(void) {
-    return lcdDmaFailed_;
-}
-//............................................................................
 // Transfer complete: HAL has already disabled the channel's interrupts and
 // cleared the flags (stm32f1xx_hal_dma.c:631-652). All this does is hand the
 // wait over to the thread that armed it.
 static void BSP_lcdDmaCplt_(DMA_HandleTypeDef *hdma) {
     (void)hdma;
 
-    if (lcdDmaDone_ != (void (*)(void))0) {
-        lcdDmaDone_();
-    }
+    lcdWait_.notifyDone(lcdWait_.context);
 }
 //............................................................................
 // Transfer error: HAL has disabled the interrupts, cleared every flag and put
@@ -528,9 +520,7 @@ static void BSP_lcdDmaError_(DMA_HandleTypeDef *hdma) {
 
     lcdDmaFailed_ = true;
 
-    if (lcdDmaDone_ != (void (*)(void))0) {
-        lcdDmaDone_();
-    }
+    lcdWait_.notifyDone(lcdWait_.context);
 }
 //............................................................................
 // The channel's vector. It lives here, not in bsp/platform/stm32f1xx_it.c,
@@ -549,7 +539,7 @@ void DMA1_Channel6_IRQHandler(void) {
 static uint16_t BSP_lcdReadGram_(uint16_t x, uint16_t y) {
     uint16_t value;
 
-    BSP_lcdSetWindow(x, y, x, y);
+    BSP_lcdSetWindow_(x, y, x, y);
     BSP_lcdWriteCmd_(LCD_RAMRD_CMD);
     (void)BSP_lcdReadDat_();
     value = BSP_lcdReadDat_();
@@ -632,7 +622,7 @@ static bool BSP_lcdSentinelAll_(void) {
 // One pixel, as its own little window: the panel's frame memory is addressed
 // through CASET/RASET, so a single point is a window of one.
 static void BSP_lcdWritePixel_(uint16_t x, uint16_t y, uint16_t colour) {
-    BSP_lcdSetWindow(x, y, x, y);
+    BSP_lcdSetWindow_(x, y, x, y);
     BSP_lcdWriteDat_(colour);
 
 }
@@ -832,4 +822,50 @@ static uint16_t BSP_lcdReadId_(void) {
     id = (uint16_t)(BSP_lcdReadDat_() << 8);
     id |= (uint16_t)(BSP_lcdReadDat_() & 0x00FFU);
     return id;
+}
+
+//============================================================================
+// Bound wait API: window setup, DMA and completion form one owner operation.
+#define LCD_DMA_WAIT_MS 20U
+
+SM_DEFINE_MODULE("lcdwait")
+
+static void BSP_lcdWaitRequireOwner_(void) {
+    SM_REQUIRE(lcdWaitBound_);
+    SM_REQUIRE(lcdWait_.isCaller(lcdWait_.context));
+}
+
+void BSP_lcdBindWait(BSP_lcdWaitOps const *ops) {
+    SM_REQUIRE(!lcdWaitBound_);
+    SM_REQUIRE(ops != (BSP_lcdWaitOps const *)0);
+    SM_REQUIRE(ops->isCaller != 0);
+    SM_REQUIRE(ops->waitDone != 0);
+    SM_REQUIRE(ops->notifyDone != 0);
+    SM_REQUIRE(ops->isCaller(ops->context));
+    lcdWait_ = *ops;
+    lcdWaitBound_ = true;
+}
+
+bool BSP_lcdWriteAreaWait(uint16_t xs, uint16_t ys, uint16_t xe,
+                          uint16_t ye, uint16_t const *pixels) {
+    BSP_lcdWaitRequireOwner_();
+    SM_REQUIRE((xs <= xe) && (ys <= ye));
+    SM_REQUIRE((xe < LCD_WIDTH) && (ye < LCD_HEIGHT));
+    SM_REQUIRE(pixels != (uint16_t const *)0);
+    SM_REQUIRE(((uintptr_t)pixels & 1U) == 0U);
+    SM_REQUIRE(lcdDma_.State == HAL_DMA_STATE_READY);
+
+    uint32_t const count = ((uint32_t)xe - xs + 1U)
+                          * ((uint32_t)ye - ys + 1U);
+
+    BSP_lcdSetWindow_(xs, ys, xe, ye);
+    // Publish pixel stores before DMA reads the borrowed buffer.
+    __DSB();
+    BSP_lcdWritePixelsDma_(pixels, count);
+    if (!lcdWait_.waitDone(lcdWait_.context, LCD_DMA_WAIT_MS)) {
+        // A missing completion cannot release a buffer DMA may still own.
+        SM_onAssert("lcdma", __LINE__);
+        return false;
+    }
+    return !lcdDmaFailed_;
 }

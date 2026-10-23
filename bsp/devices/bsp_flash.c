@@ -97,18 +97,6 @@ static bool BSP_flashWriteEnable_(void);
 // wakes tasks, so a numerically lower priority would be illegal to call from.
 #define FLASH_DMA_IRQ_PRIO  5U
 
-// How long one chunk may take before the boot path gives up on it. A 32 KB
-// chunk is 14.4 ms on the wire, so this is generous by an order of magnitude.
-#define FLASH_DMA_BOOT_MS 200U
-
-static volatile bool flashDmaFlag_;
-
-static void BSP_flashDmaFlagCb_(bool ok) {
-    (void)ok; // flashDmaFailed_ carries the answer to the waiter
-
-    flashDmaFlag_ = true;
-}
-//............................................................................
 static void BSP_flashDmaInit_(void);
 static void BSP_flashDmaChunk_(void);
 static void BSP_flashDmaFinish_(bool ok);
@@ -132,28 +120,6 @@ void BSP_flashInit(void) {
     // one matched, so the first one is spent here instead of on data.
     (void)BSP_flashReadStatus_();
 }
-//............................................................................
-// Read Data (03h) over an arbitrary length. The device increments the
-// address by itself for as long as the clock keeps coming, so one
-// transaction covers the whole block. No overrun to clean up either: the
-// byte-wise exchange reads the receive register on every unit, so RXNE
-// never stays set.
-bool BSP_flashRead(uint32_t address, uint8_t *dst, uint32_t len) {
-    uint8_t addr[3];
-
-    BSP_flashAddr_(addr, address);
-
-    if ((dst == (uint8_t *)0) || (len == 0U) || (address >= FLASH_DEV_SIZE)
-        || (len > (FLASH_DEV_SIZE - address))) {
-        return false;
-    }
-
-    // The device must not be busy here. At run time the flash thread is the
-    // only bus user and every program or erase waits BUSY out before it
-    // returns, so this call never races one.
-    return BSP_flashExchange_(FLASH_READ_CMD, addr, 3U, dst, len);
-}
-
 //............................................................................
 static void BSP_flashDmaInit_(void) {
     __HAL_RCC_DMA1_CLK_ENABLE();
@@ -306,39 +272,6 @@ static void BSP_flashProgramPageDma_(uint32_t address, uint8_t const *data,
                              (uint16_t)len) != HAL_OK) {
         BSP_flashDmaFinish_(false);
     }
-}
-//............................................................................
-// The run time path waits on a task notification. Before the scheduler there
-// is no task to notify, so this one polls a flag the completion interrupt
-// sets - the same interrupt, a different way of waiting. It is here for
-// Asset_load, which used to crawl at 0.43 MB/s through HAL's polled block
-// path and now runs at the wire limit. Safe before the scheduler because the
-// callback it installs does nothing but set that flag: no FreeRTOS call, no
-// task, nothing that needs a kernel.
-bool BSP_flashReadDmaWait(uint32_t address, uint8_t *dst, uint32_t len) {
-    bool ok = true;
-
-    while (ok && (len > 0U)) {
-        uint32_t const n = (len > FLASH_DMA_CHUNK) ? FLASH_DMA_CHUNK : len;
-        uint32_t const deadline = HAL_GetTick() + FLASH_DMA_BOOT_MS;
-
-        flashDmaFlag_ = false;
-        BSP_flashReadDma_(address, dst, n, &BSP_flashDmaFlagCb_);
-
-        while (!flashDmaFlag_) {
-            if ((int32_t)(HAL_GetTick() - deadline) >= 0) {
-                ok = false;
-                break;
-            }
-        }
-
-        ok = ok && !flashDmaFailed_;
-        address += n;
-        dst += n;
-        len -= n;
-    }
-
-    return ok;
 }
 //............................................................................
 // One poll of the status register: the caller owns how long to wait and
@@ -674,3 +607,74 @@ bool BSP_flashEraseSectorWait(uint32_t address) {
     }
     return BSP_flashWaitDevice_(FLASH_WAIT_ERASE_STEP_MS);
 }
+
+//============================================================================
+// Startup asset loading only -- Asset_load(), before the scheduler starts.
+// No wait capability binding: polling and DMA-flag waits keep the CPU here.
+// Keep their private flag/callback and public entry points together.
+
+// How long one chunk may take before the boot path gives up on it. A 32 KB
+// chunk is 14.4 ms on the wire, so this is generous by an order of magnitude.
+#define FLASH_DMA_BOOT_MS 200U
+
+static volatile bool flashDmaFlag_;
+
+static void BSP_flashDmaFlagCb_(bool ok) {
+    (void)ok; // flashDmaFailed_ carries the answer to the waiter
+
+    flashDmaFlag_ = true;
+}
+//............................................................................
+// Read Data (03h) over an arbitrary length. The device increments the
+// address by itself for as long as the clock keeps coming, so one
+// transaction covers the whole block. No overrun to clean up either: the
+// byte-wise exchange reads the receive register on every unit, so RXNE
+// never stays set.
+bool BSP_flashRead(uint32_t address, uint8_t *dst, uint32_t len) {
+    uint8_t addr[3];
+
+    BSP_flashAddr_(addr, address);
+
+    if ((dst == (uint8_t *)0) || (len == 0U) || (address >= FLASH_DEV_SIZE)
+        || (len > (FLASH_DEV_SIZE - address))) {
+        return false;
+    }
+
+    // The device must be idle; startup loading precedes run-time bus use.
+    return BSP_flashExchange_(FLASH_READ_CMD, addr, 3U, dst, len);
+}
+
+//............................................................................
+// The run time path waits on a task notification. Before the scheduler there
+// is no task to notify, so this one polls a flag the completion interrupt
+// sets - the same interrupt, a different way of waiting. It is here for
+// Asset_load, which used to crawl at 0.43 MB/s through HAL's polled block
+// path and now runs at the wire limit. Safe before the scheduler because the
+// callback it installs does nothing but set that flag: no FreeRTOS call, no
+// task, nothing that needs a kernel.
+bool BSP_flashReadDmaWait(uint32_t address, uint8_t *dst, uint32_t len) {
+    bool ok = true;
+
+    while (ok && (len > 0U)) {
+        uint32_t const n = (len > FLASH_DMA_CHUNK) ? FLASH_DMA_CHUNK : len;
+        uint32_t const deadline = HAL_GetTick() + FLASH_DMA_BOOT_MS;
+
+        flashDmaFlag_ = false;
+        BSP_flashReadDma_(address, dst, n, &BSP_flashDmaFlagCb_);
+
+        while (!flashDmaFlag_) {
+            if ((int32_t)(HAL_GetTick() - deadline) >= 0) {
+                ok = false;
+                break;
+            }
+        }
+
+        ok = ok && !flashDmaFailed_;
+        address += n;
+        dst += n;
+        len -= n;
+    }
+
+    return ok;
+}
+//............................................................................

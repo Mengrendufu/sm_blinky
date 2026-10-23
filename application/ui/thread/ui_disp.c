@@ -46,20 +46,11 @@
 // has no timer pending, and as the ceiling for what it does ask for.
 #define UI_FALLBACK_MS 10U
 
-// How long the flush wait may spin before it calls the channel wedged: a
-// 240x32 strip is 7,680 pixels, about 1.3 ms at the measured 169 ns/px, which
-// leaves this bound two orders of magnitude of headroom.
-#define UI_DMA_SPIN_LIMIT 2000000U
-
 // The notification slot the flush waits on. Slot 0 wakes the loop for the
 // inbox (ui.c); slot 1 is the "the blocking call you submitted has finished"
 // slot from AGENTS.md, shared with the flash RPC - this thread blocks on one
 // thing at a time, so one slot serves both.
 #define UI_DMA_NOTIFY 1U
-
-// A 240x32 strip is 7,680 pixels, about 0.9 ms of bus time at the measured
-// 112 ns/px. The timeout catches a wedged channel, not a slow one.
-#define UI_DMA_TIMEOUT_MS 20U
 
 // The panel's *display* path is not part of the proof the pages are drawn
 // under: it comes up on its own schedule (measured 3 to 8 s on a cold start,
@@ -94,9 +85,6 @@ static uint32_t Ui_fps_;
 
 static uint16_t Ui_strip_[UI_STRIP_PX] LV_ATTRIBUTE_MEM_ALIGN;
 
-// Captured at bring-up: the thread the transfer's interrupt wakes.
-static TaskHandle_t Ui_waiter_;
-
 // A page's entry action sets this, and the first frame that answers it
 // clears it: it asks for one whole-screen repaint, and it is what holds the
 // glass dark until a whole picture is on it. There is no coverage proof
@@ -114,9 +102,8 @@ volatile uint8_t Ui_dbgSplashOk_;
 //============================================================================
 static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
                       uint8_t *px);
-static void Ui_flushDone_(void);
+static void Ui_lcdBindWait_(void);
 static void Ui_flushWait_(lv_display_t *disp);
-static void Ui_dmaWait_(uint32_t timeoutMs);
 static uint32_t Ui_tick_(void);
 static uint32_t Ui_us_(void);
 
@@ -129,12 +116,8 @@ void Ui_dispInit(void) {
     Ui_disp_ = lv_display_create(UI_LCD_HOR, UI_LCD_VER);
     configASSERT(Ui_disp_ != (lv_display_t *)0);
 
-    // The completion arrives on the channel's interrupt and the wait is this
-    // thread's second notification slot. Wiring the wait callback keeps LVGL
-    // from falling back to its own busy wait on disp->flushing
-    // (lv_refr.c:1458), which charter §4.8 forbids.
-    Ui_waiter_ = xTaskGetCurrentTaskHandle();
-    BSP_lcdDmaSetDoneHook(Ui_flushDone_);
+    // Supply scheduling capabilities; the BSP owns the transfer wait flow.
+    Ui_lcdBindWait_();
     lv_display_set_flush_wait_cb(Ui_disp_, Ui_flushWait_);
 
     lv_display_set_flush_cb(Ui_disp_, Ui_flush_);
@@ -329,23 +312,16 @@ TickType_t Ui_dispHeartbeat(void) {
 // window first makes the panel's address counter walk exactly that rectangle.
 static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
                       uint8_t *px) {
-    uint32_t const width = (uint32_t)(area->x2 - area->x1 + 1);
-    uint32_t const height = (uint32_t)(area->y2 - area->y1 + 1);
-
     // The pixels of the rectangle are contiguous from the buffer's start,
     // however narrow the rectangle is: LVGL re-shapes its render buffer to
     // the area it is drawing (the stride is the rectangle's width here, not
     // the display's - a row-by-row push stepping by the display width was
     // tried on 2026-10-12 and made every narrow redraw wrong).
-    BSP_lcdSetWindow((uint16_t)area->x1, (uint16_t)area->y1,
-                     (uint16_t)area->x2, (uint16_t)area->y2);
-
-    // Arm the channel and wait for it. The barrier publishes the strip's
-    // stores before the transfer starts: the DMA reads them as another bus
-    // master, not through this core's write buffer.
-    __DSB();
-    BSP_lcdWritePixelsDma((uint16_t const *)(void const *)px, width * height);
-    Ui_dmaWait_(UI_DMA_TIMEOUT_MS);
+    if (!BSP_lcdWriteAreaWait((uint16_t)area->x1, (uint16_t)area->y1,
+                              (uint16_t)area->x2, (uint16_t)area->y2,
+                              (uint16_t const *)(void const *)px)) {
+        SM_onAssert("uidma", __LINE__);
+    }
 
     if (lv_display_flush_is_last(disp)) {
         ++Ui_frames_;
@@ -367,49 +343,46 @@ static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
     lv_display_flush_ready(disp);
 }
 //............................................................................
-// Runs in the panel channel's interrupt. It wakes the thread that armed the
-// transfer and does nothing else: lv_display_flush_ready() is called by that
-// thread microseconds later, so every lv_* call in the firmware stays on the
-// UI thread (charter §4.2).
-static void Ui_flushDone_(void) {
+// LCD wait capabilities. The BSP sees only an opaque context and hooks;
+// task identity, notification slot and ISR scheduling stay in this adapter.
+static bool Ui_lcdIsCaller_(void *context) {
+    return (context != (void *)0)
+           && (xPortIsInsideInterrupt() == pdFALSE)
+           && (xTaskGetCurrentTaskHandle() == (TaskHandle_t)context);
+}
+
+static bool Ui_lcdWaitDone_(void *context, uint32_t timeoutMs) {
+    (void)context;
+    return ulTaskNotifyTakeIndexed(UI_DMA_NOTIFY, pdTRUE,
+                                   pdMS_TO_TICKS(timeoutMs)) != 0U;
+}
+
+static void Ui_lcdNotifyDone_(void *context) {
     BaseType_t woken = pdFALSE;
 
-    (void)vTaskNotifyGiveIndexedFromISR(Ui_waiter_, UI_DMA_NOTIFY, &woken);
+    (void)vTaskNotifyGiveIndexedFromISR((TaskHandle_t)context,
+                                       UI_DMA_NOTIFY, &woken);
     portYIELD_FROM_ISR(woken);
 }
-//............................................................................
-// The flush path's one wait, and the reason it blocks instead of spinning
-// (charter §4.8, §7): while it waits the idle task runs, and that is where
-// the tracer's pump lives. A timeout means the completion never came, a
-// failed transfer means the channel reported an error - both are asserted on
-// this thread, where pushing a record and resetting the board is ordinary
-// work.
-static void Ui_dmaWait_(uint32_t timeoutMs) {
-    uint32_t const signalled = ulTaskNotifyTakeIndexed(
-        UI_DMA_NOTIFY, pdTRUE, pdMS_TO_TICKS(timeoutMs));
 
-    if ((signalled == 0U) || BSP_lcdDmaFailed()) {
-        SM_onAssert("uidma", __LINE__);
-    }
+static void Ui_lcdBindWait_(void) {
+    BSP_lcdWaitOps const ops = {
+        .context = (void *)xTaskGetCurrentTaskHandle(),
+        .isCaller = &Ui_lcdIsCaller_,
+        .waitDone = &Ui_lcdWaitDone_,
+        .notifyDone = &Ui_lcdNotifyDone_,
+    };
+
+    BSP_lcdBindWait(&ops);
 }
 //............................................................................
-// LVGL asks the waiter to release a buffer it still considers in flight. In
-// single buffer partial mode that cannot happen - Ui_flush_() returns only
-// once its strip has landed - so this is the backstop that keeps LVGL's own
-// alternative, a busy wait on disp->flushing, out of the firmware.
+// Flush completes synchronously and calls flush_ready before returning.
+// LVGL only invokes this hook when flushing is still set: that would break
+// the single-buffer contract. Fail-stop rather than spin or consume a second
+// notification. lv_* completion stays on the UI thread, never in the ISR.
 static void Ui_flushWait_(lv_display_t *disp) {
-    uint32_t spin;
-
     (void)disp;
-
-    // The defensive path: the flush above already waited for the transfer, so
-    // this should never have anything to do. It spins rather than taking the
-    // notification, which belongs to the wait above and nothing else.
-    for (spin = 0U; BSP_lcdDmaBusy(); ++spin) {
-        if (spin > UI_DMA_SPIN_LIMIT) {
-            SM_onAssert("uidma", __LINE__);
-        }
-    }
+    SM_onAssert("uiflush", __LINE__);
 }
 //............................................................................
 // LVGL's clock is the FreeRTOS tick, so lv_tick_get() and xTaskGetTickCount()

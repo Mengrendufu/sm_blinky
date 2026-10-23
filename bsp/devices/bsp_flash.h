@@ -28,22 +28,12 @@
 // and the CH340 auto-download branch can hold the chip in reset right then
 // (see AGENTS.md), so the flash thread runs the probe late instead.
 
+// Device initialization shared by all phases.
 void BSP_flashInit(void);
 
-// Block read (03h). One transaction: chip select stays low from the
-// command byte through the last data byte, and the device walks the
-// address itself, so len has no page boundary to respect - only the array
-// size.
-//
-// Boot-only polling read, before the run-time owner starts using the bus.
-// No wait capability binding is needed; the CPU polls the SPI throughout.
-bool BSP_flashRead(uint32_t address, uint8_t *dst, uint32_t len);
-
-// The same read moved by DMA, waited out by polling a flag instead of a task
-// notification: the boot path (Asset_load) has no task to notify, but it does
-// have interrupts now. Any length; the driver splits the transfer internally.
-// Blocking, so it is for the boot path only.
-bool BSP_flashReadDmaWait(uint32_t address, uint8_t *dst, uint32_t len);
+//============================================================================
+// Bound wait API -- bootloader asset burning and the run-time flash task.
+// Bind their respective wait capabilities before issuing reads/writes/erases.
 
 // Waiting capabilities required by the BSP, implemented by the caller.
 // context is opaque to the BSP and must outlive every transfer. isCaller
@@ -74,4 +64,25 @@ bool BSP_flashWriteWait(uint32_t address, void const *src, uint32_t len);
 // One aligned 4 KB sector, using sleepMs between BUSY polls. False reports a
 // start failure or device timeout; it does not cancel an ongoing erase.
 bool BSP_flashEraseSectorWait(uint32_t address);
+
+//============================================================================
+// Startup asset loading only -- Asset_load(), before the scheduler starts.
+// These reads do not use BSP_flashWaitOps and never yield the CPU.
+// Bootloader burning and run-time clients use the bound wait API above.
+
+// Block read (03h). One transaction: chip select stays low from the
+// command byte through the last data byte, and the device walks the
+// address itself, so len has no page boundary to respect - only the array
+// size.
+//
+// Boot-only polling read, before the run-time owner starts using the bus.
+// No wait capability binding is needed; the CPU polls the SPI throughout.
+bool BSP_flashRead(uint32_t address, uint8_t *dst, uint32_t len);
+
+// The same read moved by DMA, waited out by polling a flag instead of a task
+// notification: the boot path (Asset_load) has no task to notify, but it does
+// have interrupts now. Any length; the driver splits the transfer internally.
+// Blocking, so it is for the boot path only.
+bool BSP_flashReadDmaWait(uint32_t address, uint8_t *dst, uint32_t len);
+
 #endif // BSP_FLASH_H_

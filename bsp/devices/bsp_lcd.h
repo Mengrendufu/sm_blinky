@@ -13,111 +13,51 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-//============================================================================
-// ATK-MD0240 (240x320, ST7789) on FSMC Bank1 NOR/SRAM4:
-//   CS  = FSMC_NE4 (PG12)  -> bank base 0x6C000000
-//   RS  = FSMC_A10 (PG0)   -> command at base, data at base + 0x800
-//   WR  = FSMC_NWE (PD5)
-//   RD  = FSMC_NOE (PD4)
-//   D0..D15 = FSMC_D0..D15
-//   BL  = PB0 (active high)
-//   RST is tied to the board RESET net, so there is no reset GPIO.
-//
-// The bus setup, the vendor register sequence and the panel geometry live
-// here. The drawing API (window + pixels) arrives with the display layer.
+// ATK-MD0240 (240x320, ST7789), FSMC Bank1 NOR/SRAM4.
+// CS=PG12/NE4, RS=PG0/A10, WR=PD5/NWE, RD=PD4/NOE, BL=PB0.
+// Data is RGB565 over D0..D15. RESET is tied to the board RESET net.
 
 //============================================================================
-// One-time panel bring-up: bus setup (GPIO + FSMC), the panel's own waits
-// around SLPOUT and the vendor register sequence, then the frame memory
-// cleared to black and display on. The backlight stays off at this point:
-// bring-up leaves the glass dark on purpose, and the display layer lights it
-// through BSP_lcdBacklight() once a whole frame is on the frame memory and
-// proven covered. Every retry above, the coverage sentinel and the drawing of
-// that first frame therefore happen behind a dark glass (2026-10-12: on a lit
-// glass the sentinel showed as a set of bright lines, and the first frame as
-// the drawing of itself). It blocks for the better part of 250 ms, so it
-// belongs to BSP_init() - before the scheduler exists, never inside a task -
-// and it is the only writer on this bus until the display layer takes over.
-// On the trace channel it reports DISPON plus one RDID read, the cheap
-// "panel is talking" line on the bench.
+// Startup only: GPIO/FSMC/DMA setup, panel sleep-out and readiness retries.
+// Runs before the scheduler using blocking HAL delays and GRAM readback.
+// Clears GRAM and enables display output; the backlight remains off.
 void BSP_lcdInit(void);
 
-// Backlight (PB0, active high). Bring-up leaves it off and the display layer
-// turns it on, after the first whole frame is on the frame memory and proven.
-void BSP_lcdBacklight(bool on);
-
-void BSP_lcdReassert(void);
-
-// The coverage sentinel belongs to bring-up alone: mark the frame, write over
-// it, ask whether the mark survived. The run-time version of that proof is
-// gone (2026-10-12): a mark is a picture on the glass, so proving a page's
-// frame with one drew bright lines across the screen on every page change.
-// The display layer draws under no proof at all - it is the panel's
-// writability, proven here before the light comes on, that the run-time path
-// leans on.
-
-// Read a few frame memory pixels back and report them: four points down the
-// left edge, spanning both halves of the panel. Called by the AO some time
-// after bring-up, so the records land on a terminal that is already attached.
-// The bring-up facts (display on, identification read) again, for the first
-// task to report: bring-up itself cannot push records (see bsp.c).
+// Reports cached DISPON/RDID bring-up facts once the tracer is available.
+// Does not read the live panel or perform a new coverage check.
 void BSP_dbgLcdBootReport(void);
 
-// Drawing API for the display layer: open a window, then push pixels into it.
-// The window writes go straight to the FSMC bus, so they belong to whoever
-// owns the panel at run time (the UI thread); there is no locking here.
-//
-// One 8080 16-bit transfer carries one RGB565 pixel, so the halfword goes out
-// as it is - no byte swapping on this path.
-void BSP_lcdSetWindow(uint16_t xs, uint16_t ys, uint16_t xe, uint16_t ye);
+//============================================================================
+// Waiting capabilities implemented by the display owner, not by the BSP.
+// context is opaque and outlives every transfer. isCaller accepts only the
+// owner, never an ISR. waitDone consumes completion, including an early
+// notification; false means timeout. notifyDone runs in the DMA ISR and
+// must not block. All time arguments are milliseconds.
+typedef struct {
+    void *context;
+    bool (*isCaller)(void *context);
+    bool (*waitDone)(void *context, uint32_t timeoutMs);
+    void (*notifyDone)(void *context);
+} BSP_lcdWaitOps;
 
-// The pixel push runs on DMA1 channel 6: the caller arms the channel and
-// returns, and the transfer's completion runs the hook below from the
-// channel's interrupt.
-//
-// Both ends are memory mapped - the strip in SRAM, the panel window on
-// FSMC bank 4 - so this is a memory to memory transfer and no request line is
-// involved; the FSMC's own wait states pace the writes at the panel's timing.
-// That is what makes M2M legal here, and it is exactly why the flash read
-// cannot use it: the SPI data register is a handshake endpoint (charter §3).
-//
-// One shot, one strip at a time. The panel has one owner at run time (the
-// UI thread) and it is blocked while the transfer runs, so nothing else is on
-// this bus.
-//
-// count is in pixels; the channel moves two of them per access when the count
-// is even and the source is word aligned, one per access otherwise. The
-// ceiling is the 16-bit transfer counter, an assertion here and not a plan:
-// LVGL's partial buffer is 240x32 = 7680. The source has to be at least
-// halfword aligned, which the strip buffer is.
-void BSP_lcdWritePixelsDma(uint16_t const *pixels, uint32_t count);
+// Bind once from the owner before run-time writes or panel control.
+// Copies the structure. No queue or mutex is provided.
+void BSP_lcdBindWait(BSP_lcdWaitOps const *ops);
 
-// Completion hook, run in the DMA interrupt. The display adapter wakes its
-// thread from here and calls lv_display_flush_ready(); keep it to that. No
-// blocking, no waiting, nothing that takes a lock.
-void BSP_lcdDmaSetDoneHook(void (*hook)(void));
+// Inclusive coordinates, contiguous RGB565 pixels, at least halfword aligned.
+// Sets the window, starts DMA and waits synchronously before returning the
+// borrowed buffer. Count is derived from the rectangle. One DMA transfer:
+// at most 65,535 units, each carrying 2 pixels for aligned even counts,
+// otherwise 1 pixel. False reports DMA error; timeout is fail-stop because
+// DMA may still own the buffer. Waiting behavior comes from the bound ops.
+bool BSP_lcdWriteAreaWait(uint16_t xs, uint16_t ys, uint16_t xe,
+                          uint16_t ye, uint16_t const *pixels);
 
-// Re-send the panel's inversion bit (0x21). The panel clobbers it on its own
-// schedule - measured on the glass 2026-10-12: with the keep-alive removed,
-// the panel came up inverted (bright where it should be black) and every
-// region drawn after that kept the wrong polarity, which reads as garbage
-// where the picture changes. The inversion bit is the one register that is
-// safe to write while the panel scans, so the display layer re-asserts it
-// forever at a slow rate.
+// Run-time owner only. UI turns on backlight after its first complete frame.
+void BSP_lcdBacklight(bool on);
 
-// True when the last transfer ended in a DMA error. The adapter reads it
-// after its wait, so the assertion and its record happen on the thread
-// instead of inside an interrupt.
-bool BSP_lcdDmaFailed(void);
-
-// Is the channel still moving pixels? The arm in BSP_lcdWritePixelsDma is a
-// register level one that enables no interrupts, so the caller waits by
-// polling this instead of by parking on the transfer's completion. See the
-// display adapter for why the wait is a poll and not a block (charter §11).
-bool BSP_lcdDmaBusy(void);
-
-// DMA1_Channel6_IRQHandler is defined in bsp_lcd.c, next to the channel it
-// serves. It is not in bsp/platform/stm32f1xx_it.c because that file is
-// shared with the bootloader, which links no panel driver.
+// Re-send inversion-on (0x21), the board's polarity keep-alive. Scheduling
+// this operation belongs to the display owner; it must not overlap DMA.
+void BSP_lcdReassert(void);
 
 #endif // BSP_LCD_H_
