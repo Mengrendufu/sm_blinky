@@ -33,6 +33,7 @@ struct flash_pages_info {
     uint32_t index;
 };
 
+// One BSP Flash object; its transport/wait policy is owned by the AO.
 void *nvs_port_device(void);
 int flash_read(void *dev, off_t off, void *buf, size_t len);
 int flash_write(void *dev, off_t off, const void *buf, size_t len);

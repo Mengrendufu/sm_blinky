@@ -371,16 +371,33 @@ static void Bl_flashSleepMs_(void *context, uint32_t delayMs) {
     HAL_Delay(delayMs);
 }
 
+static void Bl_flashYield_(void *context) {
+    (void)context;
+}
+
+static uint32_t Bl_flashNow_(void *context) {
+    (void)context;
+    return HAL_GetTick();
+}
+
+static uint32_t Bl_flashElapsedMs_(void *context, uint32_t started) {
+    (void)context;
+    return HAL_GetTick() - started;
+}
+
 static void Bl_flashBindWait_(void) {
-    BSP_flashWaitOps const ops = {
-        .context = &Bl_flashWait_,
+    static BSP_flashWaitOperations const operations = {
         .isCaller = &Bl_flashIsCaller_,
         .waitDone = &Bl_flashWaitDone_,
         .notifyDone = &Bl_flashNotifyDone_,
         .sleepMs = &Bl_flashSleepMs_,
+        .yield = &Bl_flashYield_,
+        .now = &Bl_flashNow_,
+        .elapsedMs = &Bl_flashElapsedMs_,
     };
 
-    BSP_flashBindWait(&ops);
+    BSP_flashBind(BSP_flashDevice(), &BSP_flashDmaOperations,
+                   &operations, &Bl_flashWait_);
 }
 
 // Program one block into the NOR and read it back. Same bus, so the read-back
@@ -390,17 +407,17 @@ static bool Bl_writeBlock_(uint32_t idx, uint32_t len) {
     uint32_t off;
     uint32_t n;
 
-    if (!BSP_flashEraseSectorWait(addr)) {
+    if (!BSP_flashEraseSector(BSP_flashDevice(), addr)) {
         return false;
     }
 
-    if (!BSP_flashWriteWait(addr, Bl_block_, len)) {
+    if (!BSP_flashWrite(BSP_flashDevice(), addr, Bl_block_, len)) {
         return false;
     }
 
     for (off = 0U; off < len; off += BL_PAGE_BYTES) {
         n = ((len - off) > BL_PAGE_BYTES) ? BL_PAGE_BYTES : (len - off);
-        if (!BSP_flashReadWait(addr + off, Bl_page_, n)) {
+        if (!BSP_flashRead(BSP_flashDevice(), addr + off, Bl_page_, n)) {
             return false;
         }
         if (memcmp(Bl_page_, &Bl_block_[off], n) != 0) {
@@ -425,13 +442,13 @@ static bool Bl_commit_(void) {
     hdr[14] = 0U;
     hdr[15] = 0U;
 
-    if (!BSP_flashEraseSectorWait(BL_ASSET_BASE)) {
+    if (!BSP_flashEraseSector(BSP_flashDevice(), BL_ASSET_BASE)) {
         return false;
     }
-    if (!BSP_flashWriteWait(BL_ASSET_BASE, hdr, BL_HDR_BYTES)) {
+    if (!BSP_flashWrite(BSP_flashDevice(), BL_ASSET_BASE, hdr, BL_HDR_BYTES)) {
         return false;
     }
-    if (!BSP_flashReadWait(BL_ASSET_BASE, Bl_page_, BL_HDR_BYTES)) {
+    if (!BSP_flashRead(BSP_flashDevice(), BL_ASSET_BASE, Bl_page_, BL_HDR_BYTES)) {
         return false;
     }
 

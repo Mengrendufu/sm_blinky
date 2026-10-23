@@ -16,21 +16,18 @@
 //============================================================================
 //=== Flash state machine
 //
-// One instance, owned by the flash thread and dispatched synchronously from
-// its inbox drain, so the thread is the only one that touches it.
-//
-// The handlers do the transfer inline. Waiting inside a handler is deliberate
-// here: this thread has no event queue behind it, so a slow handler delays
-// the next request and nothing else - and a wait costs no CPU, where the
-// blocking read it replaced spun for the whole transfer and starved the idle
-// task that drains the tracer. Flash_ready is the only state for now; the
-// maintenance and upgrade modes grow off it later.
+// One instance, owned by the Flash AO and dispatched one event at a time.
+// Handlers may yield while waiting for DMA or device readiness. The current
+// event runs to completion before the AO consumes the next queued event.
 
 typedef struct {
+    SST_Task super;
     SM_Hsm sm_hsm_;
 } Sm_Flash;
 
-void Sm_Flash_init(Sm_Flash * const me);
-void Sm_Flash_dispatch(Sm_Flash * const me, Flash_Evt const * const e);
+// SST virtual functions, registered directly. init runs on the starter;
+// dispatch runs on the AO task.
+void Sm_Flash_init(SST_Task * const me, SST_Evt const * const e);
+void Sm_Flash_dispatch(SST_Task * const me, SST_Evt const * const e);
 
 #endif // SM_FLASH_H_

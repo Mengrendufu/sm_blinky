@@ -37,7 +37,8 @@ static void SST_ao_thread(void *arg) {
     SST_Task *me = (SST_Task *)arg;   /* 每个任务通过 me 区分身份 */
     for (;;) {
         /* 等通知（计数信号量 -1），阻塞直到有事件 */
-        ulTaskNotifyTake(pdFALSE, portMAX_DELAY);
+        ulTaskNotifyTakeIndexed(SST_TASK_NOTIFY_INDEX, pdFALSE,
+                                 portMAX_DELAY);
         /* 出队一个事件并 dispatch */
         SST_Task_activate(me);
     }
@@ -108,7 +109,8 @@ bool SST_Task_postFromISR(SST_Task * const me,
     taskEXIT_CRITICAL_FROM_ISR(isrStatus);
 
     // activate thread
-    vTaskNotifyGiveFromISR(me->thread, pHigherPriorityTaskWoken);
+    vTaskNotifyGiveIndexedFromISR(me->thread, SST_TASK_NOTIFY_INDEX,
+                                    pHigherPriorityTaskWoken);
 
     return true;
 }

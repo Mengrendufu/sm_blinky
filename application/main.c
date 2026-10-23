@@ -4,7 +4,6 @@
 #include "bsp.h"
 #include "application.h"
 #include "ui.h"
-#include "flash.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include "timers.h"
@@ -72,15 +71,11 @@ int main(void) {
     configASSERT(SST_sysTimer != NULL);
     configASSERT(xTimerStart(SST_sysTimer, 0U) == pdPASS);
 
-    // Bind before post: Ui_start()/Flash_start() build their task and point
-    // the channel's wake slot at it; AO_start() is what posts into those
-    // channels, from the initial transition of its first AO. A post into an
-    // unbound channel is accepted silently with the wake dropped - a flash
-    // caller would then park on a completion that can never arrive - so this
-    // order is the contract, not the timing luck that used to cover it.
-    SST_init();
+    // Bind before post: UI inbox and Flash AO queue must exist before any
+    // AO submits work. SST_Task_start initializes synchronously before
+    // returning, so NVS restore precedes every Flash request.
     Ui_start();
-    Flash_start();
+    SST_init();
     AO_start();
     SST_start();
 

@@ -31,7 +31,65 @@ static uint32_t Asset_be32_(uint8_t const *p);
 static uint32_t Asset_crc_(uint8_t const *data, uint32_t len);
 
 //============================================================================
+// ASSET WAIT OPERATIONS -- main before RTOS calls, interrupts/tick live.
+// Header uses Poll; payload uses DMA. Both consume the same local latch.
+static volatile bool Asset_flashDone_;
+
+static bool Asset_flashIsCaller_(void *context) {
+    return (context == (void *)&Asset_flashDone_) && (__get_IPSR() == 0U);
+}
+
+static uint32_t Asset_flashNow_(void *context) {
+    (void)context;
+    return HAL_GetTick();
+}
+
+static uint32_t Asset_flashElapsedMs_(void *context, uint32_t started) {
+    (void)context;
+    return HAL_GetTick() - started;
+}
+
+static bool Asset_flashWaitDone_(void *context, uint32_t timeoutMs) {
+    volatile bool * const done = context;
+    uint32_t const started = HAL_GetTick();
+
+    while (!*done) {
+        if (HAL_GetTick() - started >= timeoutMs) {
+            return false;
+        }
+    }
+    *done = false;
+    return true;
+}
+
+static void Asset_flashNotifyDone_(void *context) {
+    volatile bool * const done = context;
+
+    *done = true;
+}
+
+static void Asset_flashSleepMs_(void *context, uint32_t delayMs) {
+    (void)context;
+    HAL_Delay(delayMs);
+}
+
+static void Asset_flashYield_(void *context) {
+    (void)context;
+}
+
+static BSP_flashWaitOperations const Asset_flashWaitOperations_ = {
+    .isCaller = &Asset_flashIsCaller_,
+    .waitDone = &Asset_flashWaitDone_,
+    .notifyDone = &Asset_flashNotifyDone_,
+    .sleepMs = &Asset_flashSleepMs_,
+    .yield = &Asset_flashYield_,
+    .now = &Asset_flashNow_,
+    .elapsedMs = &Asset_flashElapsedMs_,
+};
+
+//============================================================================
 Asset Asset_load(void) {
+    BSP_Flash * const flash = BSP_flashDevice();
     uint8_t hdr[16];
     uint32_t magic;
     uint32_t len;
@@ -43,7 +101,9 @@ Asset Asset_load(void) {
     Asset_.slots = 0U;
     Asset_.pixels = (void const *)0;
 
-    if (!BSP_flashRead(ASSET_BASE, hdr, sizeof hdr)) {
+    BSP_flashBind(flash, &BSP_flashPollOperations,
+                   &Asset_flashWaitOperations_, (void *)&Asset_flashDone_);
+    if (!BSP_flashRead(flash, ASSET_BASE, hdr, sizeof hdr)) {
         return Asset_;
     }
 
@@ -57,8 +117,10 @@ Asset Asset_load(void) {
     // The payload is the big one: 153,600 B per slot, three slots. Read it
     // through the channel instead of HAL's polled block path, which measured
     // 0.43 MB/s against 2.28 at the wire - a third of a second per image.
-    if (!BSP_flashReadDmaWait(ASSET_DATA, (uint8_t *)(uintptr_t)ASSET_SRAM,
-                              len)) {
+    BSP_flashBind(flash, &BSP_flashDmaOperations,
+                   &Asset_flashWaitOperations_, (void *)&Asset_flashDone_);
+    if (!BSP_flashRead(flash, ASSET_DATA,
+                        (void *)(uintptr_t)ASSET_SRAM, len)) {
         return Asset_;
     }
 

@@ -14,6 +14,7 @@
 #include "asset.h"
 #include "bsp.h"
 #include "bsp_lcd.h"
+#include "flash.h"
 
 //============================================================================
 // Everything that happened before the scheduler reports through here, called
@@ -30,6 +31,14 @@ void Application_dbgBootReport(void) {
 void AO_start(void) {
     //........................................................................
     // AOs......
+    // AO_Flash: initialize storage before other AOs can post requests.
+    Flash_ctor();
+    static SST_Evt const *Flash_qSto[FLASH_QUEUE_LEN];
+    SST_Task_start(AO_Flash,
+                   (SST_TaskPrio)((23U << 8) | 2U),
+                   Flash_qSto, ARRAY_NELEM(Flash_qSto),
+                   (SST_Evt const *)0);
+
     // AO_Blinky...
     Blinky_ctor();
     static SST_Evt const * Blinky_qSto[8];

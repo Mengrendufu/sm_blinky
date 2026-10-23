@@ -79,7 +79,7 @@ static void Ui_thread_(void *arg) {
     wait = Ui_dispHeartbeat();
 
     for (;;) {
-        (void)ulTaskNotifyTake(pdTRUE, wait);
+        (void)ulTaskNotifyTakeIndexed(UI_INBOX_NOTIFY_INDEX, pdTRUE, wait);
 
         Ui_drain_();
         Ui_report_();

@@ -12,14 +12,17 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "sst.h"
+
+#define FLASH_QUEUE_LEN 9U
 
 //============================================================================
-//=== Flash thread -- the owner of the SPI flash at run time
+//=== Flash AO -- the owner of the SPI flash at run time
 //
-// A plain FreeRTOS task with an HSM inside, not an SST AO: a sector erase is
-// 130 ms and a whole chip sweep is minutes, and an AO whose handler runs that
-// long fills its 8 slot queue and trips DBC_REQUIRE(300). This thread has no
-// event queue and no beat - it sleeps until a request arrives.
+// A dedicated SST AO. Events run to completion in FIFO order; DMA waits
+// and device BUSY polling yield the CPU inside the current handler without
+// dispatching another event. Slot 0 wakes SST; slot 1 completes DMA.
+// Checkpoints use a one-shot event rearmed after processing, never a beat.
 //
 // SPI2 is one indivisible resource: two contexts on it would interleave
 // command, address and data of different transactions. So every other thread
@@ -36,16 +39,18 @@
 // Call these from a task, once the scheduler is running: the wait is an RTOS
 // block and a request posted before that could not be served.
 //
-// A caller that is an SST AO has to keep the block short: its queue is 8
-// deep and the beat keeps posting into it while the handler waits. The flash
-// thread itself has no such queue, which is why the long work lives there.
+// Up to eight accepted RPCs, including the one executing. Further calls
+// return false without borrowing the buffer. Callers must not call these
+// synchronous RPCs from the Flash AO itself. Other AOs must account for any
+// events queued on them while their handler waits for this RPC.
 
-// Called from main() before the scheduler starts.
-void Flash_start(void);
+// Constructed and started by AO_start(), before the scheduler starts.
+extern SST_Task * const AO_Flash;
+void Flash_ctor(void);
 
-// JEDEC identity plus six bytes from address 0, both reported on the trace
-// channel. Called late (the AO asks for it 30 s in) so a terminal is attached
-// by then.
+//============================================================================
+// Raw NOR requests -- physical byte addresses, bypassing NVS.
+// The caller owns the target address range; no key ID interpretation here.
 
 // Block read of len bytes from address into dst. Blocks the caller until the
 // data is in dst.
@@ -60,16 +65,11 @@ bool Flash_writeBlock(uint32_t address, void const *src, uint32_t len);
 // Erase one 4 KB sector: what a write needs first. Same sleeping wait.
 bool Flash_eraseSector(uint32_t address);
 
-// The NVS the flash task mounts at boot, as two requests: the caller blocks
-// on
-// its completion slot exactly like the block calls above. Read wants the
-// stored bytes, write the bytes to store; both want exactly len of them.
+//============================================================================
+// NVS requests -- logical uint16_t key IDs, not physical flash addresses.
+// NVS resolves IDs and owns its partition layout. Both calls use the same
+// synchronous RPC completion; len is the value's length in bytes.
 bool Flash_nvsRead(uint16_t id, void *dst, uint32_t len);
 bool Flash_nvsWrite(uint16_t id, void const *src, uint32_t len);
-
-// What the AO's own dispatcher calls. Not for callers: they use the two
-// above.
-bool Flash_kvRead(uint16_t id, void *dst, uint32_t len);
-bool Flash_kvWrite(uint16_t id, void const *src, uint32_t len);
 
 #endif // FLASH_H_

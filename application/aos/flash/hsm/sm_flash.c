@@ -10,7 +10,7 @@
 #include "sm_port.h"
 #include "bsp_flash.h"
 #include "sm_flash.h"
-#include "flash.h"
+#include "flash_priv.h"
 #include "flash_req.h"
 
 //============================================================================
@@ -28,48 +28,59 @@ SM_HsmState SM_HSM_ROM Sm_Flash_ready = {
 };
 
 //============================================================================
-void Sm_Flash_init(Sm_Flash * const me) {
-    SM_Hsm_init_(&me->sm_hsm_, (SM_InitHandler)Sm_Flash_TOP_initial_);
+void Sm_Flash_init(SST_Task * const me, SST_Evt const * const e) {
+    Sm_Flash * const self = (Sm_Flash *)me;
+
+    (void)e;
+    SM_Hsm_init_(&self->sm_hsm_, (SM_InitHandler)Sm_Flash_TOP_initial_);
 }
 //............................................................................
-void Sm_Flash_dispatch(Sm_Flash * const me, Flash_Evt const * const e) {
-    SM_Hsm_dispatch_(&me->sm_hsm_, (void const *)e);
+void Sm_Flash_dispatch(SST_Task * const me, SST_Evt const * const e) {
+    Sm_Flash * const self = (Sm_Flash *)me;
+
+    SM_Hsm_dispatch_(&self->sm_hsm_, (void const *)e);
 }
 //............................................................................
 // UML-Top-Initial
 static SM_StatePtr Sm_Flash_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT {
     (void)me;
+    Flash_initStorage();
+    Flash_armCheckpoint();
     return _SM_INIT(&Sm_Flash_ready);
 }
 //............................................................................
 // State-Flash_ready
 static SM_RetState Sm_Flash_ready_(void * const me,
                                    void const * const e) SM_HSM_RETT {
-    Flash_Evt const * const evt = (Flash_Evt const *)e;
+    SST_Evt const * const evt = (SST_Evt const *)e;
 
     (void)me;
 
     switch (evt->sig) {
         case FLASH_REQ_SIG: {
-            Flash_Req * const req = evt->req;
+            Flash_Req * const req = SST_EVT_DOWNCAST(Flash_Evt, evt)->req;
 
             req->ok = false;
 
             switch (req->op) {
+                // Raw NOR: use the physical byte address directly.
                 case FLASH_OP_READ: {
-                    req->ok = BSP_flashReadWait(req->address, req->dst,
-                                                    req->len);
+                    req->ok = BSP_flashRead(BSP_flashDevice(),
+                        req->address, req->dst, req->len);
                     break;
                 }
                 case FLASH_OP_WRITE: {
-                    req->ok = BSP_flashWriteWait(req->address, req->dst,
-                                                     req->len);
+                    req->ok = BSP_flashWrite(BSP_flashDevice(),
+                        req->address, req->dst, req->len);
                     break;
                 }
                 case FLASH_OP_ERASE: {
-                    req->ok = BSP_flashEraseSectorWait(req->address);
+                    req->ok = BSP_flashEraseSector(
+                        BSP_flashDevice(), req->address);
                     break;
                 }
+
+                // NVS: address carries a key ID, resolved by the store.
                 case FLASH_OP_NVS_READ: {
                     req->ok = Flash_kvRead((uint16_t)req->address, req->dst,
                                            req->len);
@@ -84,6 +95,12 @@ static SM_RetState Sm_Flash_ready_(void * const me,
                     break;
                 }
             }
+            Flash_completeRequest(req);
+            return _SM_HANDLED();
+        }
+        case FLASH_CHECKPOINT_SIG: {
+            Flash_checkpoint();
+            Flash_armCheckpoint();
             return _SM_HANDLED();
         }
         default: {

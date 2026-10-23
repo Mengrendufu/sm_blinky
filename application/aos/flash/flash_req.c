@@ -8,104 +8,86 @@
 // See http://www.wtfpl.net/ for more details.
 //============================================================================
 //============================================================================
-//=== Inbox and the blocking call -- a plain static ring, no RTOS queue
+//=== Synchronous RPC adapter onto the Flash AO's SST event queue
 //
-// One consumer (the flash thread), any number of task producers. The ring
-// holds pointers, not copies: the caller's request block is where the result
-// has to land. A full ring refuses the request and says so, so a producer is
-// never held up by the flash thread - and a caller that got false knows the
-// work never ran and its buffer was not touched.
-//
-// Two task contexts share this file, which is what makes it read oddly at
-// first: nobody notifies itself. Flash_wake_() runs in the caller and writes
-// the flash thread's slot 0 ("there is work in the ring"), which the thread's
-// loop takes. Flash_reqFinish() runs in the flash thread and writes the
-// caller's slot 1 ("your request is done"), which the caller is parked on
-// inside Flash_submit_().
-//
-//   caller (any task)          flash thread
-//   ------------------         -------------
-//   Flash_readBlock()
-//     push, wake  ----------->  take(slot 0) returns
-//     take(slot 1) [blocked]    pop, transfer
-//     returns, reads req.ok  <--  finish -> give(slot 1)
+// Requests remain on the caller's stack until completion. Event envelopes
+// live in static storage: SST performs GC after dispatch returns, which may
+// be after the caller has already resumed and discarded its request.
 
 #include "flash.h"
 #include "flash_req_priv.h"
 
 //============================================================================
-#define FLASH_INBOX_LEN 8U
+typedef struct {
+    Flash_Evt event;
+    bool used;
+} Flash_RequestSlot_;
 
-static Flash_Req *Flash_inbox_[FLASH_INBOX_LEN];
-static uint8_t Flash_head_;   // next slot to write
-static uint8_t Flash_tail_;   // next slot to read
-static uint8_t Flash_used_;
-static TaskHandle_t Flash_thread_;
+static Flash_RequestSlot_ Flash_slots_[FLASH_REQUEST_CAPACITY];
+static SST_Task *Flash_target_;
 
 //============================================================================
-void Flash_reqBind(TaskHandle_t thread) {
-    Flash_thread_ = thread;
+void Flash_reqBind(SST_Task *ao) {
+    configASSERT(Flash_target_ == (SST_Task *)0);
+    configASSERT(ao != (SST_Task *)0);
+    for (unsigned i = 0U; i < FLASH_REQUEST_CAPACITY; ++i) {
+        // Static SST headers remain immutable, even when an envelope is
+        // reused before the previous dispatch's GC has inspected it.
+        Flash_slots_[i].event.super.sig = FLASH_REQ_SIG;
+    }
+    Flash_target_ = ao;
 }
 //............................................................................
-static bool Flash_push_(Flash_Req * const req) {
+static bool Flash_post_(Flash_Req * const req) {
     bool accepted = false;
 
+    configASSERT(Flash_target_ != (SST_Task *)0);
+    configASSERT(xPortIsInsideInterrupt() == pdFALSE);
+    configASSERT(xTaskGetCurrentTaskHandle() != Flash_target_->thread);
     taskENTER_CRITICAL();
-    if (Flash_used_ < FLASH_INBOX_LEN) {
-        Flash_inbox_[Flash_head_] = req;
-        Flash_head_ = (uint8_t)((Flash_head_ + 1U) % FLASH_INBOX_LEN);
-        ++Flash_used_;
-        accepted = true;
+    for (unsigned i = 0U; i < FLASH_REQUEST_CAPACITY; ++i) {
+        Flash_RequestSlot_ * const slot = &Flash_slots_[i];
+
+        if (!slot->used) {
+            slot->used = true;
+            slot->event.req = req;
+            // Queue reserves space for every envelope plus checkpoint.
+            SST_Task_post(Flash_target_, &slot->event.super);
+            accepted = true;
+            break;
+        }
     }
     taskEXIT_CRITICAL();
-
     return accepted;
 }
 //............................................................................
-// Producer side: runs in the caller, and the slot it writes belongs to the
-// flash thread. Nothing in this module notifies the current task here.
-static void Flash_wake_(void) {
-    TaskHandle_t const thread = Flash_thread_;
-
-    if (thread != (TaskHandle_t)0) {
-        (void)xTaskNotifyGiveIndexed(thread, FLASH_REQ_INDEX);
-    }
-}
-//............................................................................
-// Flash thread side: the single consumer, so the pop side needs no
-// coordination beyond the critical section it shares with the producers.
-bool Flash_reqPop(Flash_Req ** const out) {
-    bool found = false;
+void Flash_reqFinish(Flash_Req * const req) {
+    bool released = false;
 
     taskENTER_CRITICAL();
-    if (Flash_used_ > 0U) {
-        *out = Flash_inbox_[Flash_tail_];
-        Flash_tail_ = (uint8_t)((Flash_tail_ + 1U) % FLASH_INBOX_LEN);
-        --Flash_used_;
-        found = true;
+    for (unsigned i = 0U; i < FLASH_REQUEST_CAPACITY; ++i) {
+        Flash_RequestSlot_ * const slot = &Flash_slots_[i];
+
+        if (slot->used && (slot->event.req == req)) {
+            slot->used = false;
+            released = true;
+            break;
+        }
     }
     taskEXIT_CRITICAL();
-
-    return found;
-}
-//............................................................................
-// Flash thread side: the caller is parked on its own slot, so this give is
-// what makes it runnable again. The buffer stays the caller's; this hands
-// back a block its owner is still sitting on, which is exactly why it is
-// safe.
-void Flash_reqFinish(Flash_Req * const req) {
+    configASSERT(released);
+    // No request or payload access after notification: the caller can run
+    // immediately. The static envelope's SST header remains valid for GC.
     (void)xTaskNotifyGiveIndexed(req->waiter, req->waiterIndex);
 }
 //............................................................................
 // Caller side: submit, then give the CPU away until the flash thread is done.
-// A return value of false means the request was refused (inbox full), so
-// req.ok still says nothing and the buffer was never touched.
+// False means all envelopes were in use: req.ok says nothing and the
+// buffer was never touched.
 static bool Flash_submit_(Flash_Req * const req) {
-    if (!Flash_push_(req)) {
+    if (!Flash_post_(req)) {
         return false;
     }
-
-    Flash_wake_();
 
     // WAIT: the caller gives the CPU away here until the flash thread has
     // run the request to the end. Slot 1 is the only thing that can wake it,
@@ -137,7 +119,9 @@ static bool Flash_call_(Flash_Op op, uint32_t address, void *buf,
 
     return Flash_submit_(&req) && req.ok;
 }
-//............................................................................
+//============================================================================
+// Raw NOR requests -- address is the physical flash byte address.
+// These operations bypass NVS and do not resolve keys or select a partition.
 bool Flash_readBlock(uint32_t address, void *dst, uint32_t len) {
     return Flash_call_(FLASH_OP_READ, address, dst, len);
 }
@@ -154,10 +138,10 @@ bool Flash_writeBlock(uint32_t address, void const *src, uint32_t len) {
 bool Flash_eraseSector(uint32_t address) {
     return Flash_call_(FLASH_OP_ERASE, address, (void *)0, 0U);
 }
-//............................................................................
-// The key-value store the flash task owns, reached the same way as the rest:
-// a request in the queue, the AO executes it, the caller waits on its own
-// completion slot. id is the key, dst the buffer, len the value's length.
+//============================================================================
+// NVS requests -- id is a logical key; len is the value's length in bytes.
+// The shared envelope stores id in address. Only NVS operations interpret
+// that field as a key; physical address resolution belongs to NVS.
 bool Flash_nvsRead(uint16_t id, void *dst, uint32_t len) {
     return Flash_call_(FLASH_OP_NVS_READ, (uint32_t)id, dst, len);
 }

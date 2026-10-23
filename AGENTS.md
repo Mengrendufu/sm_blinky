@@ -210,3 +210,32 @@ python3 ~/.config/opencode/skills/sm/uml-sync/scripts/export_model_tree.py \
   （payload = 丢弃计数（饱和到 1 字节）+ `1U`；在用 id = 12/13/20-24/38/45/66/67/79，80~86 是退休探针、不复用 ✓）。
   **怎么读**：`inbox` 满条或 `0/16` ⇒ 生产者事件正在被丢（UI 线程约 8 秒没排空，16 槽除以 2 Hz）⇒ 故障信号 ✓；
   正常应长期是 `16/16`（或偶发 `15/16`）✓。
+
+
+## 2026-10-23：Flash AO、同步初始化与 UI 控件目录
+
+- Flash 位于 `application/aos/flash/`，与 Blinky 同归 AO 目录。
+  根下为 AO/请求适配，`hsm/` 为状态机；不再设置 `thread/` 层。
+- `AO_start()` 集中调用 `Flash_ctor()`、`SST_Task_start()`，Flash 在前。
+  其初始化和请求通道绑定完成后，再初始化可能投递请求的 Blinky。
+- SST 保持原有时序：`SST_Task_start()` 直接调用 init 虚函数。
+  init 在启动者上下文同步执行，dispatch 才运行于 AO 任务。
+  init/dispatch 直接注册，禁止重复包装派发或为此改框架初始化时机。
+- NVS 在 HSM 顶层初始化，AO Flash 给同一 BSP_Flash 对象绑定
+  Poll operations 和初始化等待上下文；不用任务通知或 DMA 中断。
+  初始化后换绑 DMA operations 与任务等待上下文，NVS 设备句柄不变。
+  初始化使用 DWT，运行期使用 HAL tick；设备 BUSY 等待可让出 CPU。
+- Flash 的 SST 队列为 9 格：8 个请求封装 + 1 个单次持久化事件。
+  handler 可让出 CPU，但一事件完成前不派发下一事件。
+- UI 控件放在 `application/ui/hsm/widgets/`，由 HSM 持有和操作。
+- 当前启动链路：BSP/资产 → 定时器 → UI → SST_init → AO_start
+  → SST_start → 调度器。启动期 SPI 轮询须能在中断屏蔽时完成并超时。
+- Flash/LCD 各自只有一个 BSP 对象；传输 operations 和等待 operations
+  分别绑定。只允许旧所有者在完整操作结束、完成已消费后换绑。
+  普通完成与 ISR 完成必须各用对应的 indexed 通知 API。
+- LCD WriteArea 同步完成：窗口、所有分块与等待保持独占。
+  flush_ready 和首帧背光调度归 UI 线程，ISR 不调用 lv_*。
+- Sys 页 Flsh/Blky 两行按 AO_Flash/AO_Blinky 的线程句柄匹配。
+  SST 任务名同为 ao，不能依赖名字区分；水位是历史最低剩余栈字数。
+- 目录迁移、同步初始化、Flash/LCD 对象化的验证见
+  `docs/charter.md` §13—15；历史板端数据不能充当新镜像验证。

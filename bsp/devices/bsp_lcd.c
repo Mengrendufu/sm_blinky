@@ -121,9 +121,10 @@ typedef struct {
 } BSP_lcdInitStep_;
 
 static DMA_HandleTypeDef lcdDma_;
-static BSP_lcdWaitOps lcdWait_;
-static bool lcdWaitBound_;
-static volatile bool lcdDmaFailed_;
+static BSP_Lcd lcdDevice_ = {.device = &lcdDma_};
+static volatile bool lcdDmaBusy_;
+static BSP_lcdDone lcdDmaDone_;
+static void *lcdDmaContext_;
 static BSP_lcdInitStep_ const lcdInitSeq_[] = {
     // MADCTL: BGR bit set. Measured, not inherited: with 0x00 the panel swaps
     // red and blue (a red/green/blue/white/black bar test came back
@@ -154,7 +155,7 @@ static BSP_lcdInitStep_ const lcdInitSeq_[] = {
 static void BSP_lcdGpioInit_(void);
 static void BSP_lcdFsmcInit_(void);
 static void BSP_lcdDmaInit_(void);
-static void BSP_lcdWaitRequireOwner_(void);
+
 static void BSP_lcdSetWindow_(uint16_t xs, uint16_t ys,
                                uint16_t xe, uint16_t ye);
 static void BSP_lcdDmaCplt_(DMA_HandleTypeDef *hdma);
@@ -315,13 +316,6 @@ void BSP_lcdInit(void) {
 }
 
 //............................................................................
-// The light, on the display layer's schedule. Idempotent, one GPIO write.
-void BSP_lcdBacklight(bool on) {
-    BSP_lcdWaitRequireOwner_();
-    HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN,
-                      on ? GPIO_PIN_SET : GPIO_PIN_RESET);
-}
-//............................................................................
 static void BSP_lcdPanelInit_(void) {
     uint8_t step;
 
@@ -340,29 +334,8 @@ static void BSP_lcdPanelInit_(void) {
 //............................................................................
 // Window set: CASET + RASET + RAMWR. Parameters go out 8 bit on the low byte,
 // which is what the panel expects in the 16-bit 8080 mode.
-// A whole frame, straight from memory to the panel, waited out by polling
-// the channel: the boot splash runs before the scheduler, so there is no task
-// to notify. One screen is 8.6 ms of bus.
+// Shared by startup GRAM checks and the object's complete area operation.
 //............................................................................
-// Put the panel's inversion back. A panel that is still running its own
-// power-up can end that sequence by loading its NVM, and what that leaves
-// behind is a panel whose black level has the wrong polarity: black comes up
-// as a bright field. The inversion bit is what that level hangs on, and
-// unlike the power and VCOM registers it can be written while the panel is
-// scanning - idempotent, tens of microseconds.
-//
-// This was taken out once, as an unproven hedge, and put back the same day:
-// with it gone the glass came up inverted and every region drawn afterwards
-// carried the wrong polarity - garbage wherever the picture changed, which is
-// exactly what it looked like on the bench (2026-10-12). It is now re-sent
-// forever, slowly, because that clobber has no schedule of its own.
-void BSP_lcdReassert(void) {
-    BSP_lcdWaitRequireOwner_();
-    if (lcdDma_.State != HAL_DMA_STATE_READY) {
-        SM_onAssert("lcd", __LINE__);
-    }
-    BSP_lcdWriteCmd_(LCD_INVON_CMD);
-}
 //............................................................................
 // The run-time coverage proof used to live here: clear the frame and prove
 // it, lay the sentinel, draw, then ask whether the drawing covered the frame
@@ -446,93 +419,6 @@ static void BSP_lcdDmaInit_(void) {
     HAL_NVIC_EnableIRQ(LCD_DMA_IRQN);
 }
 //............................................................................
-// Push pixels into the window BSP_lcdSetWindow_() just opened, by channel
-// instead of by CPU. That loop was retired with this path; charter §6 keeps
-// its 169 ns/px as the baseline the channel has to beat.
-//
-// The caller has already opened the window, so the panel's address counter
-// sits where the first pixel has to land: the transfer only has to push them
-// in order, with an incrementing source and fixed destination.
-static void BSP_lcdWritePixelsDma_(uint16_t const *pixels, uint32_t count) {
-    uint32_t transfers = count;
-    uint32_t size = DMA_PDATAALIGN_HALFWORD;
-
-    if ((pixels == (uint16_t const *)0) || (count == 0U)
-        || (((uint32_t)pixels & 1U) != 0U)) {
-        SM_onAssert("lcd", __LINE__);
-    }
-
-    // A word access carries two pixels, and what the frame memory charges for
-    // is the access, not the pixel: the retired record 49 bench measured a
-    // fixed ~8 HCLK per access plus ~4 HCLK per halfword moved, so 167 ns/px
-    // for halfwords against 112 ns/px for words. The pair order survives -
-    // the low halfword lands first - and the destination does not walk, so RS
-    // stays on the data register either way. Odd counts and sources that are
-    // not word aligned fall back to halfwords.
-    if (((count & 1U) == 0U) && (((uint32_t)pixels & 3U) == 0U)) {
-        size = DMA_PDATAALIGN_WORD;
-        transfers = count / 2U;
-    }
-    if (transfers > 0xFFFFU) {
-        SM_onAssert("lcd", __LINE__);
-    }
-    if (lcdDma_.State != HAL_DMA_STATE_READY) {
-        SM_onAssert("lcd", __LINE__);
-    }
-
-    lcdDmaFailed_ = false;
-
-    // The size lives in CCR, which HAL_DMA_Start_IT() does not reprogram: it
-    // sets the addresses, the length and the interrupt enables, and nothing
-    // else. PSIZE sits at bit 8 and MSIZE at bit 10, and both take the same
-    // value - which is how DMA_PDATAALIGN_* and DMA_MDATAALIGN_* are defined.
-    MODIFY_REG(lcdDma_.Instance->CCR, DMA_CCR_PSIZE | DMA_CCR_MSIZE,
-               size | (size << 2U));
-
-    // PINC walks the source. The destination (CMAR) is fixed, so every access
-    // lands on the same register - which keeps the panel's RS (FSMC_A10 =
-    // HADDR[11]) on "data" instead of flipping it to "command" every 1024
-    // pixels. HAL's DMA_SetConfig() clears the channel's flags before the
-    // interrupts are enabled, so no stale transfer-complete can fire the wake
-    // early (stm32f1xx_hal_dma.c:861).
-    if (HAL_DMA_Start_IT(&lcdDma_, (uint32_t)pixels,
-                         (uint32_t)LCD_DAT_ADDR, transfers) != HAL_OK) {
-        SM_onAssert("lcd", __LINE__);
-    }
-}
-//............................................................................
-// Transfer complete: HAL has already disabled the channel's interrupts and
-// cleared the flags (stm32f1xx_hal_dma.c:631-652). All this does is hand the
-// wait over to the thread that armed it.
-static void BSP_lcdDmaCplt_(DMA_HandleTypeDef *hdma) {
-    (void)hdma;
-
-    lcdWait_.notifyDone(lcdWait_.context);
-}
-//............................................................................
-// Transfer error: HAL has disabled the interrupts, cleared every flag and put
-// the handle back to READY (stm32f1xx_hal_dma.c:655-680), so the thread can
-// arm the next transfer. Wake it either way and let it decide - the assertion
-// belongs on the thread, where pushing a record and resetting the board is
-// ordinary work instead of something done inside an interrupt.
-static void BSP_lcdDmaError_(DMA_HandleTypeDef *hdma) {
-    (void)hdma;
-
-    lcdDmaFailed_ = true;
-
-    lcdWait_.notifyDone(lcdWait_.context);
-}
-//............................................................................
-// The channel's vector. It lives here, not in bsp/platform/stm32f1xx_it.c,
-// because that file is shared with the bootloader - which links no panel
-// driver, so a reference to this channel from there would not link at all.
-// The bootloader keeps the startup file's default handler on this line, and
-// nothing there ever arms a transfer.
-void DMA1_Channel6_IRQHandler(void) {
-    HAL_DMA_IRQHandler(&lcdDma_);
-}
-
-
 // Frame memory readback: narrow the window to one pixel, RAMRD, one dummy
 // read (the first value back is not the pixel), then the pixel itself.
 //............................................................................
@@ -825,47 +711,209 @@ static uint16_t BSP_lcdReadId_(void) {
 }
 
 //============================================================================
-// Bound wait API: window setup, DMA and completion form one owner operation.
-#define LCD_DMA_WAIT_MS 20U
+// POLLING OPERATIONS -- CPU writes to the fixed FSMC data register.
+SM_DEFINE_MODULE("lcd")
 
-SM_DEFINE_MODULE("lcdwait")
+#define LCD_TRANSFER_WAIT_MS 20U
+#define LCD_DMA_MAX_UNITS 65535U
 
-static void BSP_lcdWaitRequireOwner_(void) {
-    SM_REQUIRE(lcdWaitBound_);
-    SM_REQUIRE(lcdWait_.isCaller(lcdWait_.context));
+static void BSP_lcdWritePixelsPoll_(void *device, uint16_t const *pixels,
+                                    uint32_t count, BSP_lcdDone done,
+                                    void *context) {
+    SM_REQUIRE(device == &lcdDma_);
+    SM_REQUIRE(lcdDevice_.busy);
+    for (uint32_t i = 0U; i < count; ++i) {
+        BSP_lcdWriteDat_(pixels[i]);
+    }
+    done(context, true);
 }
 
-void BSP_lcdBindWait(BSP_lcdWaitOps const *ops) {
-    SM_REQUIRE(!lcdWaitBound_);
-    SM_REQUIRE(ops != (BSP_lcdWaitOps const *)0);
-    SM_REQUIRE(ops->isCaller != 0);
-    SM_REQUIRE(ops->waitDone != 0);
-    SM_REQUIRE(ops->notifyDone != 0);
-    SM_REQUIRE(ops->isCaller(ops->context));
-    lcdWait_ = *ops;
-    lcdWaitBound_ = true;
+BSP_lcdOperations const BSP_lcdPollOperations = {
+    .writePixels = &BSP_lcdWritePixelsPoll_,
+};
+
+//============================================================================
+// DMA OPERATIONS -- fixed destination, incrementing source, one arm per call.
+// A word carries two RGB565 pixels, low halfword first. Odd counts and
+// halfword-only aligned sources retain the original halfword fallback.
+static void BSP_lcdDmaFinish_(bool ok) {
+    BSP_lcdDone const done = lcdDmaDone_;
+    void * const context = lcdDmaContext_;
+
+    SM_REQUIRE(lcdDmaBusy_);
+    lcdDmaDone_ = (BSP_lcdDone)0;
+    lcdDmaContext_ = (void *)0;
+    lcdDmaBusy_ = false;
+    done(context, ok);
 }
 
-bool BSP_lcdWriteAreaWait(uint16_t xs, uint16_t ys, uint16_t xe,
-                          uint16_t ye, uint16_t const *pixels) {
-    BSP_lcdWaitRequireOwner_();
+static void BSP_lcdWritePixelsDma_(void *device, uint16_t const *pixels,
+                                   uint32_t count, BSP_lcdDone done,
+                                   void *context) {
+    uint32_t transfers = count;
+    uint32_t size = DMA_PDATAALIGN_HALFWORD;
+
+    SM_REQUIRE(device == &lcdDma_);
+    SM_REQUIRE(lcdDevice_.busy && !lcdDmaBusy_);
+    SM_REQUIRE(lcdDma_.State == HAL_DMA_STATE_READY);
+    if (((count & 1U) == 0U) && (((uintptr_t)pixels & 3U) == 0U)) {
+        size = DMA_PDATAALIGN_WORD;
+        transfers = count / 2U;
+    }
+    SM_REQUIRE((transfers > 0U) && (transfers <= LCD_DMA_MAX_UNITS));
+    lcdDmaDone_ = done;
+    lcdDmaContext_ = context;
+    lcdDmaBusy_ = true;
+
+    // HAL start does not change width bits. PINC walks CPAR (the source);
+    // CMAR stays on LCD_DAT_ADDR so FSMC RS never flips into command mode.
+    MODIFY_REG(lcdDma_.Instance->CCR, DMA_CCR_PSIZE | DMA_CCR_MSIZE,
+               size | (size << 2U));
+    // Publish borrowed pixel stores before the channel starts reading them.
+    __DSB();
+    if (HAL_DMA_Start_IT(&lcdDma_, (uint32_t)(uintptr_t)pixels,
+                         LCD_DAT_ADDR, transfers) != HAL_OK) {
+        BSP_lcdDmaFinish_(false);
+    }
+}
+
+BSP_lcdOperations const BSP_lcdDmaOperations = {
+    .writePixels = &BSP_lcdWritePixelsDma_,
+};
+
+// HAL has cleared flags, disabled interrupts and restored READY first.
+static void BSP_lcdDmaCplt_(DMA_HandleTypeDef *hdma) {
+    SM_REQUIRE(hdma == &lcdDma_);
+    BSP_lcdDmaFinish_(true);
+}
+
+static void BSP_lcdDmaError_(DMA_HandleTypeDef *hdma) {
+    SM_REQUIRE(hdma == &lcdDma_);
+    BSP_lcdDmaFinish_(false);
+}
+
+// Keep the vector with the panel: bootloader does not link this driver.
+void DMA1_Channel6_IRQHandler(void) {
+    HAL_DMA_IRQHandler(&lcdDma_);
+}
+
+//============================================================================
+// OBJECT BINDING AND PUBLIC METHODS -- window and pixels are indivisible.
+BSP_Lcd *BSP_lcdDevice(void) {
+    return &lcdDevice_;
+}
+
+void BSP_lcdBind(BSP_Lcd *me, BSP_lcdOperations const *operations,
+                 BSP_lcdWaitOperations const *waitOperations,
+                 void *waitContext) {
+    SM_REQUIRE(me == &lcdDevice_);
+    SM_REQUIRE(__get_IPSR() == 0U);
+    SM_REQUIRE(!me->busy && !me->complete && !lcdDmaBusy_);
+    SM_REQUIRE(lcdDma_.State == HAL_DMA_STATE_READY);
+    SM_REQUIRE(operations != (BSP_lcdOperations const *)0);
+    SM_REQUIRE(operations->writePixels != 0);
+    SM_REQUIRE(waitOperations != (BSP_lcdWaitOperations const *)0);
+    SM_REQUIRE(waitOperations->isCaller != 0);
+    SM_REQUIRE(waitOperations->waitDone != 0);
+    SM_REQUIRE(waitOperations->notifyDone != 0);
+    SM_REQUIRE(waitOperations->yield != 0);
+    if (me->waitOperations != (BSP_lcdWaitOperations const *)0) {
+        SM_REQUIRE(me->waitOperations->isCaller(me->waitContext));
+    }
+    me->operations = operations;
+    me->waitOperations = waitOperations;
+    me->waitContext = waitContext;
+}
+
+static void BSP_lcdEnter_(BSP_Lcd *me) {
+    SM_REQUIRE(me == &lcdDevice_);
+    SM_REQUIRE(me->operations != (BSP_lcdOperations const *)0);
+    SM_REQUIRE(me->waitOperations != (BSP_lcdWaitOperations const *)0);
+    SM_REQUIRE(me->waitOperations->isCaller(me->waitContext));
+    SM_REQUIRE(!me->busy && !me->complete && !lcdDmaBusy_);
+    SM_REQUIRE(lcdDma_.State == HAL_DMA_STATE_READY);
+    me->busy = true;
+}
+
+static void BSP_lcdDone_(void *context, bool ok) {
+    BSP_Lcd * const me = context;
+
+    SM_REQUIRE(me->busy && !me->complete);
+    me->ok = ok;
+    me->complete = true;
+    me->waitOperations->notifyDone(me->waitContext);
+}
+
+static bool BSP_lcdWaitTransfer_(BSP_Lcd *me) {
+    if (!me->waitOperations->waitDone(me->waitContext,
+                                      LCD_TRANSFER_WAIT_MS)) {
+        SM_onAssert("lcdma", __LINE__);
+        return false; // Never release a buffer while DMA may own it.
+    }
+    SM_REQUIRE(me->complete && !lcdDmaBusy_);
+    SM_REQUIRE(lcdDma_.State == HAL_DMA_STATE_READY);
+    bool const ok = me->ok;
+
+    me->complete = false;
+    return ok;
+}
+
+bool BSP_lcdWriteArea(BSP_Lcd *me, uint16_t xs, uint16_t ys, uint16_t xe,
+                      uint16_t ye, uint16_t const *pixels) {
+    BSP_lcdEnter_(me);
     SM_REQUIRE((xs <= xe) && (ys <= ye));
     SM_REQUIRE((xe < LCD_WIDTH) && (ye < LCD_HEIGHT));
     SM_REQUIRE(pixels != (uint16_t const *)0);
     SM_REQUIRE(((uintptr_t)pixels & 1U) == 0U);
-    SM_REQUIRE(lcdDma_.State == HAL_DMA_STATE_READY);
-
-    uint32_t const count = ((uint32_t)xe - xs + 1U)
-                          * ((uint32_t)ye - ys + 1U);
+    uint32_t left = ((uint32_t)xe - xs + 1U) * ((uint32_t)ye - ys + 1U);
+    bool ok = true;
 
     BSP_lcdSetWindow_(xs, ys, xe, ye);
-    // Publish pixel stores before DMA reads the borrowed buffer.
-    __DSB();
-    BSP_lcdWritePixelsDma_(pixels, count);
-    if (!lcdWait_.waitDone(lcdWait_.context, LCD_DMA_WAIT_MS)) {
-        // A missing completion cannot release a buffer DMA may still own.
-        SM_onAssert("lcdma", __LINE__);
-        return false;
+    while (ok && (left > 0U)) {
+        uint32_t n = left;
+
+        if (n > LCD_DMA_MAX_UNITS) {
+            // Large aligned/even spans keep word DMA. A halfword-aligned
+            // span uses one bounded chunk, then continues the same window.
+            n = (((uintptr_t)pixels & 3U) == 0U)
+                ? ((n > 2U * LCD_DMA_MAX_UNITS)
+                   ? 2U * LCD_DMA_MAX_UNITS : (n & ~1U))
+                : LCD_DMA_MAX_UNITS;
+        }
+        me->operations->writePixels(me->device, pixels, n,
+                                     &BSP_lcdDone_, me);
+        ok = BSP_lcdWaitTransfer_(me);
+        pixels += n;
+        left -= n;
+        if (ok && (left > 0U)) {
+            me->waitOperations->yield(me->waitContext);
+        }
     }
-    return !lcdDmaFailed_;
+    me->busy = false;
+    return ok;
+}
+
+void BSP_lcdBacklight(BSP_Lcd *me, bool on) {
+    BSP_lcdEnter_(me);
+    HAL_GPIO_WritePin(LCD_BL_PORT, LCD_BL_PIN,
+                      on ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    me->busy = false;
+}
+
+// Put the panel's inversion back. A panel that is still running its own
+// power-up can end that sequence by loading its NVM, and what that leaves
+// behind is a panel whose black level has the wrong polarity: black comes up
+// as a bright field. The inversion bit is what that level hangs on, and
+// unlike the power and VCOM registers it can be written while the panel is
+// scanning - idempotent, tens of microseconds.
+//
+// This was taken out once, as an unproven hedge, and put back the same day:
+// with it gone the glass came up inverted and every region drawn afterwards
+// carried the wrong polarity - garbage wherever the picture changed, which is
+// exactly what it looked like on the bench (2026-10-12). It is now re-sent
+// forever, slowly, because that clobber has no schedule of its own.
+void BSP_lcdReassert(BSP_Lcd *me) {
+    BSP_lcdEnter_(me);
+    BSP_lcdWriteCmd_(LCD_INVON_CMD);
+    me->busy = false;
 }

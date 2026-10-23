@@ -8,20 +8,20 @@
 // See http://www.wtfpl.net/ for more details.
 //============================================================================
 //============================================================================
-//=== Flash thread -- wait, drain, dispatch
+//=== Flash AO -- one event at a time, with yielding waits inside dispatch
 
 #include "bsp.h"
 #include "flash.h"
 #include "bsp_flash.h"
 #include "sm_flash.h"
 #include "flash_req_priv.h"
+#include "flash_priv.h"
 #include "nvs.h"
 #include "nvm.h"
 #include "nor_partitions.h"   // where the log lives and how many sectors
 #include "sm_tracer.h"
 #include <string.h>
 
-/* TODO(probe): remove with the flood below. The port counts erases for us. */
 #include "FreeRTOS.h"
 #include "task.h"
 
@@ -30,14 +30,8 @@
 // the link map instead of hiding inside an RTOS heap.
 #define FLASH_STACK_WORDS 256U // 256 words = 1 KB; settle it from [MEM]
 
-// Same level as the UI thread (23) and under the Blinky AO (24). It must not
-// sit below its callers: a notification wait has no priority inheritance, so
-// a middle-priority task in between would stretch every caller's block.
-#define FLASH_PRIORITY    23U
-
-// The application snapshot is written out this often. The deadline is checked
-// on every wake, not only on a timeout: tying the write to a page's life is
-// what made the first version never checkpoint at all (2026-10-13).
+// One-shot checkpoint: rearmed only after its handler finishes, so long
+// transfers cannot accumulate periodic checkpoint events.
 #define FLASH_NVM_MS      10000U
 
 // NVM_Blinky lives under this key in the store.
@@ -50,50 +44,36 @@
 
 static StaticTask_t Flash_tcb_;
 static StackType_t Flash_stack_[FLASH_STACK_WORDS];
-static Sm_Flash Flash_sm_;
-static TaskHandle_t Flash_handle_;
+static Sm_Flash Flash_inst_;
+SST_Task * const AO_Flash = &Flash_inst_.super;
+static SST_TimeEvt Flash_checkpoint_;
 static uint32_t Flash_done_;
 
 //============================================================================
-static void Flash_thread_(void *arg);
-static void Flash_drain_(void);
 static void Flash_report_(void);
 
 //============================================================================
-void Flash_start(void) {
-    Sm_Flash_init(&Flash_sm_);
-
-    Flash_handle_ = xTaskCreateStatic(Flash_thread_, "flash",
-                                      FLASH_STACK_WORDS, (void *)0,
-                                      FLASH_PRIORITY, Flash_stack_,
-                                      &Flash_tcb_);
-    configASSERT(Flash_handle_ != (TaskHandle_t)0);
-
-    Flash_reqBind(Flash_handle_);
+void Flash_ctor(void) {
+    SST_Task_ctor(AO_Flash, &Sm_Flash_init, &Sm_Flash_dispatch);
+    AO_Flash->tcb = &Flash_tcb_;
+    AO_Flash->stack = Flash_stack_;
+    AO_Flash->stackSizeWords = FLASH_STACK_WORDS;
+    SST_TimeEvt_ctor(&Flash_checkpoint_, FLASH_CHECKPOINT_SIG, AO_Flash);
 }
 //............................................................................
-// No poll timeout: this thread has no periodic work at all, so it sleeps
-// until a request arrives. That is the difference from an AO, which would
-// have a beat to keep up with.
-// The NVS is a capability of this AO, not a second user of the flash: it
-// lives in this thread, and nvs_port_flash.c talks to the bus directly. On
-// the way up it mounts, reads the boot counter, writes it back one higher and
-// traces what each step cost (record 91: mount ms, write ms, read ms, boot
-// count low, boot count high, tag).
-//
-// Four sectors on purpose: the mount scans the ATE area of every sector in
-// 8-byte reads, so 16 sectors cost about 111 ms on the glass and four cost a
-// quarter of that, which is plenty of room for a key-value store this size.
+// NVS belongs to this AO. TOP initialization mounts and restores it in the
+// starter context, before the scheduler starts.
 static struct nvs_fs Flash_nvs_;
 static uint32_t Flash_boot_;
-static TickType_t Flash_nvmAt_;   // when the next checkpoint is due
 
-static uint32_t Flash_nvs_us_(void) {
-    return ((uint32_t)HAL_GetTick() * 1000U) + (uint32_t)TIM1->CNT;
+static uint32_t Flash_dbgNvsCycles_(void) {
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    return DWT->CYCCNT;
 }
 
-static uint8_t Flash_nvs_ms_(uint32_t us) {
-    uint32_t const ms = us / 1000U;
+static uint8_t Flash_dbgNvsMs_(uint32_t cycles) {
+    uint32_t const ms = cycles / (SystemCoreClock / 1000U);
 
     return (ms > 255U) ? 255U : (uint8_t)ms;
 }
@@ -101,9 +81,9 @@ static uint8_t Flash_nvs_ms_(uint32_t us) {
 static void Flash_nvsBoot_(void) {
     uint32_t before = 0U;
     uint32_t t0;
-    uint32_t mountUs;
-    uint32_t readUs;
-    uint32_t writeUs;
+    uint32_t mountCycles;
+    uint32_t readCycles;
+    uint32_t writeCycles;
     bool have;
 
     Flash_nvs_.offset = 0U;
@@ -113,30 +93,30 @@ static void Flash_nvsBoot_(void) {
                                                  // times the erase budget
     Flash_nvs_.flash_device = nvs_port_device();
 
-    t0 = Flash_nvs_us_();
+    t0 = Flash_dbgNvsCycles_();
     if (nvs_mount(&Flash_nvs_) != 0) {
         (void)nvs_clear(&Flash_nvs_);
         if (nvs_mount(&Flash_nvs_) != 0) {
             return;   // nothing to report this boot
         }
     }
-    mountUs = Flash_nvs_us_() - t0;
+    mountCycles = Flash_dbgNvsCycles_() - t0;
 
-    t0 = Flash_nvs_us_();
+    t0 = Flash_dbgNvsCycles_();
     have = (nvs_read(&Flash_nvs_, 1U, &before, sizeof(before))
             == (ssize_t)sizeof(before));
-    readUs = Flash_nvs_us_() - t0;
+    readCycles = Flash_dbgNvsCycles_() - t0;
 
     Flash_boot_ = have ? (before + 1U) : 1U;
 
-    t0 = Flash_nvs_us_();
+    t0 = Flash_dbgNvsCycles_();
     (void)nvs_write(&Flash_nvs_, 1U, &Flash_boot_, sizeof(Flash_boot_));
-    writeUs = Flash_nvs_us_() - t0;
+    writeCycles = Flash_dbgNvsCycles_() - t0;
 
     SM_TRACE_BEGIN(91U, 6)
-    SM_TRACE_PAYLOAD_BE(Flash_nvs_ms_(mountUs))
-    SM_TRACE_PAYLOAD_BE(Flash_nvs_ms_(writeUs))
-    SM_TRACE_PAYLOAD_BE(Flash_nvs_ms_(readUs))
+    SM_TRACE_PAYLOAD_BE(Flash_dbgNvsMs_(mountCycles))
+    SM_TRACE_PAYLOAD_BE(Flash_dbgNvsMs_(writeCycles))
+    SM_TRACE_PAYLOAD_BE(Flash_dbgNvsMs_(readCycles))
     SM_TRACE_PAYLOAD_BE((unsigned char)(Flash_boot_ & 0xFFU))
     SM_TRACE_PAYLOAD_BE((unsigned char)((Flash_boot_ >> 8) & 0xFFU))
     SM_TRACE_PAYLOAD_BE(2U)   // tag 2: the NVS lives in the flash task now
@@ -164,18 +144,79 @@ bool Flash_kvRead(uint16_t id, void *dst, uint32_t len) {
     return (nvs_read(&Flash_nvs_, id, dst, len) == (ssize_t)len);
 }
 
-// BSP waiting capabilities: task handles and FreeRTOS stay in this layer.
-// Slot 0 wakes the inbox; slot 1 completes this task's hardware transfer.
+//============================================================================
+// INIT WAIT OPERATIONS -- caller context, before the scheduler; no RTOS wait.
+typedef struct {
+    bool done;
+} Flash_InitWait;
+
+static Flash_InitWait Flash_initWait_;
+
+static bool Flash_initIsCaller_(void *context) {
+    return (context == &Flash_initWait_)
+           && (xPortIsInsideInterrupt() == pdFALSE)
+           && (xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED);
+}
+
+static bool Flash_initWaitDone_(void *context, uint32_t timeoutMs) {
+    Flash_InitWait * const wait = context;
+    bool const done = wait->done;
+
+    (void)timeoutMs; // Poll operations have already completed inline.
+    wait->done = false;
+    return done;
+}
+
+static void Flash_initNotifyDone_(void *context) {
+    Flash_InitWait * const wait = context;
+
+    wait->done = true;
+}
+
+static uint32_t Flash_initNow_(void *context) {
+    (void)context;
+    return DWT->CYCCNT;
+}
+
+static uint32_t Flash_initElapsedMs_(void *context, uint32_t started) {
+    (void)context;
+    return (uint32_t)(DWT->CYCCNT - started) / (SystemCoreClock / 1000U);
+}
+
+static void Flash_initSleepMs_(void *context, uint32_t delayMs) {
+    uint32_t const started = Flash_initNow_(context);
+
+    while (Flash_initElapsedMs_(context, started) < delayMs) {
+    }
+}
+
+static void Flash_initYield_(void *context) {
+    (void)context;
+}
+
+static BSP_flashWaitOperations const Flash_initWaitOperations_ = {
+    .isCaller = &Flash_initIsCaller_,
+    .waitDone = &Flash_initWaitDone_,
+    .notifyDone = &Flash_initNotifyDone_,
+    .sleepMs = &Flash_initSleepMs_,
+    .yield = &Flash_initYield_,
+    .now = &Flash_initNow_,
+    .elapsedMs = &Flash_initElapsedMs_,
+};
+
+//============================================================================
+// RUN WAIT OPERATIONS -- the AO task; slot 0 is SST, slot 1 is hardware/RPC.
 #define FLASH_DMA_DONE_INDEX 1U
 
 static bool Flash_waitIsCaller_(void *context) {
     return (context != (void *)0)
            && (xPortIsInsideInterrupt() == pdFALSE)
+           && (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED)
            && (xTaskGetCurrentTaskHandle() == (TaskHandle_t)context);
 }
 
 static bool Flash_waitDone_(void *context, uint32_t timeoutMs) {
-    (void)context; // Notifications are taken on the current task.
+    (void)context;
     return ulTaskNotifyTakeIndexed(FLASH_DMA_DONE_INDEX, pdTRUE,
                                    pdMS_TO_TICKS(timeoutMs)) != 0U;
 }
@@ -200,57 +241,60 @@ static void Flash_sleepMs_(void *context, uint32_t delayMs) {
     vTaskDelay(pdMS_TO_TICKS(delayMs));
 }
 
-static void Flash_bindWait_(void) {
-    BSP_flashWaitOps const ops = {
-        .context = (void *)xTaskGetCurrentTaskHandle(),
-        .isCaller = &Flash_waitIsCaller_,
-        .waitDone = &Flash_waitDone_,
-        .notifyDone = &Flash_notifyDone_,
-        .sleepMs = &Flash_sleepMs_,
-    };
-
-    BSP_flashBindWait(&ops);
+static void Flash_yield_(void *context) {
+    (void)context;
+    taskYIELD();
 }
 
-static void Flash_thread_(void *arg) {
-    (void)arg;
+static uint32_t Flash_now_(void *context) {
+    (void)context;
+    return HAL_GetTick();
+}
 
-    Flash_bindWait_();
+static uint32_t Flash_elapsedMs_(void *context, uint32_t started) {
+    (void)context;
+    return HAL_GetTick() - started;
+}
+
+static BSP_flashWaitOperations const Flash_runWaitOperations_ = {
+    .isCaller = &Flash_waitIsCaller_,
+    .waitDone = &Flash_waitDone_,
+    .notifyDone = &Flash_notifyDone_,
+    .sleepMs = &Flash_sleepMs_,
+    .yield = &Flash_yield_,
+    .now = &Flash_now_,
+    .elapsedMs = &Flash_elapsedMs_,
+};
+
+//============================================================================
+// LIFECYCLE BINDING -- one device and NVS handle, two execution contexts.
+void Flash_initStorage(void) {
+    BSP_Flash * const flash = BSP_flashDevice();
+
+    configASSERT(xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED);
+    BSP_flashBind(flash, &BSP_flashPollOperations,
+                   &Flash_initWaitOperations_, &Flash_initWait_);
     Flash_nvsBoot_();
-
-    Flash_nvmAt_ = xTaskGetTickCount();
-
-    for (;;) {
-        // WAIT: nothing pending, so the thread parks here and the CPU goes
-        // elsewhere until a producer writes slot 0 - or until a second has
-        // gone by, which is when the checkpoint's deadline is looked at. The
-        // deadline is absolute, so a busy stretch cannot starve it.
-        (void)ulTaskNotifyTakeIndexed(FLASH_REQ_INDEX, pdTRUE,
-                                      pdMS_TO_TICKS(1000U));
-        Flash_drain_();
-
-        if ((int32_t)(xTaskGetTickCount() - Flash_nvmAt_)
-            >= (int32_t)pdMS_TO_TICKS(FLASH_NVM_MS)) {
-            uint32_t const v = Nvm_blinky();
-
-            Flash_nvmAt_ = xTaskGetTickCount();
-            (void)nvs_write(&Flash_nvs_, NVM_BLINKY_KEY, &v, sizeof(v));
-        }
-    }
+    BSP_flashBind(flash, &BSP_flashDmaOperations,
+                   &Flash_runWaitOperations_, (void *)AO_Flash->thread);
+    Flash_reqBind(AO_Flash);
 }
-//............................................................................
-static void Flash_drain_(void) {
-    Flash_Req *req;
 
-    while (Flash_reqPop(&req)) {
-        Flash_Evt const evt = { FLASH_REQ_SIG, req };
+void Flash_armCheckpoint(void) {
+    SST_TimeEvt_arm(&Flash_checkpoint_,
+                    FLASH_NVM_MS * BSP_TICKS_PER_SEC / 1000U, 0U);
+}
 
-        Sm_Flash_dispatch(&Flash_sm_, &evt);
-        Flash_reqFinish(req);
+void Flash_checkpoint(void) {
+    uint32_t const v = Nvm_blinky();
 
-        ++Flash_done_;
-        Flash_report_();
-    }
+    (void)nvs_write(&Flash_nvs_, NVM_BLINKY_KEY, &v, sizeof(v));
+}
+
+void Flash_completeRequest(Flash_Req * const req) {
+    Flash_reqFinish(req);
+    ++Flash_done_;
+    Flash_report_();
 }
 //............................................................................
 static void Flash_report_(void) {

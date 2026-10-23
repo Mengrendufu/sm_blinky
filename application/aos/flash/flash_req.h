@@ -19,11 +19,10 @@
 //=== Notification slots this module uses
 //
 // Slot 0 belongs to a task's own entry wake: the SST AO pend, the UI inbox,
-// and the flash thread waiting for a request. Slot 1 is therefore where a
+// and the Flash AO waiting for an event. Slot 1 is therefore where a
 // flash RPC is completed, on the caller's own task - same convention at both
 // ends, and no per-call object to create. The flash thread separately
 // supplies its hardware-completion notification through BSP wait hooks.
-#define FLASH_REQ_INDEX  0U
 #define FLASH_DONE_INDEX 1U
 
 #if (configTASK_NOTIFICATION_ARRAY_ENTRIES < 2)
@@ -43,20 +42,23 @@
 // other end. The call is synchronous, so a caller never has two requests in
 // flight and one slot is always enough.
 
-// dst is the caller's buffer either way: a destination for FLASH_OP_READ, a
-// source for FLASH_OP_WRITE. Borrowed, never copied - the caller is blocked
-// until the flash thread is done with it (see Flash_submit_ below).
+// Both request groups share this envelope and completion protocol. dst is
+// the destination for reads and source for writes; erase does not use it.
+// The buffer is borrowed until completion (see Flash_submit_ below).
 typedef enum {
+    // Raw NOR: address is a physical byte address; erase targets one sector.
     FLASH_OP_READ,
     FLASH_OP_WRITE,
     FLASH_OP_ERASE,
-    FLASH_OP_NVS_READ,    // address carries the key id, dst the buffer
+
+    // NVS: address carries a logical uint16_t key ID; len is value bytes.
+    FLASH_OP_NVS_READ,
     FLASH_OP_NVS_WRITE
 } Flash_Op;
 
 typedef struct {
     Flash_Op op;
-    uint32_t address;
+    uint32_t address;         // raw byte address or NVS key ID, per op
     void *dst;
     uint32_t len;
     bool ok;                  // result: written by the flash thread

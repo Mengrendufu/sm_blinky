@@ -28,36 +28,66 @@ void BSP_lcdInit(void);
 void BSP_dbgLcdBootReport(void);
 
 //============================================================================
-// Waiting capabilities implemented by the display owner, not by the BSP.
-// context is opaque and outlives every transfer. isCaller accepts only the
-// owner, never an ISR. waitDone consumes completion, including an early
-// notification; false means timeout. notifyDone runs in the DMA ISR and
-// must not block. All time arguments are milliseconds.
+// LCD object -- one physical FSMC panel, owned by BSP. Obtain it after init;
+// do not copy the object or change its members directly.
+typedef struct BSP_Lcd BSP_Lcd;
+typedef void (*BSP_lcdDone)(void *context, bool ok);
+
+// Pixel transport under an already-open window. At most 65,535 halfwords,
+// or 65,535 words for aligned even pixel counts. Exactly one done callback:
+// Poll completes inline; DMA completes in ISR or inline on start failure.
+// Bind these tables to the object; use only the public methods below.
 typedef struct {
-    void *context;
+    void (*writePixels)(void *device, uint16_t const *pixels, uint32_t count,
+                        BSP_lcdDone done, void *context);
+} BSP_lcdOperations;
+
+extern BSP_lcdOperations const BSP_lcdPollOperations;
+extern BSP_lcdOperations const BSP_lcdDmaOperations;
+
+// Waiting operations owned by the display adapter. isCaller accepts only
+// the owner, never an ISR. waitDone consumes one completion, including an
+// early notifyDone. notifyDone supports inline and ISR calls. yield is a
+// scheduling point between bounded pixel transfers; it may be a no-op.
+// Tables and context must outlive their binding. Times are milliseconds.
+typedef struct {
     bool (*isCaller)(void *context);
     bool (*waitDone)(void *context, uint32_t timeoutMs);
     void (*notifyDone)(void *context);
-} BSP_lcdWaitOps;
+    void (*yield)(void *context);
+} BSP_lcdWaitOperations;
 
-// Bind once from the owner before run-time writes or panel control.
-// Copies the structure. No queue or mutex is provided.
-void BSP_lcdBindWait(BSP_lcdWaitOps const *ops);
+struct BSP_Lcd {
+    void *device;
+    BSP_lcdOperations const *operations;
+    BSP_lcdWaitOperations const *waitOperations;
+    void *waitContext;
+    // Private state: busy includes window setup, all chunks and waits.
+    bool busy;
+    volatile bool complete;
+    volatile bool ok;
+};
 
-// Inclusive coordinates, contiguous RGB565 pixels, at least halfword aligned.
-// Sets the window, starts DMA and waits synchronously before returning the
-// borrowed buffer. Count is derived from the rectangle. One DMA transfer:
-// at most 65,535 units, each carrying 2 pixels for aligned even counts,
-// otherwise 1 pixel. False reports DMA error; timeout is fail-stop because
-// DMA may still own the buffer. Waiting behavior comes from the bound ops.
-bool BSP_lcdWriteAreaWait(uint16_t xs, uint16_t ys, uint16_t xe,
-                          uint16_t ye, uint16_t const *pixels);
+BSP_Lcd *BSP_lcdDevice(void);
 
-// Run-time owner only. UI turns on backlight after its first complete frame.
-void BSP_lcdBacklight(bool on);
+// Bind before use. The outgoing owner may rebind only when no operation,
+// DMA or unconsumed completion remains. No queue or mutex is provided.
+void BSP_lcdBind(BSP_Lcd *me, BSP_lcdOperations const *operations,
+                 BSP_lcdWaitOperations const *waitOperations,
+                 void *waitContext);
 
-// Re-send inversion-on (0x21), the board's polarity keep-alive. Scheduling
-// this operation belongs to the display owner; it must not overlap DMA.
-void BSP_lcdReassert(void);
+//============================================================================
+// Synchronous area write: inclusive coordinates and contiguous RGB565 data,
+// at least halfword aligned. One window covers all bounded pixel transfers.
+// The buffer is borrowed until return, when every transfer has completed.
+// False reports a transfer error; lost completion is fail-stop because DMA
+// may still own the buffer. DMA needs live interrupts; Poll does not.
+bool BSP_lcdWriteArea(BSP_Lcd *me, uint16_t xs, uint16_t ys, uint16_t xe,
+                      uint16_t ye, uint16_t const *pixels);
+
+// Same owner/idle contract as area writes. UI enables backlight after its
+// first complete frame. Polarity keep-alive timing belongs to the adapter.
+void BSP_lcdBacklight(BSP_Lcd *me, bool on);
+void BSP_lcdReassert(BSP_Lcd *me);
 
 #endif // BSP_LCD_H_

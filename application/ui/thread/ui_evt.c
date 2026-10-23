@@ -72,7 +72,7 @@ static void Ui_wake_(void) {
     TaskHandle_t const thread = Ui_thread_;
 
     if (thread != (TaskHandle_t)0) {
-        (void)xTaskNotifyGive(thread);
+        (void)xTaskNotifyGiveIndexed(thread, UI_INBOX_NOTIFY_INDEX);
     }
 }
 //............................................................................

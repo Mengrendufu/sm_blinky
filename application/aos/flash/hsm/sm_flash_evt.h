@@ -10,27 +10,26 @@
 #ifndef SM_FLASH_EVT_H_
 #define SM_FLASH_EVT_H_
 
-#include <stdint.h>
+#include "sst.h"
 #include "flash_req.h"
 
 //============================================================================
-//=== Event contract shared by the flash inbox and the flash HSM
+//=== Event contract shared by the Flash AO queue and the flash HSM
 //
 // The event carries a pointer to the caller's request block, not a copy: the
-// result has to land where the caller will look for it. The block stays valid
-// for the whole dispatch because the caller is blocked until the thread
-// releases it.
-
-typedef uint16_t Flash_Sig;
+// result has to land where the caller will look for it. The request is valid
+// until completion notification. Its static envelope outlives dispatch and
+// SST GC; no request access is allowed after notifying its caller.
 
 typedef struct {
-    Flash_Sig sig;
+    SST_Evt super;
     Flash_Req *req;
 } Flash_Evt;
 
 enum {
     FLASH_NULL_SIG = 0,
-    FLASH_REQ_SIG
+    FLASH_REQ_SIG,
+    FLASH_CHECKPOINT_SIG
 };
 
 #endif // SM_FLASH_EVT_H_

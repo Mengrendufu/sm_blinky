@@ -45,25 +45,25 @@ set(SRC_ALL
     ${CMAKE_SOURCE_DIR}/application/ui/thread/ui.c
     ${CMAKE_SOURCE_DIR}/application/ui/thread/ui_evt.c
     ${CMAKE_SOURCE_DIR}/application/ui/thread/ui_disp.c
-    ${CMAKE_SOURCE_DIR}/application/ui/widgets/widget_io_priv.c
-    ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_topbar.c
-    ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_dots.c
-    ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_gauge.c
-    ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_barpanel.c
-    ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_switch.c
-    ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_dial.c
-    ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_nvm.c
-    ${CMAKE_SOURCE_DIR}/application/ui/widgets/w_ram.c
+    ${CMAKE_SOURCE_DIR}/application/ui/hsm/widgets/widget_io_priv.c
+    ${CMAKE_SOURCE_DIR}/application/ui/hsm/widgets/w_topbar.c
+    ${CMAKE_SOURCE_DIR}/application/ui/hsm/widgets/w_dots.c
+    ${CMAKE_SOURCE_DIR}/application/ui/hsm/widgets/w_gauge.c
+    ${CMAKE_SOURCE_DIR}/application/ui/hsm/widgets/w_barpanel.c
+    ${CMAKE_SOURCE_DIR}/application/ui/hsm/widgets/w_switch.c
+    ${CMAKE_SOURCE_DIR}/application/ui/hsm/widgets/w_dial.c
+    ${CMAKE_SOURCE_DIR}/application/ui/hsm/widgets/w_nvm.c
+    ${CMAKE_SOURCE_DIR}/application/ui/hsm/widgets/w_ram.c
     ${CMAKE_SOURCE_DIR}/application/ui/hsm/sm_ui.c
     ${CMAKE_SOURCE_DIR}/application/nvm/nvm.c
-    ${CMAKE_SOURCE_DIR}/application/flash
+    ${CMAKE_SOURCE_DIR}/application/aos/flash
     ${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/include
-    ${CMAKE_SOURCE_DIR}/application/flash/thread/flash.c
+    ${CMAKE_SOURCE_DIR}/application/aos/flash/flash.c
     ${CMAKE_SOURCE_DIR}/ports/nvs_port.c
     ${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/src/nvs.c
     ${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/src/nvs_crc.c
-    ${CMAKE_SOURCE_DIR}/application/flash/thread/flash_req.c
-    ${CMAKE_SOURCE_DIR}/application/flash/hsm/sm_flash.c
+    ${CMAKE_SOURCE_DIR}/application/aos/flash/flash_req.c
+    ${CMAKE_SOURCE_DIR}/application/aos/flash/hsm/sm_flash.c
 
     ${CMAKE_SOURCE_DIR}/bsp/bsp.c
     ${CMAKE_SOURCE_DIR}/bsp/devices/bsp_lcd.c
@@ -107,9 +107,8 @@ target_include_directories(${PROJECT_NAME}.elf PRIVATE
     ${CMAKE_SOURCE_DIR}/application/nvm
     ${CMAKE_SOURCE_DIR}/application/ui/thread
     ${CMAKE_SOURCE_DIR}/application/ui/hsm
-    ${CMAKE_SOURCE_DIR}/application/flash
-    ${CMAKE_SOURCE_DIR}/application/flash/thread
-    ${CMAKE_SOURCE_DIR}/application/flash/hsm
+    ${CMAKE_SOURCE_DIR}/application/aos/flash
+    ${CMAKE_SOURCE_DIR}/application/aos/flash/hsm
     ${CMAKE_SOURCE_DIR}/bsp
     ${CMAKE_SOURCE_DIR}/bsp/devices
     ${CMAKE_SOURCE_DIR}/bsp/free_rtos

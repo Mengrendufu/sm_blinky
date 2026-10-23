@@ -52,9 +52,13 @@ typedef uint16_t SST_TaskPrio;
 #define SST_PORT_CRIT_ENTRY() taskENTER_CRITICAL()
 #define SST_PORT_CRIT_EXIT()  taskEXIT_CRITICAL()
 
+// Slot 0 wakes the AO; slot 1 remains available for operation completion.
+#define SST_TASK_NOTIFY_INDEX 0U
+
 // SST-PORT pend the Task after posting an eve
 // @NOTE: executed inside SST critical section.
-#define SST_PORT_TASK_PEND() ((void)xTaskNotifyGive(me->thread))
+#define SST_PORT_TASK_PEND() \
+    ((void)xTaskNotifyGiveIndexed(me->thread, SST_TASK_NOTIFY_INDEX))
 
 //============================================================================
 // the idle SST callback for this SST port

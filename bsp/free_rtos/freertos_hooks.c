@@ -6,9 +6,8 @@
 // task on the CPU. The tick is 10 ms here (BSP_TICKS_PER_SEC 100), so a
 // 500 ms window is fifty samples - a percentage to the nearest two. The cost
 // is one pointer compare and two increments in an interrupt that already
-// runs, and no timer of our own (DWT's cycle counter is out: it stops when
-// the debugger is detached, see AGENTS.md). What it does not see: the
-// tracer's pump runs inside the idle task, so pumping records reads as idle.
+// runs, without needing a separate timer or a core-cycle time base.
+// The tracer's pump runs inside idle, so pumping records reads as idle.
 static volatile uint32_t BSP_cpuIdle_;
 static volatile uint32_t BSP_cpuTicks_;
 

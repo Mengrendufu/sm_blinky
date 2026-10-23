@@ -23,66 +23,87 @@
 // SPI1 is not an option here: on this board it belongs to the VS1053 socket.
 // The wireless socket shares SPI2 and gives up its own chip select.
 //
-// The bus setup is part of board bring-up. The verification is a separate
-// call on purpose: bring-up happens long before a terminal can be attached,
-// and the CH340 auto-download branch can hold the chip in reset right then
-// (see AGENTS.md), so the flash thread runs the probe late instead.
+// Board bring-up initializes the bus. Lifecycle owners bind the object
+// before access: asset loading, AO initialization/run time, or bootloader.
 
 // Device initialization shared by all phases.
 void BSP_flashInit(void);
 
 //============================================================================
-// Bound wait API -- bootloader asset burning and the run-time flash task.
-// Bind their respective wait capabilities before issuing reads/writes/erases.
+// Flash object -- this board has one physical SPI2 device, owned by the BSP.
+// Obtain it after BSP_flashInit; never copy it or alter its members directly.
+typedef struct BSP_Flash BSP_Flash;
+typedef void (*BSP_flashDone)(void *context, bool ok);
 
-// Waiting capabilities required by the BSP, implemented by the caller.
-// context is opaque to the BSP and must outlive every transfer. isCaller
-// accepts only the owning execution context, never an ISR. waitDone consumes
-// a completion notification (including one posted before waiting); false is
-// timeout. notifyDone must work both in an ISR and on inline start failure.
-// sleepMs delays execution (busy delay or yielding). Times are milliseconds.
+//============================================================================
+// Transport operations supplied by BSP; select one table at binding time.
+// Bind tables to the object; call only the unified public methods below.
+// Each method completes one bounded transaction, releases CS and calls done
+// exactly once (also on failure). Poll completes inline; DMA may complete
+// inline on start failure or from an ISR. Buffers remain borrowed until done.
+// program never crosses a page; erase only sends one sector command.
+// Completion here does NOT mean the chip's program/erase BUSY has cleared.
 typedef struct {
-    void *context;
+    void (*read)(void *device, uint32_t address, void *dst, uint32_t len,
+                 BSP_flashDone done, void *context);
+    void (*program)(void *device, uint32_t address, void const *src,
+                    uint32_t len, BSP_flashDone done, void *context);
+    void (*erase)(void *device, uint32_t address,
+                  BSP_flashDone done, void *context);
+} BSP_flashOperations;
+
+extern BSP_flashOperations const BSP_flashPollOperations;
+extern BSP_flashOperations const BSP_flashDmaOperations;
+
+//============================================================================
+// Waiting operations required by BSP, supplied and owned by the application.
+// waitDone consumes one completion, even if notifyDone ran before the wait.
+// notifyDone supports both inline and ISR calls. sleepMs is a busy delay or
+// a yielding delay; yield is a scheduling point between bounded transfers.
+// now/elapsedMs preserve the caller's existing time source and wrap rules.
+// No callback/table/context may expire while bound to the device.
+typedef struct {
     bool (*isCaller)(void *context);
     bool (*waitDone)(void *context, uint32_t timeoutMs);
     void (*notifyDone)(void *context);
     void (*sleepMs)(void *context, uint32_t delayMs);
-} BSP_flashWaitOps;
+    void (*yield)(void *context);
+    uint32_t (*now)(void *context);
+    uint32_t (*elapsedMs)(void *context, uint32_t started);
+} BSP_flashWaitOperations;
 
-// Bind once from the owner before first use. Copies the structure; no queue
-// or mutex is provided. Only the caller accepted by isCaller may use waits.
-void BSP_flashBindWait(BSP_flashWaitOps const *ops);
+struct BSP_Flash {
+    void *device;
+    BSP_flashOperations const *operations;
+    BSP_flashWaitOperations const *waitOperations;
+    void *waitContext;
+    // Private execution state: busy covers the entire public operation,
+    // including all pages/chunks, completion consumption and chip BUSY.
+    bool busy;
+    volatile bool complete;
+    volatile bool ok;
+};
 
-// Synchronous completion; DMA data transfer waits use the bound capability.
-// Buffers are borrowed until return. Writes split at page boundaries and
-// use sleepMs while the device programs. Destination must be erased.
-// False reports transfer/device failure. Lost DMA completion is fail-stop:
-// returning then could release a buffer still owned by the DMA.
-bool BSP_flashReadWait(uint32_t address, void *dst, uint32_t len);
-bool BSP_flashWriteWait(uint32_t address, void const *src, uint32_t len);
+BSP_Flash *BSP_flashDevice(void);
 
-// One aligned 4 KB sector, using sleepMs between BUSY polls. False reports a
-// start failure or device timeout; it does not cancel an ongoing erase.
-bool BSP_flashEraseSectorWait(uint32_t address);
+// Lifecycle owner binds before use and may rebind only between operations,
+// with no DMA, chip BUSY or unconsumed completion. Binding provides no lock.
+// The outgoing owner's isCaller must accept the binder. The incoming owner
+// is checked at operation entry, so it may be a task not yet scheduled.
+void BSP_flashBind(BSP_Flash *me, BSP_flashOperations const *operations,
+                   BSP_flashWaitOperations const *waitOperations,
+                   void *waitContext);
 
 //============================================================================
-// Startup asset loading only -- Asset_load(), before the scheduler starts.
-// These reads do not use BSP_flashWaitOps and never yield the CPU.
-// Bootloader burning and run-time clients use the bound wait API above.
-
-// Block read (03h). One transaction: chip select stays low from the
-// command byte through the last data byte, and the device walks the
-// address itself, so len has no page boundary to respect - only the array
-// size.
-//
-// Boot-only polling read, before the run-time owner starts using the bus.
-// No wait capability binding is needed; the CPU polls the SPI throughout.
-bool BSP_flashRead(uint32_t address, uint8_t *dst, uint32_t len);
-
-// The same read moved by DMA, waited out by polling a flag instead of a task
-// notification: the boot path (Asset_load) has no task to notify, but it does
-// have interrupts now. Any length; the driver splits the transfer internally.
-// Blocking, so it is for the boot path only.
-bool BSP_flashReadDmaWait(uint32_t address, uint8_t *dst, uint32_t len);
+// Unified synchronous API -- all phases use the same object and methods.
+// Returning succeeds only after data transfer AND chip program/erase finish.
+// DMA needs live interrupts; Poll does not. Waiting/yielding is bound policy.
+// Writes split at page boundaries; destination must already be erased.
+// Erase addresses are aligned to 4 KB. False reports transfer/device failure.
+// Lost completion is fail-stop: an active DMA must not outlive its buffer.
+bool BSP_flashRead(BSP_Flash *me, uint32_t address, void *dst, uint32_t len);
+bool BSP_flashWrite(BSP_Flash *me, uint32_t address,
+                    void const *src, uint32_t len);
+bool BSP_flashEraseSector(BSP_Flash *me, uint32_t address);
 
 #endif // BSP_FLASH_H_

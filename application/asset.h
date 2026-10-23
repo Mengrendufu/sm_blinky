@@ -17,9 +17,9 @@
 // checked them when it wrote them (read-back per block), and this checks the
 // path they take back (NOR -> SPI -> FSMC -> the buffer LVGL reads).
 //
-// Called from main() before the first FreeRTOS call: BSP_flashRead() polls
-// SPI itself and needs no scheduler, and from that first timer call the
-// critical-section nesting is already odd (see the comment in main.c).
+// Called from main() before the first FreeRTOS call: header uses Poll,
+// payload uses DMA with a local flag wait. Interrupts/tick must still run;
+// the first RTOS timer call can mask them (see the comment in main.c).
 //============================================================================
 #ifndef ASSET_H_
 #define ASSET_H_

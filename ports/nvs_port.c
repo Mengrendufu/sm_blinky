@@ -1,6 +1,5 @@
-/* NVS uses the BSP task-wait API in the task that owns the flash.
- * Calls complete synchronously while hardware waits let the CPU go.
- * This port only maps NVS offsets, geometry and errors.
+/* One Flash object throughout initialization and run time. The AO binds
+ * transport/waiting operations; NVS always sees synchronous read/write/erase.
  */
 #include "nvs_port.h"
 #include "bsp_flash.h"
@@ -17,26 +16,24 @@ static const struct flash_parameters nvs_flash_par_ = {
 };
 
 void *nvs_port_device(void) {
-    return (void *)0;
+    return BSP_flashDevice();
 }
 
 int flash_read(void *dev, off_t off, void *buf, size_t len) {
-    (void)dev;
-    if (!BSP_flashReadWait(NVS_FLASH_BASE + (uint32_t)off,
-                               buf, (uint32_t)len)) {
+    if (!BSP_flashRead(dev, NVS_FLASH_BASE + (uint32_t)off,
+                        buf, (uint32_t)len)) {
         return -5;
     }
     return 0;
 }
 
 int flash_write(void *dev, off_t off, const void *buf, size_t len) {
-    (void)dev;
     if ((len == 0U) || ((len % NVS_WBS) != 0U)) {
         return -22;
     }
 
-    if (!BSP_flashWriteWait(NVS_FLASH_BASE + (uint32_t)off,
-                                buf, (uint32_t)len)) {
+    if (!BSP_flashWrite(dev, NVS_FLASH_BASE + (uint32_t)off,
+                         buf, (uint32_t)len)) {
         return -5;
     }
     return 0;
@@ -45,10 +42,9 @@ int flash_write(void *dev, off_t off, const void *buf, size_t len) {
 int flash_flatten(void *dev, off_t off, size_t len) {
     size_t done;
 
-    (void)dev;
     for (done = 0U; done < len; done += FLASH_DEV_SECTOR) {
-        if (!BSP_flashEraseSectorWait(NVS_FLASH_BASE + (uint32_t)off
-                                         + (uint32_t)done)) {
+        if (!BSP_flashEraseSector(dev, NVS_FLASH_BASE + (uint32_t)off
+                                     + (uint32_t)done)) {
             return -5;
         }
     }

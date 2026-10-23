@@ -67,6 +67,7 @@
 #define UI_INVON_MS       100U
 
 static lv_display_t *Ui_disp_;
+static BSP_Lcd *Ui_lcd_;
 // Everything a page builds lives under this one container, so a page change
 // can take the last page away without touching the chrome above it. The
 // state machine builds into it through Ui_dispPageRoot().
@@ -263,7 +264,7 @@ TickType_t Ui_dispHeartbeat(void) {
     // the picture goes bright-on-dark where it was dark-on-bright, and every
     // change leaves garbage. Measured on the glass (2026-10-12).
     if ((Ui_invonAt_ == 0U) || ((int32_t)(now - Ui_invonAt_) >= 0)) {
-        BSP_lcdReassert();
+        BSP_lcdReassert(Ui_lcd_);
         Ui_invonAt_ = now + pdMS_TO_TICKS(UI_INVON_MS);
     }
 
@@ -317,7 +318,7 @@ static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
     // the area it is drawing (the stride is the rectangle's width here, not
     // the display's - a row-by-row push stepping by the display width was
     // tried on 2026-10-12 and made every narrow redraw wrong).
-    if (!BSP_lcdWriteAreaWait((uint16_t)area->x1, (uint16_t)area->y1,
+    if (!BSP_lcdWriteArea(Ui_lcd_, (uint16_t)area->x1, (uint16_t)area->y1,
                               (uint16_t)area->x2, (uint16_t)area->y2,
                               (uint16_t const *)(void const *)px)) {
         SM_onAssert("uidma", __LINE__);
@@ -336,7 +337,7 @@ static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
 
         if (!Ui_backlightOn_) {
             Ui_backlightOn_ = true;
-            BSP_lcdBacklight(true);
+            BSP_lcdBacklight(Ui_lcd_, true);
         }
     }
 
@@ -358,22 +359,35 @@ static bool Ui_lcdWaitDone_(void *context, uint32_t timeoutMs) {
 }
 
 static void Ui_lcdNotifyDone_(void *context) {
-    BaseType_t woken = pdFALSE;
+    TaskHandle_t const waiter = (TaskHandle_t)context;
 
-    (void)vTaskNotifyGiveIndexedFromISR((TaskHandle_t)context,
-                                       UI_DMA_NOTIFY, &woken);
-    portYIELD_FROM_ISR(woken);
+    if (xPortIsInsideInterrupt() != pdFALSE) {
+        BaseType_t woken = pdFALSE;
+
+        (void)vTaskNotifyGiveIndexedFromISR(waiter, UI_DMA_NOTIFY, &woken);
+        portYIELD_FROM_ISR(woken);
+    }
+    else {
+        (void)xTaskNotifyGiveIndexed(waiter, UI_DMA_NOTIFY);
+    }
+}
+
+static void Ui_lcdYield_(void *context) {
+    (void)context;
+    taskYIELD();
 }
 
 static void Ui_lcdBindWait_(void) {
-    BSP_lcdWaitOps const ops = {
-        .context = (void *)xTaskGetCurrentTaskHandle(),
+    static BSP_lcdWaitOperations const operations = {
         .isCaller = &Ui_lcdIsCaller_,
         .waitDone = &Ui_lcdWaitDone_,
         .notifyDone = &Ui_lcdNotifyDone_,
+        .yield = &Ui_lcdYield_,
     };
 
-    BSP_lcdBindWait(&ops);
+    Ui_lcd_ = BSP_lcdDevice();
+    BSP_lcdBind(Ui_lcd_, &BSP_lcdDmaOperations, &operations,
+                 (void *)xTaskGetCurrentTaskHandle());
 }
 //............................................................................
 // Flush completes synchronously and calls flush_ready before returning.

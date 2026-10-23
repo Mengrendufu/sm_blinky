@@ -22,6 +22,9 @@ unsigned Ui_evtInboxLen(void);
 #include "task.h"
 #include "sm_ui_evt.h"
 
+// Slot 0 wakes the inbox loop; slot 1 is for operation completion.
+#define UI_INBOX_NOTIFY_INDEX 0U
+
 // ui.c binds the thread once it exists; a post from then on also wakes it.
 void Ui_evtBind(TaskHandle_t thread);
 

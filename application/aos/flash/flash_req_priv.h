@@ -8,7 +8,7 @@
 // See http://www.wtfpl.net/ for more details.
 //============================================================================
 //============================================================================
-//=== Inbox internals -- private to application/flash/thread
+//=== AO request adapter -- private to application/aos/flash
 
 #ifndef FLASH_REQ_PRIV_H_
 #define FLASH_REQ_PRIV_H_
@@ -16,15 +16,13 @@
 #include <stdbool.h>
 #include "FreeRTOS.h"
 #include "task.h"
-#include "flash_req.h"
+#include "sm_flash_evt.h"
+#include "flash.h"
 
-// flash.c binds the thread once it exists; a submit from then on also
-// wakes it.
-void Flash_reqBind(TaskHandle_t thread);
+#define FLASH_REQUEST_CAPACITY (FLASH_QUEUE_LEN - 1U)
 
-// Flash thread only: one consumer, so the pop side needs no coordination
-// beyond the critical section it shares with the producers.
-bool Flash_reqPop(Flash_Req ** const out);
+// Bind once after the AO queue exists, before any request is submitted.
+void Flash_reqBind(SST_Task *ao);
 
 // Flash thread only: hand the finished request back to its caller.
 void Flash_reqFinish(Flash_Req * const req);

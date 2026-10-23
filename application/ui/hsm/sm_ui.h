@@ -53,7 +53,7 @@ typedef struct {
     // The widgets this machine owns: the topbar once, for every page, and one
     // set per page that the page's own state builds and drops. The handles
     // live here because the states are the only thing that knows which page
-    // is up; the thin wrappers in application/ui/widgets do the LVGL work.
+    // is up; the wrappers in hsm/widgets do the LVGL work.
     struct W_Topbar top;      // title, cpu readout, heartbeat led
     struct W_Gauge gauge;     // page 1: the cpu half gauge
     struct W_BarPanel panel;  // page 1: one row per thread and per pool

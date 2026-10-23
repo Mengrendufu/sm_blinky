@@ -15,6 +15,8 @@
 #include "widgets/widget_io_priv.h"
 #include "bsp.h"
 #include "sm_tracer.h"
+#include "flash.h"
+#include "aos/blinky/blinky.h"
 #include "sst_port.h"   // defines SST_EVT_POOL_NUM, then the pool's API
 #include "nvm.h"          // the snapshot both sides meet in
 
@@ -67,13 +69,13 @@ static void Sm_Ui_publish_(Sm_Ui * const self);
 // Short names on purpose: a label that reaches into its neighbour's box is
 // redrawn through a narrow area when the neighbour moves, and that tears.
 static char const * const Sm_Ui_panelNames_[SM_UI_PANEL_ROWS] = {
-    "ui", "flash", "ao", "tmr", "idle", "nmin", "inbox", "sst"
+    "ui", "Flsh", "Blky", "tmr", "idle", "nmin", "inbox", "sst"
 };
 static char const * const Sm_Ui_panelUnits_[SM_UI_PANEL_ROWS] = {
     "w", "w", "w", "w", "w", "-", "-", "-"
 };
 static char const * const Sm_Ui_stackNames_[SM_UI_TASK_ROWS] = {
-    "ui", "flash", "ao", "Tmr Svc", "IDLE"
+    "ui", (char const *)0, (char const *)0, "Tmr Svc", "IDLE"
 };
 
 //============================================================================
@@ -199,9 +201,9 @@ static bool Sm_Ui_slow_(Sm_Ui * const me) {
     return slow;
 }
 //............................................................................
-// One panel row per thread: the kernel gives the free words, the table above
-// gives the total, so the bar is what has been used. The rows are matched by
-// name because that is the only handle uxTaskGetSystemState() reports.
+// One panel row per thread: the kernel supplies both total and free words.
+// Both SST tasks are named "ao", so their rows match the owning AO handle;
+// UI/timer/idle rows keep their unique-name lookup. Bars show free capacity.
 static void Sm_Ui_panel_(Sm_Ui * const me) {
     static TaskStatus_t tasks[SM_UI_TASKS];
     configRUN_TIME_COUNTER_TYPE runTime;
@@ -212,7 +214,14 @@ static void Sm_Ui_panel_(Sm_Ui * const me) {
         UBaseType_t i;
 
         for (i = 0U; i < n; ++i) {
-            if (strcmp(tasks[i].pcTaskName, Sm_Ui_stackNames_[row]) == 0) {
+            bool const matches = (row == 1U)
+                ? (tasks[i].xHandle == AO_Flash->thread)
+                : (row == 2U)
+                  ? (tasks[i].xHandle == AO_Blinky->thread)
+                  : (strcmp(tasks[i].pcTaskName,
+                             Sm_Ui_stackNames_[row]) == 0);
+
+            if (matches) {
                 uint32_t const total =
                     (uint32_t)(tasks[i].pxEndOfStack - tasks[i].pxStackBase)
                     + 1U;
