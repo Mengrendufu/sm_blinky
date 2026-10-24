@@ -44,6 +44,7 @@ set(SRC_ALL
     ${CMAKE_SOURCE_DIR}/application/aos/blinky/blinky.c
     ${CMAKE_SOURCE_DIR}/application/ui/thread/ui.c
     ${CMAKE_SOURCE_DIR}/application/ui/thread/ui_evt.c
+    ${CMAKE_SOURCE_DIR}/application/ui/thread/ui_tick.c
     ${CMAKE_SOURCE_DIR}/application/ui/thread/ui_disp.c
     ${CMAKE_SOURCE_DIR}/application/ui/hsm/widgets/widget_io_priv.c
     ${CMAKE_SOURCE_DIR}/application/ui/hsm/widgets/w_topbar.c
@@ -70,6 +71,7 @@ set(SRC_ALL
     ${CMAKE_SOURCE_DIR}/bsp/devices/bsp_sram.c
     ${CMAKE_SOURCE_DIR}/bsp/devices/bsp_flash.c
     ${CMAKE_SOURCE_DIR}/bsp/free_rtos/freertos_hooks.c
+    ${CMAKE_SOURCE_DIR}/bsp/free_rtos/bsp_tick.c
     ${CMAKE_SOURCE_DIR}/bsp/platform/stm32f1xx_it.c
     ${CMAKE_SOURCE_DIR}/bsp/platform/stm32f1xx_hal_msp.c
     ${CMAKE_SOURCE_DIR}/bsp/platform/stm32f1xx_hal_timebase_tim.c

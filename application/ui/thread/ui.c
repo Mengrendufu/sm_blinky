@@ -44,6 +44,7 @@ static uint16_t Ui_reported_; // edge batches already reported
 static void Ui_thread_(void *arg);
 static void Ui_drain_(void);
 static void Ui_report_(void);
+static void Ui_bindDisplay_(void);
 
 //============================================================================
 void Ui_start(void) {
@@ -64,17 +65,16 @@ void Ui_start(void) {
 // deadline is whatever LVGL asks for next (clamped by the display adapter).
 static void Ui_thread_(void *arg) {
     TickType_t wait;
-    TickType_t pageAt = 0U;   // when the page on the glass last changed
 
     (void)arg;
 
     // LVGL comes up on the thread that drives it, so no other context ever
     // touches lv_*.
     Ui_dispInit();
+    Ui_bindDisplay_();
 
-    // The initial transition is the splash page: its entry action pushes the
-    // boot image and arms the hold, and until the hold is over this loop runs
-    // no LVGL at all.
+    // The fixed timebase is already running; pending pulses wait in the
+    // inbox until initialization completes and this thread begins draining.
     Sm_Ui_init(&Ui_sm_);
     wait = Ui_dispHeartbeat();
 
@@ -84,53 +84,16 @@ static void Ui_thread_(void *arg) {
         Ui_drain_();
         Ui_report_();
 
-        // The hold is the state machine's; the thread only delivers its
-        // deadline as an event, and the transition that follows starts the
-        // demo page (clear the frame, prove it, draw it whole).
-        TickType_t const now = xTaskGetTickCount();
-
-        if (Ui_sm_.splashUp && (Sm_Ui_splashLeft(&Ui_sm_) == 0U)) {
-            Ui_Evt evt;
-
-            evt.sig = UI_SPLASH_DONE_SIG;
-            Sm_Ui_dispatch(&Ui_sm_, &evt);
-        }
-
-        // The dwell is the page's own; this is only its clock. While the boot
-        // image holds the glass the clock keeps being pushed forward, so the
-        // first content page gets its full UI_PAGE_MS.
-        if (Ui_sm_.splashUp) {
-            pageAt = now;
-        }
-        else if ((int32_t)(now - pageAt)
-                 >= (int32_t)pdMS_TO_TICKS(UI_PAGE_MS)) {
-            Ui_Evt evt;
-
-            pageAt = now;
-            evt.sig = UI_PAGE_SWITCH_SIG;
-            Sm_Ui_dispatch(&Ui_sm_, &evt);
-        }
-
-        // The frame pulse. What a frame does is the current state's business,
-        // so the splash state is the one that ignores it - the widgets are
-        // the
-        // state machine's, not this loop's.
-        {
-            Ui_Evt evt;
-
-            evt.sig = UI_FRAME_SIG;
-            Sm_Ui_dispatch(&Ui_sm_, &evt);
-        }
-
         wait = Ui_dispHeartbeat();
     }
 }
 //............................................................................
 static void Ui_drain_(void) {
-    Ui_Evt evt;
+    SST_Evt const *evt;
 
     while (Ui_evtPop(&evt)) {
-        Sm_Ui_dispatch(&Ui_sm_, &evt);
+        Sm_Ui_dispatch(&Ui_sm_, evt);
+        SST_GC(evt);
     }
 }
 //............................................................................
@@ -141,4 +104,32 @@ static void Ui_report_(void) {
         Ui_reported_ = batch;
         BSP_dbgMemReport(BSP_TRACE_STACK_UI);
     }
+}
+//............................................................................
+// The thread supplies the HSM's required display capabilities. These adapters
+// keep the concrete display API out of the state machine.
+static void Ui_requestFrame_(void *context) {
+    (void)context;
+    Ui_dispRequestFrame();
+}
+
+static void Ui_setBacklight_(void *context, bool on) {
+    (void)context;
+    Ui_dispBacklight(on);
+}
+
+static uint32_t Ui_readFps_(void *context) {
+    (void)context;
+    return Ui_dispFps();
+}
+
+static void Ui_bindDisplay_(void) {
+    static Sm_Ui_DisplayOperations const operations = {
+        .context = NULL,
+        .requestFrame = Ui_requestFrame_,
+        .setBacklight = Ui_setBacklight_,
+        .readFps = Ui_readFps_
+    };
+
+    Sm_Ui_bindDisplay(&Ui_sm_, &operations);
 }

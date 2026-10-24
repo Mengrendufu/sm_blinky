@@ -6,17 +6,13 @@
 #include "ui.h"
 #include "FreeRTOS.h"
 #include "task.h"
-#include "timers.h"
 
 UART_HandleTypeDef huart1;
-static TimerHandle_t SST_sysTimer;
-static StaticTimer_t SST_sysTimer_sto;
 
 void SystemClock_Config(void);
 void Error_Handler(void);
 static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
-static void SST_sysTimer_cb(TimerHandle_t xTimer);
 
 int main(void) {
     // The app image lives at 0x08004000; the first 16 KB belong to the
@@ -61,15 +57,7 @@ int main(void) {
 
     BSP_dbgBootMark();   // 2: the asset is in the external SRAM, CRC checked
 
-    SST_sysTimer = xTimerCreateStatic(
-        "sstTick",
-        configTICK_RATE_HZ / BSP_TICKS_PER_SEC,
-        pdTRUE,
-        (void *)0,
-        SST_sysTimer_cb,
-        &SST_sysTimer_sto);
-    configASSERT(SST_sysTimer != NULL);
-    configASSERT(xTimerStart(SST_sysTimer, 0U) == pdPASS);
+    Application_tickStart();
 
     // Bind before post: UI inbox and Flash AO queue must exist before any
     // AO submits work. SST_Task_start initializes synchronously before
@@ -143,12 +131,6 @@ static void MX_GPIO_Init(void)
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(BSP_LED_PORT, &GPIO_InitStruct);
-}
-
-static void SST_sysTimer_cb(TimerHandle_t xTimer)
-{
-    (void)xTimer;
-    SST_TimeEvt_tick();
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)

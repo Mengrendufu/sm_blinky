@@ -16,30 +16,27 @@
 
 #include "ui_evt.h"
 #include "ui_evt_priv.h"
-#include "sm_tracer.h"
+#include "sm_assert.h"
 
-// A dropped post is the only evidence a wedged UI thread leaves behind, so it
-// gets a record of its own. 90 is free (the used ids are 12/13/20-24/38/45/
-// 66/67/79, and 80-86 are retired probes that are never reused).
-#define SM_UI_TRACE_INBOX_FULL 90U
+SM_DEFINE_MODULE("ui_evt")
 
 //============================================================================
-#define UI_INBOX_LEN 16U
+#define UI_INBOX_LEN 32U
 
-static Ui_Evt Ui_inbox_[UI_INBOX_LEN];
+static SST_Evt const *Ui_inbox_[UI_INBOX_LEN];
 static uint8_t Ui_head_;    // next slot to write
 static uint8_t Ui_tail_;    // next slot to read
 static uint8_t Ui_used_;
-static uint16_t Ui_drops_;   // posts the inbox had no room for
+static uint8_t Ui_minFree_ = UI_INBOX_LEN;
 static TaskHandle_t Ui_thread_;
 
 //============================================================================
 //............................................................................
-unsigned Ui_evtInboxFree(void) {
+unsigned Ui_evtInboxMinFree(void) {
     unsigned free_;
 
     taskENTER_CRITICAL();
-    free_ = (unsigned)(UI_INBOX_LEN - Ui_used_);
+    free_ = (unsigned)Ui_minFree_;
     taskEXIT_CRITICAL();
 
     return free_;
@@ -53,19 +50,22 @@ void Ui_evtBind(TaskHandle_t thread) {
     Ui_thread_ = thread;
 }
 //............................................................................
-static bool Ui_push_(Ui_Sig sig) {
-    bool accepted = false;
-
+static void Ui_push_(SST_Evt const *evt) {
     taskENTER_CRITICAL();
-    if (Ui_used_ < UI_INBOX_LEN) {
-        Ui_inbox_[Ui_head_].sig = sig;
-        Ui_head_ = (uint8_t)((Ui_head_ + 1U) % UI_INBOX_LEN);
-        ++Ui_used_;
-        accepted = true;
+    SM_REQUIRE(Ui_used_ < UI_INBOX_LEN);
+    if (evt->poolId != 0U) {
+        SM_REQUIRE(evt->poolId <= SST_EVT_POOL_NUM);
+        SM_REQUIRE(evt->refCtr < UINT8_MAX);
+        ++((SST_Evt *)evt)->refCtr;
+    }
+    Ui_inbox_[Ui_head_] = evt;
+    Ui_head_ = (uint8_t)((Ui_head_ + 1U) % UI_INBOX_LEN);
+    ++Ui_used_;
+    uint8_t const freeSlots = (uint8_t)(UI_INBOX_LEN - Ui_used_);
+    if (freeSlots < Ui_minFree_) {
+        Ui_minFree_ = freeSlots;
     }
     taskEXIT_CRITICAL();
-
-    return accepted;
 }
 //............................................................................
 static void Ui_wake_(void) {
@@ -76,7 +76,7 @@ static void Ui_wake_(void) {
     }
 }
 //............................................................................
-bool Ui_evtPop(Ui_Evt * const out) {
+bool Ui_evtPop(SST_Evt const **out) {
     bool found = false;
 
     taskENTER_CRITICAL();
@@ -91,39 +91,25 @@ bool Ui_evtPop(Ui_Evt * const out) {
     return found;
 }
 //............................................................................
-static void Ui_traceDrop_(void) {
-    if (Ui_drops_ < 0xFFFFU) {
-        ++Ui_drops_;
-    }
-
-    SM_TRACE_BEGIN(SM_UI_TRACE_INBOX_FULL, 2)
-    SM_TRACE_PAYLOAD_BE((Ui_drops_ > 0xFFU) ? 0xFFU : Ui_drops_)
-    SM_TRACE_PAYLOAD_BE(1U)     // the UI inbox is the one that filled up
-    SM_TRACE_END(0)
+void Ui_post(SST_Evt const *evt) {
+    SM_REQUIRE(Ui_thread_ != (TaskHandle_t)0);
+    SM_REQUIRE(evt != NULL);
+    Ui_push_(evt);
+    Ui_wake_();
 }
 //............................................................................
-bool Ui_postLedOn(void) {
-    bool const accepted = Ui_push_(UI_LED_ON_SIG);
+void Ui_postLedOn(void) {
+    static SST_Evt const evt = {
+        .sig = UI_LED_ON_SIG, .poolId = 0U, .refCtr = 0U
+    };
 
-    if (accepted) {
-        Ui_wake_();
-    }
-    else {
-        Ui_traceDrop_();
-    }
-
-    return accepted;
+    Ui_post(&evt);
 }
 //............................................................................
-bool Ui_postLedOff(void) {
-    bool const accepted = Ui_push_(UI_LED_OFF_SIG);
+void Ui_postLedOff(void) {
+    static SST_Evt const evt = {
+        .sig = UI_LED_OFF_SIG, .poolId = 0U, .refCtr = 0U
+    };
 
-    if (accepted) {
-        Ui_wake_();
-    }
-    else {
-        Ui_traceDrop_();
-    }
-
-    return accepted;
+    Ui_post(&evt);
 }

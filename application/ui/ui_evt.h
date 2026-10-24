@@ -10,17 +10,20 @@
 #ifndef UI_EVT_H_
 #define UI_EVT_H_
 
-#include <stdbool.h>
+#include "sst.h"
 
 //============================================================================
 //=== UI event ingress -- thread safe, callable from any AO
 //
-// Events are values, not pool blocks: nothing is allocated, nothing blocks. A
-// full inbox drops the event and returns false, so a producer is never held
-// up by the UI thread. A successful post also wakes the thread, so an event
-// never has to wait for the next poll timeout.
+// Task context only, after Ui_start binds the inbox. Posting never blocks.
+// The inbox must have capacity: overflow asserts, following SST semantics.
+// Posting acquires a queue reference; the UI calls SST_GC after dispatch.
+// Do not access an event after handing off its last reference. Static events
+// (poolId=0) are immutable and must outlive every queued reference; current
+// signal wrappers use static storage.
+void Ui_post(SST_Evt const *evt);
 
-bool Ui_postLedOn(void);
-bool Ui_postLedOff(void);
+void Ui_postLedOn(void);
+void Ui_postLedOff(void);
 
 #endif // UI_EVT_H_

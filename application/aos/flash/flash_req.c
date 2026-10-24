@@ -16,6 +16,9 @@
 
 #include "flash.h"
 #include "flash_req_priv.h"
+#include "sm_assert.h"
+
+SM_DEFINE_MODULE("flash_req")
 
 //============================================================================
 typedef struct {
@@ -28,8 +31,8 @@ static SST_Task *Flash_target_;
 
 //============================================================================
 void Flash_reqBind(SST_Task *ao) {
-    configASSERT(Flash_target_ == (SST_Task *)0);
-    configASSERT(ao != (SST_Task *)0);
+    SM_REQUIRE(Flash_target_ == (SST_Task *)0);
+    SM_REQUIRE(ao != (SST_Task *)0);
     for (unsigned i = 0U; i < FLASH_REQUEST_CAPACITY; ++i) {
         // Static SST headers remain immutable, even when an envelope is
         // reused before the previous dispatch's GC has inspected it.
@@ -41,7 +44,7 @@ void Flash_reqBind(SST_Task *ao) {
 static bool Flash_post_(Flash_Req * const req) {
     bool accepted = false;
 
-    configASSERT(Flash_target_ != (SST_Task *)0);
+    SM_REQUIRE(Flash_target_ != (SST_Task *)0);
     configASSERT(xPortIsInsideInterrupt() == pdFALSE);
     configASSERT(xTaskGetCurrentTaskHandle() != Flash_target_->thread);
     taskENTER_CRITICAL();
@@ -75,7 +78,7 @@ void Flash_reqFinish(Flash_Req * const req) {
         }
     }
     taskEXIT_CRITICAL();
-    configASSERT(released);
+    SM_ASSERT(released);
     // No request or payload access after notification: the caller can run
     // immediately. The static envelope's SST header remains valid for GC.
     (void)xTaskNotifyGiveIndexed(req->waiter, req->waiterIndex);

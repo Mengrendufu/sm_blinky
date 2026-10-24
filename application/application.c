@@ -15,6 +15,8 @@
 #include "bsp.h"
 #include "bsp_lcd.h"
 #include "flash.h"
+#include "bsp_tick.h"
+#include "ui.h"
 
 //============================================================================
 // Everything that happened before the scheduler reports through here, called
@@ -26,6 +28,20 @@ void Application_dbgBootReport(void) {
     BSP_dbgBootReport();
     BSP_dbgLcdBootReport();
     Asset_dbgBootReport();
+}
+//............................................................................
+static void Application_sstTick_(void *context) {
+    (void)context;
+    SST_TimeEvt_tick();
+}
+
+void Application_tickStart(void) {
+    static BSP_TickOperations const operations[] = {
+        { .context = NULL, .tick = Application_sstTick_ },
+        { .context = NULL, .tick = Ui_tick }
+    };
+
+    BSP_tickStart(operations, ARRAY_NELEM(operations));
 }
 //............................................................................
 void AO_start(void) {

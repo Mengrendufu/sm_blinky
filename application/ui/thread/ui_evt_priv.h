@@ -16,8 +16,8 @@
 #include <stdbool.h>
 #include "FreeRTOS.h"
 
-// How many of the inbox slots are still free, for the stats page's own row.
-unsigned Ui_evtInboxFree(void);
+// Lowest free-slot count since boot, updated on each successful enqueue.
+unsigned Ui_evtInboxMinFree(void);
 unsigned Ui_evtInboxLen(void);
 #include "task.h"
 #include "sm_ui_evt.h"
@@ -30,6 +30,7 @@ void Ui_evtBind(TaskHandle_t thread);
 
 // UI thread only: one consumer, so the pop side needs no coordination beyond
 // the critical section it shares with the producers.
-bool Ui_evtPop(Ui_Evt * const out);
+// Transfers the queue's reference to the consumer: dispatch, then SST_GC.
+bool Ui_evtPop(SST_Evt const **out);
 
 #endif // UI_EVT_PRIV_H_

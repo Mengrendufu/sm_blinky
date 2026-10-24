@@ -8,9 +8,10 @@
 // See http://www.wtfpl.net/ for more details.
 //============================================================================
 #include "sm_port.h"
+#include "sm_assert.h"
 #include "sm_ui.h"
+#include "asset.h"
 #include "ui.h"
-#include "ui_disp_priv.h"
 #include "ui_evt_priv.h"
 #include "widgets/widget_io_priv.h"
 #include "bsp.h"
@@ -19,6 +20,8 @@
 #include "aos/blinky/blinky.h"
 #include "sst_port.h"   // defines SST_EVT_POOL_NUM, then the pool's API
 #include "nvm.h"          // the snapshot both sides meet in
+
+SM_DEFINE_MODULE("sm_ui")
 
 // The internal SRAM as the linker script laid it out: the static image ends
 // at _ebss, the stack starts at the top (_estack). The gap between them is
@@ -32,6 +35,9 @@ extern uint8_t _estack;
 #include "FreeRTOS.h"
 #include "task.h"
 
+// == DEBUG: whether a verified splash image was installed by the HSM. ==
+volatile uint8_t Ui_dbgSplashOk_;
+
 //============================================================================
 // Which background slot each page lays down. The burner writes three, in this
 // order: 0 = the night dashboard, 1 = the grid, 2 = the logo, which is the
@@ -43,6 +49,12 @@ extern uint8_t _estack;
 // ones; 2 Hz is where numbers stop being interesting and redraws stop being
 // cheap.
 #define UI_STAT_MS 500U
+
+// The fixed BSP/UI timebase; state entries reset their local count.
+#define SM_UI_SPLASH_BEATS \
+    ((UI_SPLASH_MS * BSP_TICKS_PER_SEC + 999U) / 1000U)
+#define SM_UI_PAGE_BEATS \
+    ((UI_PAGE_MS * BSP_TICKS_PER_SEC + 999U) / 1000U)
 
 // The live page's entry action publishes its edges, so the helper is declared
 // ahead of it; its body sits further down beside the page actions it serves.
@@ -69,7 +81,7 @@ static void Sm_Ui_publish_(Sm_Ui * const self);
 // Short names on purpose: a label that reaches into its neighbour's box is
 // redrawn through a narrow area when the neighbour moves, and that tears.
 static char const * const Sm_Ui_panelNames_[SM_UI_PANEL_ROWS] = {
-    "ui", "Flsh", "Blky", "tmr", "idle", "nmin", "inbox", "sst"
+    "ui", "Flsh", "Blky", "tmr", "idle", "nmin", "imin", "smin"
 };
 static char const * const Sm_Ui_panelUnits_[SM_UI_PANEL_ROWS] = {
     "w", "w", "w", "w", "w", "-", "-", "-"
@@ -80,10 +92,11 @@ static char const * const Sm_Ui_stackNames_[SM_UI_TASK_ROWS] = {
 
 //============================================================================
 static SM_StatePtr Sm_Ui_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT;
-static SM_RetState Sm_Ui_ui_(void * const me,
-                             void const * const e) SM_HSM_RETT;
-static void Sm_Ui_splash_entry_(SM_Hsm * const me) SM_HSM_RETT;
-static SM_RetState Sm_Ui_splash_(void * const me,
+static void Sm_Ui_splashing_entry_(SM_Hsm * const me) SM_HSM_RETT;
+static SM_RetState Sm_Ui_splashing_(void * const me,
+                                 void const * const e) SM_HSM_RETT;
+static SM_StatePtr Sm_Ui_active_initial_(SM_Hsm * const me) SM_HSM_RETT;
+static SM_RetState Sm_Ui_active_(void * const me,
                                  void const * const e) SM_HSM_RETT;
 static void Sm_Ui_sys_entry_(SM_Hsm * const me) SM_HSM_RETT;
 static void Sm_Ui_sys_exit_(SM_Hsm * const me) SM_HSM_RETT;
@@ -98,30 +111,30 @@ static void Sm_Ui_chrome_(Sm_Ui * const me, char const *title);
 static bool Sm_Ui_fast_(Sm_Ui * const me);
 static bool Sm_Ui_slow_(Sm_Ui * const me);
 
-// State-Ui: the level every page shares. The LED events land here, so the
-// model keeps tracking the AO while the splash owns the glass.
-SM_HsmState SM_HSM_ROM Sm_Ui_ui = {
-    SM_HSM_TOP,                       // super
+// State-Splashing: show the boot image and wait for its display period.
+// Timeout pulses only count the hold; active controls do not exist yet.
+SM_HsmState SM_HSM_ROM Sm_Ui_splashing = {
+    SM_HSM_TOP,           // super
     (SM_InitHandler)0,                // init_
-    (SM_ActionHandler)0,              // entry_
+    (SM_ActionHandler)&Sm_Ui_splashing_entry_,  // entry_
     (SM_ActionHandler)0,              // exit_
-    (SM_StateHandler)&Sm_Ui_ui_       // handler
+    (SM_StateHandler)&Sm_Ui_splashing_   // handler
 };
 
-// State-Splash: the boot image, pushed by the entry action and held for
-// UI_SPLASH_MS. Nothing else may draw while this state is current.
-SM_HsmState SM_HSM_ROM Sm_Ui_splash = {
-    (SM_StatePtr)&Sm_Ui_ui,           // super
-    (SM_InitHandler)0,                // init_
-    (SM_ActionHandler)&Sm_Ui_splash_entry_,  // entry_
-    (SM_ActionHandler)0,              // exit_
-    (SM_StateHandler)&Sm_Ui_splash_   // handler
+// State-Active: Sys/Live update controls, then delegate the same timeout
+// to this phase for its page-switch count and guard.
+SM_HsmState SM_HSM_ROM Sm_Ui_active = {
+    SM_HSM_TOP,                 // super
+    (SM_InitHandler)&Sm_Ui_active_initial_, // init_
+    (SM_ActionHandler)0,                   // entry_
+    (SM_ActionHandler)0,                   // exit_
+    (SM_StateHandler)&Sm_Ui_active_         // handler
 };
 
 // State-Sys: page 1, the system's own numbers - the CPU as a half gauge and
 // one bar per thread and per pool. Its entry owns every widget on it.
 SM_HsmState SM_HSM_ROM Sm_Ui_sys = {
-    (SM_StatePtr)&Sm_Ui_ui,           // super
+    (SM_StatePtr)&Sm_Ui_active,       // super
     (SM_InitHandler)0,                // init_
     (SM_ActionHandler)&Sm_Ui_sys_entry_,     // entry_
     (SM_ActionHandler)&Sm_Ui_sys_exit_,      // exit_
@@ -131,7 +144,7 @@ SM_HsmState SM_HSM_ROM Sm_Ui_sys = {
 // State-Live: page 2, the moving one - a spinner, a switch the AO's LED
 // drives, and the CPU over the last twelve windows.
 SM_HsmState SM_HSM_ROM Sm_Ui_live = {
-    (SM_StatePtr)&Sm_Ui_ui,           // super
+    (SM_StatePtr)&Sm_Ui_active,       // super
     (SM_InitHandler)0,                // init_
     (SM_ActionHandler)&Sm_Ui_live_entry_,    // entry_
     (SM_ActionHandler)&Sm_Ui_live_exit_,     // exit_
@@ -139,6 +152,106 @@ SM_HsmState SM_HSM_ROM Sm_Ui_live = {
 };
 
 //============================================================================
+// Page objects and borrowed asset descriptors belong to this HSM instance.
+// Display registration, rendering and LCD completion stay in ui_disp.
+static void Sm_Ui_pageInit_(Sm_Ui * const me) {
+    lv_display_t * const display = lv_display_get_default();
+
+    me->bgDsc = (lv_image_dsc_t){0};
+    me->splashDsc = (lv_image_dsc_t){0};
+    // The page container: one parent for every page's widgets, and the one
+    // thing a page change empties. It sits below the chrome, which the shared
+    // state builds once on the screen itself.
+    me->pageRoot = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(me->pageRoot,
+                     lv_display_get_horizontal_resolution(display),
+                     lv_display_get_vertical_resolution(display));
+    lv_obj_set_pos(me->pageRoot, 0, 0);
+    lv_obj_set_style_border_width(me->pageRoot, 0, 0);
+    lv_obj_set_style_radius(me->pageRoot, 0, 0);
+    lv_obj_set_style_pad_all(me->pageRoot, 0, 0);
+    lv_obj_set_style_shadow_width(me->pageRoot, 0, 0);
+    lv_obj_remove_flag(me->pageRoot, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+static void Sm_Ui_screenBase_(lv_obj_t * const screen) {
+    lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000U), 0);
+    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+}
+
+// One RGB565 descriptor per slot: 240x320, no copy, no decode - it points
+// straight at the external SRAM. Every page shows one of these, so the panel
+// has a single writer (the flush) and the state machine a single owner.
+static void Sm_Ui_slotDesc_(lv_image_dsc_t * const dsc,
+                            void const * const pixels) {
+    lv_display_t * const display = lv_display_get_default();
+    uint32_t const width =
+        (uint32_t)lv_display_get_horizontal_resolution(display);
+
+    dsc->header.magic = LV_IMAGE_HEADER_MAGIC;
+    dsc->header.cf = LV_COLOR_FORMAT_RGB565;
+    dsc->header.w = width;
+    dsc->header.h =
+        (uint32_t)lv_display_get_vertical_resolution(display);
+    dsc->header.stride = width * 2U;
+    dsc->data_size = ASSET_SLOT_BYTES;
+    dsc->data = (uint8_t const *)pixels;
+}
+
+//............................................................................
+static void Sm_Ui_pageEnd_(Sm_Ui * const me) {
+    lv_obj_set_style_bg_image_src(me->pageRoot, (void const *)0, 0);
+    lv_obj_clean(me->pageRoot);
+}
+//............................................................................
+// One page entry, whichever page it is: the last page's tree goes, then the
+// background that page belongs to is laid down. The page's own state builds
+// its widgets on top of it.
+static void Sm_Ui_pageBegin_(Sm_Ui * const me, uint32_t slot) {
+    Asset const * const asset = Asset_get();
+    void const * const bgPixels = Asset_slot(asset, slot);
+
+    Sm_Ui_pageEnd_(me);
+    Sm_Ui_screenBase_(me->pageRoot);
+
+    // The bootloader's asset, if it verified: the whole page becomes one
+    // image
+    // and the widgets sit on top of it. Without it the page keeps the black
+    // background, which is the degradation the design counts on.
+    if (bgPixels != (void const *)0) {
+        Sm_Ui_slotDesc_(&me->bgDsc, bgPixels);
+        lv_obj_set_style_bg_image_src(me->pageRoot, &me->bgDsc, 0);
+    }
+
+    me->display->requestFrame(me->display->context);
+}
+
+static bool Sm_Ui_splashView_(Sm_Ui * const me) {
+    Asset const * const asset = Asset_get();
+    void const * const pixels = Asset_slot(asset, 2U);
+
+    Ui_dbgSplashOk_ = 0U;
+
+    // The boot image is the page container's background, with the same
+    // single flush writer as the content pages.
+    Sm_Ui_pageEnd_(me);
+    Sm_Ui_screenBase_(me->pageRoot);
+
+    if (pixels == (void const *)0) {
+        return false;   // No verified image is available to display.
+    }
+
+    Sm_Ui_slotDesc_(&me->splashDsc, pixels);
+
+    lv_obj_set_style_bg_image_src(me->pageRoot, &me->splashDsc, 0);
+
+    me->display->requestFrame(me->display->context);
+    Ui_dbgSplashOk_ = 1U;
+
+    return true;
+}
+
 // The chrome, built by the first content page and never taken down again: the
 // topbar outlives every page, so a page change only rewrites its title. It is
 // built late on purpose - while the boot image owns the glass there must be
@@ -146,7 +259,7 @@ SM_HsmState SM_HSM_ROM Sm_Ui_live = {
 // image (the image is a child of the page container, which is created first).
 static void Sm_Ui_chrome_(Sm_Ui * const me, char const *title) {
     if (me->top.title == (struct _lv_obj_t *)0) {
-        W_Topbar_create(&me->top, Ui_dispRoot(), title);
+        W_Topbar_create(&me->top, lv_screen_active(), title);
     }
     else {
         W_Topbar_setTitle(&me->top, title);
@@ -193,7 +306,8 @@ static bool Sm_Ui_slow_(Sm_Ui * const me) {
         if (dTotal > 0U) {
             me->cpuPct = 100U - ((dIdle * 100U) / dTotal);
         }
-        W_Topbar_setFps(&me->top, (unsigned)Ui_dispFps());
+        W_Topbar_setFps(&me->top,
+            (unsigned)me->display->readFps(me->display->context));
         W_Topbar_setCpu(&me->top, (unsigned)me->cpuPct);
         me->statAt = now;
     }
@@ -250,10 +364,11 @@ static void Sm_Ui_panel_(Sm_Ui * const me) {
                            WidgetIO_pct(freeSlots, total), freeSlots, total);
     }
 
-    // The UI inbox, and the LVGL pool: both hand over their own numbers.
+    // The inbox records its lowest free-slot count on every enqueue, even
+    // while Live is visible; display sampling cannot miss short queue peaks.
     {
         unsigned const len = Ui_evtInboxLen();
-        unsigned const freeSlots = Ui_evtInboxFree();
+        unsigned const freeSlots = Ui_evtInboxMinFree();
 
         W_BarPanel_setPair(&me->panel, SM_UI_TASK_ROWS + 1U,
                            WidgetIO_pct(freeSlots, len), freeSlots, len);
@@ -273,60 +388,75 @@ static void Sm_Ui_panel_(Sm_Ui * const me) {
 }
 //............................................................................
 //============================================================================
+void Sm_Ui_bindDisplay(Sm_Ui * const me,
+                       Sm_Ui_DisplayOperations const *operations) {
+    SM_REQUIRE(me != NULL);
+    SM_REQUIRE(operations != NULL);
+    SM_REQUIRE(operations->requestFrame != NULL);
+    SM_REQUIRE(operations->setBacklight != NULL);
+    SM_REQUIRE(operations->readFps != NULL);
+    me->display = operations;
+}
+//............................................................................
 void Sm_Ui_init(Sm_Ui * const me) {
-    me->ledOn = false;
-    me->ledEdges = 0U;
-    me->splashUp = false;
-    me->splashUntil = 0U;
-    me->shownOn = false;
-    me->shownEdges = 0U;
-    me->shownValid = false;
-    me->statAt = 0U;
-    me->cpuIdle = 0U;
-    me->cpuTotal = 0U;
-    me->cpuPct = 0U;
-    W_Topbar_init(&me->top);
-    W_Gauge_init(&me->gauge);
-    W_BarPanel_init(&me->panel);
-    W_Dial_init(&me->dial);
-    me->dialAt = 0U;
-    me->dialPct = 0U;
-    me->dialUp = true;
-    W_Switch_init(&me->sw);
-    W_Ram_init(&me->ram);
     SM_Hsm_init_(&me->sm_hsm_, (SM_InitHandler)Sm_Ui_TOP_initial_);
 }
 //............................................................................
-void Sm_Ui_dispatch(Sm_Ui * const me, Ui_Evt const * const e) {
+void Sm_Ui_dispatch(Sm_Ui * const me, SST_Evt const * const e) {
     SM_Hsm_dispatch_(&me->sm_hsm_, (void const *)e);
-}
-//............................................................................
-uint32_t Sm_Ui_splashLeft(Sm_Ui const * const me) {
-    int32_t const left = (int32_t)(me->splashUntil - xTaskGetTickCount());
-
-    return ((me->splashUp) && (left > 0)) ? (uint32_t)left : 0U;
 }
 //............................................................................
 // UML-Top-Initial
 static SM_StatePtr Sm_Ui_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT {
-    (void)me;
-    return _SM_INIT(&Sm_Ui_splash);
+    Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
+
+    SM_REQUIRE(self->display != NULL);
+    self->ledOn = false;
+    self->ledEdges = 0U;
+    self->shownOn = false;
+    self->shownEdges = 0U;
+    self->shownValid = false;
+    self->statAt = 0U;
+    self->cpuIdle = 0U;
+    self->cpuTotal = 0U;
+    self->cpuPct = 0U;
+    W_Topbar_init(&self->top);
+    W_Gauge_init(&self->gauge);
+    W_BarPanel_init(&self->panel);
+    W_Dial_init(&self->dial);
+    self->dialAt = 0U;
+    self->dialPct = 0U;
+    self->dialUp = true;
+    W_Switch_init(&self->sw);
+    W_Ram_init(&self->ram);
+    Sm_Ui_pageInit_(self);
+    return _SM_INIT(&Sm_Ui_splashing);
 }
 //............................................................................
-// State-Ui
-static SM_RetState Sm_Ui_ui_(void * const me,
-                             void const * const e) SM_HSM_RETT {
+// State-Splashing
+static void Sm_Ui_splashing_entry_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
-    Ui_Evt const * const evt = (Ui_Evt const *)e;
+
+    self->display->setBacklight(self->display->context, true);
+    // Without an image, the first timeout skips the splash hold.
+    self->timeoutCount = Sm_Ui_splashView_(self)
+                         ? 0U : SM_UI_SPLASH_BEATS;
+}
+static SM_RetState Sm_Ui_splashing_(void * const me,
+                                    void const * const e) SM_HSM_RETT {
+    Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
+    SST_Evt const * const evt = (SST_Evt const *)e;
 
     switch (evt->sig) {
-        case UI_LED_ON_SIG: {
-            self->ledOn = true;
-            ++self->ledEdges;
-            return _SM_HANDLED();
+        case UI_TIMEOUT_SIG: {
+            if (++self->timeoutCount >= SM_UI_SPLASH_BEATS) {
+                return _SM_TRAN(&Sm_Ui_active);
+            }
+            return _SM_HANDLED();   // the boot image owns the glass
         }
+        case UI_LED_ON_SIG:
         case UI_LED_OFF_SIG: {
-            self->ledOn = false;
+            self->ledOn = (evt->sig == UI_LED_ON_SIG);
             ++self->ledEdges;
             return _SM_HANDLED();
         }
@@ -336,28 +466,36 @@ static SM_RetState Sm_Ui_ui_(void * const me,
     }
 }
 //............................................................................
-// State-Splash
-static void Sm_Ui_splash_entry_(SM_Hsm * const me) SM_HSM_RETT {
-    Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
-
-    self->splashUp = Ui_dispSplash();
-    self->splashUntil = xTaskGetTickCount() + pdMS_TO_TICKS(UI_SPLASH_MS);
+// State-Active
+static SM_StatePtr Sm_Ui_active_initial_(SM_Hsm * const me) SM_HSM_RETT {
+    (void)me;
+    return _SM_INIT(&Sm_Ui_sys);
 }
-static SM_RetState Sm_Ui_splash_(void * const me,
+
+static SM_RetState Sm_Ui_active_(void * const me,
                                  void const * const e) SM_HSM_RETT {
-    Ui_Evt const * const evt = (Ui_Evt const *)e;
+    Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
+    SST_Evt const * const evt = (SST_Evt const *)e;
 
     switch (evt->sig) {
-        case UI_SPLASH_DONE_SIG: {
-            (void)me;
+        case UI_TIMEOUT_SIG: {
+            if (++self->timeoutCount < SM_UI_PAGE_BEATS) {
+                return _SM_HANDLED();
+            }
+            if (SM_Hsm_childState_(&self->sm_hsm_, &Sm_Ui_active)
+                == &Sm_Ui_sys) {
+                return _SM_TRAN(&Sm_Ui_live);
+            }
             return _SM_TRAN(&Sm_Ui_sys);
         }
-        case UI_FRAME_SIG: {
-            (void)me;
-            return _SM_HANDLED();   // the boot image owns the glass
+        case UI_LED_ON_SIG:
+        case UI_LED_OFF_SIG: {
+            self->ledOn = (evt->sig == UI_LED_ON_SIG);
+            ++self->ledEdges;
+            return _SM_HANDLED();
         }
         default: {
-            return _SM_SUPER();     // the LED events are the shared level's
+            return _SM_SUPER();
         }
     }
 }
@@ -366,36 +504,34 @@ static SM_RetState Sm_Ui_splash_(void * const me,
 static void Sm_Ui_sys_entry_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
 
-    self->splashUp = false;
     Sm_Ui_chrome_(self, "sys");
-    Ui_dispPageBegin(UI_BG_SLOT_SYS);
-    W_Gauge_create(&self->gauge, Ui_dispPageRoot());
-    W_BarPanel_create(&self->panel, Ui_dispPageRoot(), Sm_Ui_panelNames_,
+    Sm_Ui_pageBegin_(self, UI_BG_SLOT_SYS);
+    W_Gauge_create(&self->gauge, self->pageRoot);
+    W_BarPanel_create(&self->panel, self->pageRoot, Sm_Ui_panelNames_,
                       Sm_Ui_panelUnits_);
-    W_Dots_create(&self->dots, Ui_dispPageRoot(), 0U);
+    W_Dots_create(&self->dots, self->pageRoot, 0U);
     self->shownValid = false;   // the model gets written out again
     self->statAt = 0U;          // slow readouts: rewrite next frame
+    self->timeoutCount = 0U;
 }
 static void Sm_Ui_sys_exit_(SM_Hsm * const me) SM_HSM_RETT {
-    (void)me;
-    Ui_dispPageEnd();
+    Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
+
+    Sm_Ui_pageEnd_(self);
 }
 static SM_RetState Sm_Ui_sys_(void * const me,
                               void const * const e) SM_HSM_RETT {
     Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
-    Ui_Evt const * const evt = (Ui_Evt const *)e;
+    SST_Evt const * const evt = (SST_Evt const *)e;
 
     switch (evt->sig) {
-        case UI_PAGE_SWITCH_SIG: {
-            return _SM_TRAN(&Sm_Ui_live);
-        }
-        case UI_FRAME_SIG: {
+        case UI_TIMEOUT_SIG: {
             (void)Sm_Ui_fast_(self);
             if (Sm_Ui_slow_(self)) {
                 Sm_Ui_panel_(self);
                 W_Gauge_setValue(&self->gauge, (unsigned)self->cpuPct);
             }
-            return _SM_HANDLED();
+            return _SM_SUPER(); // active owns the page-count guard.
         }
         default: {
             return _SM_SUPER();
@@ -408,11 +544,11 @@ static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
 
     Sm_Ui_chrome_(self, "live");
-    Ui_dispPageBegin(UI_BG_SLOT_LIVE);
+    Sm_Ui_pageBegin_(self, UI_BG_SLOT_LIVE);
     // Stacked, never side by side: the switch used to sit inside the arc's
     // 96x96 box, and two boxes that overlap tear each other when one of them
     // is redrawn through a narrow area (2026-10-13, seen on the glass).
-    W_Dial_create(&self->dial, Ui_dispPageRoot(), 92, 40, 96);
+    W_Dial_create(&self->dial, self->pageRoot, 92, 40, 96);
     // Start the sweep empty, and let the first step come one period later:
     // the page always begins on an empty ring.
     self->dialPct = 0U;
@@ -422,8 +558,8 @@ static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
     W_Dial_setValue(&self->dial, 0U);
     // The switch rides beside the arc, centred on its middle: the two boxes
     // never touch (68 < 92), and the bottom row is then free for the label.
-    W_Switch_create(&self->sw, Ui_dispPageRoot(), 12, 74);
-    W_Nvm_create(&self->nvm, Ui_dispPageRoot(), 12, 181);
+    W_Switch_create(&self->sw, self->pageRoot, 12, 74);
+    W_Nvm_create(&self->nvm, self->pageRoot, 12, 181);
     // The snapshot, not the NOR: the flash task filled it at boot and writes
     // it back every ten seconds. Syncing here catches up on the edges counted
     // while other pages held the glass.
@@ -432,13 +568,14 @@ static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
     W_Nvm_set(&self->nvm, self->nvmBlinky);
     // The RAM figure never moves: it is the static image against the top of
     // the stack, so the page sets it once, on the way in.
-    W_Ram_create(&self->ram, Ui_dispPageRoot());
+    W_Ram_create(&self->ram, self->pageRoot);
     W_Ram_set(&self->ram,
               (uint32_t)((uintptr_t)&_ebss - SM_UI_RAM_BASE),
               (uint32_t)((uintptr_t)&_estack - SM_UI_RAM_BASE));
-    W_Dots_create(&self->dots, Ui_dispPageRoot(), 1U);
+    W_Dots_create(&self->dots, self->pageRoot, 1U);
     self->shownValid = false;   // the led gets written out again
     self->statAt = 0U;          // the first window lands right away
+    self->timeoutCount = 0U;
 }
 //............................................................................
 // Hand the snapshot every edge counted since the last hand-off. The snapshot
@@ -456,22 +593,19 @@ static void Sm_Ui_publish_(Sm_Ui * const self) {
 }
 //............................................................................
 static void Sm_Ui_live_exit_(SM_Hsm * const me) SM_HSM_RETT {
-    (void)me;
+    Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
 
     /* The write to the NOR is the flash task's, on a deadline of its own:
      * every ten seconds, as the wear account in AGENTS.md covers. */
-    Ui_dispPageEnd();
+    Sm_Ui_pageEnd_(self);
 }
 static SM_RetState Sm_Ui_live_(void * const me,
                                void const * const e) SM_HSM_RETT {
     Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
-    Ui_Evt const * const evt = (Ui_Evt const *)e;
+    SST_Evt const * const evt = (SST_Evt const *)e;
 
     switch (evt->sig) {
-        case UI_PAGE_SWITCH_SIG: {
-            return _SM_TRAN(&Sm_Ui_sys);
-        }
-        case UI_FRAME_SIG: {
+        case UI_TIMEOUT_SIG: {
             // The switch is the board's own beat, made visible: it flips when
             // the AO's LED does. The history is one bar per slow window, and
             // the dial keeps a clock of its own.
@@ -512,7 +646,7 @@ static SM_RetState Sm_Ui_live_(void * const me,
                 self->dialAt = now + pdMS_TO_TICKS(SM_UI_DIAL_MS);
                 W_Dial_setValue(&self->dial, self->dialPct);
             }
-            return _SM_HANDLED();
+            return _SM_SUPER(); // active owns the page-count guard.
         }
         default: {
             return _SM_SUPER();

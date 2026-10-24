@@ -15,6 +15,9 @@
 // itself: call once, from the first task to run.
 void Application_dbgBootReport(void);
 
+// Mount the system tick clients after assets, before scheduler startup.
+void Application_tickStart(void);
+
 void AO_start(void);
 
 //============================================================================

@@ -25,14 +25,16 @@
 // for the whole post mortem, including the several wrong answers along the
 // way.
 
-#include "asset.h"
 #include "bsp.h"
 #include "bsp_lcd.h"
 #include "sm_tracer.h"
 #include "ui_disp_priv.h"
+#include "sm_assert.h"
 #include "lvgl.h"
 #include "FreeRTOS.h"
 #include "task.h"
+
+SM_DEFINE_MODULE("ui_disp")
 
 //============================================================================
 #define UI_LCD_HOR 240
@@ -68,12 +70,6 @@
 
 static lv_display_t *Ui_disp_;
 static BSP_Lcd *Ui_lcd_;
-// Everything a page builds lives under this one container, so a page change
-// can take the last page away without touching the chrome above it. The
-// state machine builds into it through Ui_dispPageRoot().
-static lv_obj_t *Ui_pageRoot_;
-static lv_image_dsc_t Ui_bgDsc_;      // the background of the page that is up
-static lv_image_dsc_t Ui_splashDsc_;  // boot image, slot 2
 // One heartbeat's cost, measured, and the extremes it has shown: the stats
 // page reads them, so they are a readout and not a probe.
 static uint32_t Ui_frameUs_;
@@ -86,20 +82,10 @@ static uint32_t Ui_fps_;
 
 static uint16_t Ui_strip_[UI_STRIP_PX] LV_ATTRIBUTE_MEM_ALIGN;
 
-// A page's entry action sets this, and the first frame that answers it
-// clears it: it asks for one whole-screen repaint, and it is what holds the
-// glass dark until a whole picture is on it. There is no coverage proof
-// around that frame any more - the sentinel is a bring-up instrument now
-// (bsp_lcd.h) and the panel's writability was proven before the light came
-// on.
+// The HSM requests a whole-screen repaint. Clear the request only after
+// its last synchronous flush; backlight policy belongs to the HSM.
 static bool Ui_framePending_;
-// The glass stays dark until the first whole frame is on the frame memory:
-// bring-up leaves the backlight off (BSP_lcdInit) and this is where it comes
-// on. The same schedule keeps bring-up's sentinel off the user's eye.
-static bool Ui_backlightOn_;
 
-// == DEBUG: whether the boot image holds the glass; read over J-Link. ==
-volatile uint8_t Ui_dbgSplashOk_;
 //============================================================================
 static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
                       uint8_t *px);
@@ -115,7 +101,7 @@ void Ui_dispInit(void) {
     Ui_fpsAt_ = lv_tick_get();
 
     Ui_disp_ = lv_display_create(UI_LCD_HOR, UI_LCD_VER);
-    configASSERT(Ui_disp_ != (lv_display_t *)0);
+    SM_ENSURE(Ui_disp_ != (lv_display_t *)0);
 
     // Supply scheduling capabilities; the BSP owns the transfer wait flow.
     Ui_lcdBindWait_();
@@ -125,89 +111,6 @@ void Ui_dispInit(void) {
     lv_display_set_buffers(Ui_disp_, Ui_strip_, (void *)0, sizeof(Ui_strip_),
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
 
-    // The page container: one parent for every page's widgets, and the one
-    // thing a page change empties. It sits below the chrome, which the shared
-    // state builds once on the screen itself.
-    Ui_pageRoot_ = lv_obj_create(lv_screen_active());
-    lv_obj_set_size(Ui_pageRoot_, UI_LCD_HOR, UI_LCD_VER);
-    lv_obj_set_pos(Ui_pageRoot_, 0, 0);
-    lv_obj_set_style_border_width(Ui_pageRoot_, 0, 0);
-    lv_obj_set_style_radius(Ui_pageRoot_, 0, 0);
-    lv_obj_set_style_pad_all(Ui_pageRoot_, 0, 0);
-    lv_obj_set_style_shadow_width(Ui_pageRoot_, 0, 0);
-    lv_obj_remove_flag(Ui_pageRoot_, LV_OBJ_FLAG_SCROLLABLE);
-}
-//............................................................................
-// Push the boot image and prove it: the frame is cleared first (and the clear
-// proven), the coverage sentinel goes down, the whole 240x320 goes out as one
-// DMA transfer straight from the external SRAM, and the sentinel has to be
-// gone afterwards. False means the glass is not showing the boot image, and
-// the caller must not hold it as if it were.
-//
-// The transfer is waited out as this thread's own wait - the flush's slot -
-// because the splash runs on the UI thread now instead of before the
-// scheduler: a poll here would spin a task that has an idle task to give the
-// CPU to.
-// One screen base for every page: no scrolling, and a real background so a
-// widget that moves repaints what it covered. Black, because that is the
-// colour BSP_lcdInit() leaves in the frame memory.
-static void Ui_screenBase_(lv_obj_t * const screen) {
-    lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_bg_color(screen, lv_color_hex(0x000000U), 0);
-    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
-}
-
-// One RGB565 descriptor per slot: 240x320, no copy, no decode - it points
-// straight at the external SRAM. Every page shows one of these, so the panel
-// has a single writer (the flush) and the state machine a single owner.
-static void Ui_slotDesc_(lv_image_dsc_t * const dsc,
-                         void const * const pixels) {
-    dsc->header.magic = LV_IMAGE_HEADER_MAGIC;
-    dsc->header.cf = LV_COLOR_FORMAT_RGB565;
-    dsc->header.w = UI_LCD_HOR;
-    dsc->header.h = UI_LCD_VER;
-    dsc->header.stride = UI_LCD_HOR * 2U;
-    dsc->data_size = ASSET_SLOT_BYTES;
-    dsc->data = (uint8_t const *)pixels;
-}
-
-//............................................................................
-// The parents the state machine draws into: the page root, which a page
-// change empties, and the screen above it, where the chrome stays put for the
-// whole run.
-struct _lv_obj_t *Ui_dispRoot(void) {
-    return (struct _lv_obj_t *)lv_screen_active();
-}
-//............................................................................
-struct _lv_obj_t *Ui_dispPageRoot(void) {
-    return (struct _lv_obj_t *)Ui_pageRoot_;
-}
-//............................................................................
-void Ui_dispPageEnd(void) {
-    lv_obj_set_style_bg_image_src(Ui_pageRoot_, (void const *)0, 0);
-    lv_obj_clean(Ui_pageRoot_);
-}
-//............................................................................
-// One page entry, whichever page it is: the last page's tree goes, then the
-// background that page belongs to is laid down. The page's own state builds
-// its widgets on top of it.
-void Ui_dispPageBegin(uint32_t slot) {
-    Asset const * const asset = Asset_get();
-    void const * const bgPixels = Asset_slot(asset, slot);
-
-    Ui_dispPageEnd();
-    Ui_screenBase_(Ui_pageRoot_);
-
-    // The bootloader's asset, if it verified: the whole page becomes one
-    // image
-    // and the widgets sit on top of it. Without it the page keeps the black
-    // background, which is the degradation the design counts on.
-    if (bgPixels != (void const *)0) {
-        Ui_slotDesc_(&Ui_bgDsc_, bgPixels);
-        lv_obj_set_style_bg_image_src(Ui_pageRoot_, &Ui_bgDsc_, 0);
-    }
-
-    Ui_framePending_ = true;   // this page starts with a whole screen
 }
 //............................................................................
 // The frame readouts the stats page carries: what the last heartbeat cost,
@@ -226,33 +129,16 @@ uint32_t Ui_dispFrameMax(void) {
     return Ui_frameMax_;
 }
 //............................................................................
-bool Ui_dispSplash(void) {
-    Asset const * const asset = Asset_get();
-    void const * const pixels = Asset_slot(asset, 2U);
-
-    Ui_dbgSplashOk_ = 0U;
-
-    // The boot image is the page container's background, with the same
-    // single flush writer as the content pages.
-    Ui_dispPageEnd();
-    Ui_screenBase_(Ui_pageRoot_);
-
-    if (pixels == (void const *)0) {
-        return false;   // no asset: the demo page comes up straight away
-    }
-
-    Ui_slotDesc_(&Ui_splashDsc_, pixels);
-
-    lv_obj_set_style_bg_image_src(Ui_pageRoot_, &Ui_splashDsc_, 0);
-
-    Ui_framePending_ = true;   // this page starts with a whole screen
-    Ui_dbgSplashOk_ = 1U;
-
-    return true;
+// Track a requested whole-screen refresh through its final synchronous
+// flush. The HSM owns page objects and backlight timing.
+void Ui_dispRequestFrame(void) {
+    Ui_framePending_ = true;
 }
 //............................................................................
-
-//............................................................................
+// The HSM chooses when the panel becomes visible; BSP enforces the owner.
+void Ui_dispBacklight(bool on) {
+    BSP_lcdBacklight(Ui_lcd_, on);
+}
 //............................................................................
 TickType_t Ui_dispHeartbeat(void) {
     static TickType_t Ui_invonAt_;
@@ -326,19 +212,7 @@ static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
 
     if (lv_display_flush_is_last(disp)) {
         ++Ui_frames_;
-    }
-
-    // The page's first frame is complete once its last dirty area is on the
-    // glass. That is the moment the light can come on - bring-up left the
-    // backlight off so the first picture is seen whole instead of seen being
-    // drawn - and the moment the pending whole-screen repaint is answered.
-    if (Ui_framePending_ && lv_display_flush_is_last(disp)) {
         Ui_framePending_ = false;
-
-        if (!Ui_backlightOn_) {
-            Ui_backlightOn_ = true;
-            BSP_lcdBacklight(Ui_lcd_, true);
-        }
     }
 
     lv_display_flush_ready(disp);

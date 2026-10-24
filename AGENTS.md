@@ -239,3 +239,12 @@ python3 ~/.config/opencode/skills/sm/uml-sync/scripts/export_model_tree.py \
   SST 任务名同为 ao，不能依赖名字区分；水位是历史最低剩余栈字数。
 - 目录迁移、同步初始化、Flash/LCD 对象化的验证见
   `docs/charter.md` §13—15；历史板端数据不能充当新镜像验证。
+
+- **UI 收件箱试验（2026-10-24）**：容量从 16 改为 32，满队列
+  按 SST 规范断言，不再返回拒收。Ui_post/Ui_postLedOn/Off 改为 void。
+  历史最小剩余量仍由入队路径维护；原拒收记录 RecID 90 退休，不复用。
+
+- **应用断言边界（2026-10-24）**：HSM、组件绑定、事件和队列协议
+  使用 sm_assert.h 的 SM_REQUIRE/SM_ENSURE/SM_ASSERT，并声明模块名。
+  configASSERT 仅用于强 FreeRTOS 关联文件中的任务、调度与通知契约；
+  不因文件间接包含 FreeRTOS 头文件而使用它检查普通应用对象。

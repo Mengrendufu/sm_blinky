@@ -17,32 +17,16 @@
 #include <stdint.h>
 #include "FreeRTOS.h"
 
-struct _lv_obj_t;
-
-// Brings LVGL up on the calling thread: lv_init, the tick source, the 240x320
-// display, the partial strip buffer and the page container. Called once, from
-// the UI thread - every lv_* call in the firmware happens on that thread,
-// because LV_OS_NONE has no locks at all.
+// Initialize LVGL, its tick source, display/strip and LCD wait binding.
+// Called once on the UI thread; all lv_* calls stay on that same thread.
 void Ui_dispInit(void);
 
-// Pushes the boot image and proves the push covered the frame: the page is
-// cleared first, the coverage sentinel goes down, the image goes out, and the
-// sentinel has to be gone afterwards. False means the glass is not showing
-// the
-// boot image, so there is nothing to hold.
-bool Ui_dispSplash(void);
+// Request a whole-screen redraw and track its final flush. The HSM owns
+// page objects/backgrounds and decides when backlight becomes visible.
+void Ui_dispRequestFrame(void);
 
-// The two parents the state machine builds into: the screen, where the chrome
-// stays put for the whole run, and the page container, which a page change
-// empties. Both are the display's, which is why they come from here.
-struct _lv_obj_t *Ui_dispRoot(void);
-struct _lv_obj_t *Ui_dispPageRoot(void);
-
-// One page's life. Begin takes the last page's tree away, lays the background
-// this page belongs to and asks for one whole-screen frame; end takes this
-// page's tree away, so the two pages can never share the glass.
-void Ui_dispPageBegin(uint32_t slot);
-void Ui_dispPageEnd(void);
+// UI-thread operation; visibility timing belongs to HSM state actions.
+void Ui_dispBacklight(bool on);
 
 // Runs lv_timer_handler() (which draws whatever is dirty) and returns how
 // long

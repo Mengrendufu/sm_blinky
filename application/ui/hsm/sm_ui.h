@@ -10,6 +10,7 @@
 #ifndef SM_UI_H_
 #define SM_UI_H_
 
+#include "lvgl.h"
 #include "sm_hsm.h"
 #include "sm_ui_evt.h"
 #include "widgets/w_barpanel.h"
@@ -20,7 +21,6 @@
 #include "widgets/w_dial.h"
 #include "widgets/w_switch.h"
 #include "widgets/w_topbar.h"
-#include "FreeRTOS.h"   // TickType_t: the splash hold is measured in ticks
 
 //============================================================================
 //=== UI state machine
@@ -29,31 +29,46 @@
 // inbox drain -- never through an SST queue, so the UI thread is the only one
 // that touches it.
 //
-// The machine owns the screen in pages: Splash first (the boot image, pushed
-// by its entry action, and held for UI_SPLASH_MS), then two content pages -
-// Demo and Stats - that take turns on UI_PAGE_MS. The LED events are handled
-// one level up, so the model stays live while any page is up - the next
-// page's entry action then draws the state as it is, not as it was.
-// More pages (menu, diagnostics) grow as siblings of these two.
+// Top-level phases: splashing shows the boot image for UI_SPLASH_MS;
+// active initializes to Sys; timeout-count guards alternate Sys/Live.
+// Initialization always enters splashing; without an image its first
+// timeout enters active. Both phases track LED events without resetting
+// the shared LED state/count at the phase boundary.
+// Content-page updates belong to active's respective child states.
 
 #define UI_SPLASH_MS 1500U   // how long the boot image holds the glass
 #define UI_PAGE_MS   8000U   // how long a page holds the glass (the live
                              // page's arc needs 7.2 s: up, then down to half)
 
+// Required display capabilities, called synchronously on the UI thread.
+// requestFrame submits a repaint request; it does not wait for rendering.
+// readFps returns the adapter's cached completed-refresh rate.
+// Bind before initialization; the immutable table/context outlive the HSM.
+typedef struct {
+    void *context;
+    void (*requestFrame)(void *context);
+    void (*setBacklight)(void *context, bool on);
+    uint32_t (*readFps)(void *context);
+} Sm_Ui_DisplayOperations;
+
 typedef struct {
     SM_Hsm sm_hsm_;
+    Sm_Ui_DisplayOperations const *display;
+    uint32_t timeoutCount; // pulses in the current splash/content page
     bool ledOn;          // last LED state posted by the Blinky AO
     uint32_t ledEdges;   // LED transitions seen, and the NVM_Blinky value:
                          // 32 bits on purpose - at two a second a 16 bit
                          // counter wraps in nine hours, which would hide the
                          // whole point of counting
-    bool splashUp;       // the glass belongs to the boot image
-    TickType_t splashUntil;  // when the hold ends, while splashUp
 
     // The widgets this machine owns: the topbar once, for every page, and one
     // set per page that the page's own state builds and drops. The handles
     // live here because the states are the only thing that knows which page
     // is up; the wrappers in hsm/widgets do the LVGL work.
+    // Page objects and image descriptors live as long as this HSM.
+    lv_obj_t *pageRoot;
+    lv_image_dsc_t bgDsc;
+    lv_image_dsc_t splashDsc;
     struct W_Topbar top;      // title, cpu readout, heartbeat led
     struct W_Gauge gauge;     // page 1: the cpu half gauge
     struct W_BarPanel panel;  // page 1: one row per thread and per pool
@@ -87,12 +102,9 @@ typedef struct {
     uint32_t cpuPct;
 } Sm_Ui;
 
+void Sm_Ui_bindDisplay(Sm_Ui * const me,
+                       Sm_Ui_DisplayOperations const *operations);
 void Sm_Ui_init(Sm_Ui * const me);
-void Sm_Ui_dispatch(Sm_Ui * const me, Ui_Evt const * const e);
-
-// Milliseconds left of the splash page's hold; zero once it is over (or when
-// there was nothing to hold). The thread uses it for two things: how long it
-// may sleep, and when to raise UI_SPLASH_DONE_SIG.
-uint32_t Sm_Ui_splashLeft(Sm_Ui const * const me);
+void Sm_Ui_dispatch(Sm_Ui * const me, SST_Evt const * const e);
 
 #endif // SM_UI_H_

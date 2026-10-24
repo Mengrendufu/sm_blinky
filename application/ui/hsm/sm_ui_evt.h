@@ -10,32 +10,18 @@
 #ifndef SM_UI_EVT_H_
 #define SM_UI_EVT_H_
 
-#include <stdint.h>
+#include "sst.h"
 
-//============================================================================
-//=== Event contract shared by the UI inbox and the UI HSM
-
-typedef uint16_t Ui_Sig;
-
-typedef struct {
-    Ui_Sig sig;
-} Ui_Evt;
+// UI signals use the standard SST_Evt header. Static events have poolId=0;
+// payload events embed SST_Evt as their first member.
 
 enum {
     UI_NULL_SIG = 0,
     UI_LED_ON_SIG,
     UI_LED_OFF_SIG,
-    // Delivered by the UI thread, not by the inbox: the splash page's hold is
-    // over, so the page that owns the glass changes. It is the thread's clock
-    // that raises it, and the state machine's decision that acts on it.
-    UI_SPLASH_DONE_SIG,
-    // The same source and the same shape: the page that owns the glass has
-    // held it for long enough, and the machine hands it to its sibling. Two
-    // content pages take turns this way - demo, stats, demo, ...
-    UI_PAGE_SWITCH_SIG,
-    // The thread's frame pulse, not an inbox event: what a frame does is the
-    // current state's business, so the splash state simply ignores it.
-    UI_FRAME_SIG
+    // Fixed-frequency UI timebase: states count pulses for transition
+    // guards and update their controls on the same event.
+    UI_TIMEOUT_SIG
 };
 
 #endif // SM_UI_EVT_H_
