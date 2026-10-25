@@ -13,133 +13,83 @@
 #include "bsp_flash.h"
 #include "bsp_sram.h"
 #include "crc32.h"
+#include "FreeRTOS.h"
+#include "task.h"
 
 //============================================================================
-// Where the bootloader puts it (see bootloader/bl_main.c and the charter's
-// partition plan): a header sector, then the payload.
 #define ASSET_BASE   ASSET_NOR_BASE
 #define ASSET_DATA   (ASSET_BASE + 0x1000U)
-#define ASSET_SRAM   BSP_SRAM_BASE  // external IS62WV51216, FSMC bank 3
-#define ASSET_MAGIC  0x41535431U    // "AST1", the word the bootloader writes
-#define ASSET_MAX         NOR_ASSET_SIZE   /* the three slots: 460,800 B */
+#define ASSET_SRAM   BSP_SRAM_BASE
+#define ASSET_MAGIC  0x41535431U
+#define ASSET_MAX    NOR_ASSET_SIZE
 #define ASSET_TRACE  45U
+#define ASSET_SPLASH_SLOT 2U
 
 static Asset Asset_;
+static bool Asset_splashReady_;
 
-//============================================================================
+static void Asset_dbgBootReport_(void);
 static uint32_t Asset_be32_(uint8_t const *p);
 static uint32_t Asset_crc_(uint8_t const *data, uint32_t len);
 
 //============================================================================
-// ASSET WAIT OPERATIONS -- main before RTOS calls, interrupts/tick live.
-// Header uses Poll; payload uses DMA. Both consume the same local latch.
-static volatile bool Asset_flashDone_;
-
-static bool Asset_flashIsCaller_(void *context) {
-    return (context == (void *)&Asset_flashDone_) && (__get_IPSR() == 0U);
-}
-
-static uint32_t Asset_flashNow_(void *context) {
-    (void)context;
-    return HAL_GetTick();
-}
-
-static uint32_t Asset_flashElapsedMs_(void *context, uint32_t started) {
-    (void)context;
-    return HAL_GetTick() - started;
-}
-
-static bool Asset_flashWaitDone_(void *context, uint32_t timeoutMs) {
-    volatile bool * const done = context;
-    uint32_t const started = HAL_GetTick();
-
-    while (!*done) {
-        if (HAL_GetTick() - started >= timeoutMs) {
-            return false;
-        }
-    }
-    *done = false;
-    return true;
-}
-
-static void Asset_flashNotifyDone_(void *context) {
-    volatile bool * const done = context;
-
-    *done = true;
-}
-
-static void Asset_flashSleepMs_(void *context, uint32_t delayMs) {
-    (void)context;
-    HAL_Delay(delayMs);
-}
-
-static void Asset_flashYield_(void *context) {
-    (void)context;
-}
-
-static BSP_flashWaitOperations const Asset_flashWaitOperations_ = {
-    .isCaller = &Asset_flashIsCaller_,
-    .waitDone = &Asset_flashWaitDone_,
-    .notifyDone = &Asset_flashNotifyDone_,
-    .sleepMs = &Asset_flashSleepMs_,
-    .yield = &Asset_flashYield_,
-    .now = &Asset_flashNow_,
-    .elapsedMs = &Asset_flashElapsedMs_,
-};
-
-//============================================================================
-Asset Asset_load(void) {
-    BSP_Flash * const flash = BSP_flashDevice();
+// Flash AO only. Device operations and waits have already been bound by the
+// owner. Metadata is fixed before the first UI readiness event is posted.
+void Asset_loadSplash(void) {
     uint8_t hdr[16];
-    uint32_t magic;
     uint32_t len;
-    uint32_t crc;
 
-    Asset_.present = false;
-    Asset_.len = 0U;
-    Asset_.crc32 = 0U;
-    Asset_.slots = 0U;
-    Asset_.pixels = (void const *)0;
-
-    BSP_flashBind(flash, &BSP_flashPollOperations,
-                   &Asset_flashWaitOperations_, (void *)&Asset_flashDone_);
-    if (!BSP_flashRead(flash, ASSET_BASE, hdr, sizeof hdr)) {
-        return Asset_;
+    Asset_ = (Asset){0};
+    Asset_splashReady_ = false;
+    if (!BSP_flashRead(BSP_flashDevice(), ASSET_BASE, hdr, sizeof hdr)) {
+        return;
     }
-
-    magic = Asset_be32_(&hdr[0]);
     len = Asset_be32_(&hdr[4]);
-    crc = Asset_be32_(&hdr[8]);
-    if ((magic != ASSET_MAGIC) || (len == 0U) || (len > ASSET_MAX)) {
-        return Asset_;
+    if ((Asset_be32_(hdr) != ASSET_MAGIC)
+        || (len == 0U) || (len > ASSET_MAX)) {
+        return;
     }
-
-    // The payload is the big one: 153,600 B per slot, three slots. Read it
-    // through the channel instead of HAL's polled block path, which measured
-    // 0.43 MB/s against 2.28 at the wire - a third of a second per image.
-    BSP_flashBind(flash, &BSP_flashDmaOperations,
-                   &Asset_flashWaitOperations_, (void *)&Asset_flashDone_);
-    if (!BSP_flashRead(flash, ASSET_DATA,
-                        (void *)(uintptr_t)ASSET_SRAM, len)) {
-        return Asset_;
-    }
-
-    // Over the SRAM copy, not over the bytes we just handed to the SPI:
-    // what covers the whole path down to the buffer LVGL will read.
     Asset_.len = len;
-    Asset_.crc32 = crc;
-    Asset_.pixels = (void const *)ASSET_SRAM;
-    Asset_.present = (Asset_crc_((uint8_t const *)(uintptr_t)ASSET_SRAM, len)
-                      == crc);
+    Asset_.crc32 = Asset_be32_(&hdr[8]);
     Asset_.slots = len / ASSET_SLOT_BYTES;
+    Asset_.pixels = (void const *)ASSET_SRAM;
 
-    return Asset_;
+    if (Asset_.slots > ASSET_SPLASH_SLOT) {
+        uint32_t const offset = ASSET_SPLASH_SLOT * ASSET_SLOT_BYTES;
+        bool const ok = BSP_flashRead(BSP_flashDevice(),
+            ASSET_DATA + offset,
+            (void *)(uintptr_t)(ASSET_SRAM + offset), ASSET_SLOT_BYTES);
+
+        // The legacy header only carries a whole-payload CRC. Splash is
+        // provisional until phase two validates all slots.
+        taskENTER_CRITICAL();
+        Asset_splashReady_ = ok;
+        taskEXIT_CRITICAL();
+    }
 }
-//............................................................................
-//............................................................................
-// The load runs before the scheduler, so its record waits for the tracer:
-// everything it needs is already in Asset_ by the time this is called.
-void Asset_dbgBootReport(void) {
+
+void Asset_loadRemaining(void) {
+    if (Asset_.len != 0U) {
+        // A published splash is never overwritten while LVGL borrows it.
+        // If no splash was published, read the complete payload instead.
+        uint32_t const n = Asset_splashReady_
+            ? ASSET_SPLASH_SLOT * ASSET_SLOT_BYTES : Asset_.len;
+        bool const read = BSP_flashRead(BSP_flashDevice(), ASSET_DATA,
+            (void *)(uintptr_t)ASSET_SRAM, n);
+        bool const valid = read
+            && (Asset_crc_((uint8_t const *)(uintptr_t)ASSET_SRAM,
+                            Asset_.len) == Asset_.crc32);
+
+        taskENTER_CRITICAL();
+        Asset_.present = valid;
+        Asset_splashReady_ = Asset_splashReady_ && valid;
+        taskEXIT_CRITICAL();
+    }
+    Asset_dbgBootReport_();
+}
+
+// Report once, on the Flash task after final validation.
+static void Asset_dbgBootReport_(void) {
     SM_TRACE_BEGIN(ASSET_TRACE, 5)
         SM_TRACE_PAYLOAD_BE(Asset_.present ? 1U : 0U)
         SM_TRACE_PAYLOAD_BE((Asset_.crc32 >> 24) & 0xFFU)
@@ -148,24 +98,38 @@ void Asset_dbgBootReport(void) {
         SM_TRACE_PAYLOAD_BE(Asset_.crc32 & 0xFFU)
     SM_TRACE_END()
 }
-//............................................................................
+
 Asset const *Asset_get(void) {
     return &Asset_;
 }
-//............................................................................
-uint32_t Asset_bytes(void) {
-    return Asset_.present ? Asset_.len : 0U;
-}
-//............................................................................
-void const *Asset_slot(Asset const *asset, uint32_t i) {
-    if (!asset->present || (i >= asset->slots)) {
-        return (void const *)0;
-    }
 
-    return (void const *)((uint8_t const *)asset->pixels
-                          + (i * ASSET_SLOT_BYTES));
+uint32_t Asset_bytes(void) {
+    // The address range stays reserved even if final CRC validation fails.
+    return Asset_.len;
 }
-//............................................................................
+
+void const *Asset_splash(void) {
+    void const *pixels;
+
+    taskENTER_CRITICAL();
+    pixels = Asset_splashReady_
+        ? (void const *)(uintptr_t)(ASSET_SRAM
+            + ASSET_SPLASH_SLOT * ASSET_SLOT_BYTES) : (void const *)0;
+    taskEXIT_CRITICAL();
+    return pixels;
+}
+
+void const *Asset_slot(Asset const *asset, uint32_t i) {
+    void const *pixels = (void const *)0;
+
+    taskENTER_CRITICAL();
+    if (asset->present && (i < asset->slots)) {
+        pixels = (uint8_t const *)asset->pixels + i * ASSET_SLOT_BYTES;
+    }
+    taskEXIT_CRITICAL();
+    return pixels;
+}
+
 static uint32_t Asset_be32_(uint8_t const *p) {
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16)
            | ((uint32_t)p[2] << 8) | (uint32_t)p[3];

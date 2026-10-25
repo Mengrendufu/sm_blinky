@@ -71,8 +71,8 @@ void BSP_dbgBootMark(void) {
     }
 }
 //............................................................................
-// The three deltas in milliseconds, two bytes each: panel bring-up, asset
-// load, and everything from there to the scheduler.
+// Three deltas, two bytes each: panel bring-up, the retired asset interval
+// (adjacent marks), and task setup. Assets now load on the Flash AO task.
 void BSP_dbgBootReport(void) {
     uint32_t const panel = BSP_dbgBootMs_[1] - BSP_dbgBootMs_[0];
     uint32_t const asset = BSP_dbgBootMs_[2] - BSP_dbgBootMs_[1];

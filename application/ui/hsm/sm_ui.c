@@ -10,6 +10,7 @@
 #include "sm_port.h"
 #include "sm_assert.h"
 #include "sm_ui.h"
+#include "ui_evt.h"
 #include "asset.h"
 #include "ui.h"
 #include "ui_evt_priv.h"
@@ -35,7 +36,7 @@ extern uint8_t _estack;
 #include "FreeRTOS.h"
 #include "task.h"
 
-// == DEBUG: whether a verified splash image was installed by the HSM. ==
+// == DEBUG: whether the HSM installed the provisional splash image. ==
 volatile uint8_t Ui_dbgSplashOk_;
 
 //============================================================================
@@ -91,6 +92,13 @@ static char const * const Sm_Ui_stackNames_[SM_UI_TASK_ROWS] = {
 };
 
 //============================================================================
+static SM_RetState Sm_Ui_standby_(void *me, void const *e);
+static void Sm_Ui_readySplash_entry_(SM_Hsm *me);
+static SM_RetState Sm_Ui_readySplash_(void *me, void const *e);
+static SM_RetState Sm_Ui_earlyReadyShow_(void *me, void const *e);
+static SM_RetState Sm_Ui_readyShow_(void *me, void const *e);
+static void Sm_Ui_rejectInvalidSplash_(Sm_Ui *self);
+
 static SM_StatePtr Sm_Ui_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT;
 static void Sm_Ui_splashing_entry_(SM_Hsm * const me) SM_HSM_RETT;
 static SM_RetState Sm_Ui_splashing_(void * const me,
@@ -111,6 +119,18 @@ static void Sm_Ui_chrome_(Sm_Ui * const me, char const *title);
 static bool Sm_Ui_fast_(Sm_Ui * const me);
 static bool Sm_Ui_slow_(Sm_Ui * const me);
 
+// Standby records the two readiness milestones before a GO is received.
+SM_HsmState SM_HSM_ROM Sm_Ui_standby = {
+    SM_HSM_TOP, 0, 0, 0, &Sm_Ui_standby_
+};
+SM_HsmState SM_HSM_ROM Sm_Ui_readySplash = {
+    &Sm_Ui_standby, 0, (SM_ActionHandler)&Sm_Ui_readySplash_entry_, 0,
+    &Sm_Ui_readySplash_
+};
+SM_HsmState SM_HSM_ROM Sm_Ui_earlyReadyShow = {
+    &Sm_Ui_readySplash, 0, 0, 0, &Sm_Ui_earlyReadyShow_
+};
+
 // State-Splashing: show the boot image and wait for its display period.
 // Timeout pulses only count the hold; active controls do not exist yet.
 SM_HsmState SM_HSM_ROM Sm_Ui_splashing = {
@@ -119,6 +139,11 @@ SM_HsmState SM_HSM_ROM Sm_Ui_splashing = {
     (SM_ActionHandler)&Sm_Ui_splashing_entry_,  // entry_
     (SM_ActionHandler)0,              // exit_
     (SM_StateHandler)&Sm_Ui_splashing_   // handler
+};
+
+// One of the two one-shot conditions has arrived; await the other.
+SM_HsmState SM_HSM_ROM Sm_Ui_readyShow = {
+    &Sm_Ui_splashing, 0, 0, 0, &Sm_Ui_readyShow_
 };
 
 // State-Active: Sys/Live update controls, then delegate the same timeout
@@ -228,8 +253,7 @@ static void Sm_Ui_pageBegin_(Sm_Ui * const me, uint32_t slot) {
 }
 
 static bool Sm_Ui_splashView_(Sm_Ui * const me) {
-    Asset const * const asset = Asset_get();
-    void const * const pixels = Asset_slot(asset, 2U);
+    void const * const pixels = Asset_splash();
 
     Ui_dbgSplashOk_ = 0U;
 
@@ -239,7 +263,7 @@ static bool Sm_Ui_splashView_(Sm_Ui * const me) {
     Sm_Ui_screenBase_(me->pageRoot);
 
     if (pixels == (void const *)0) {
-        return false;   // No verified image is available to display.
+        return false;   // Continue through the same states on a black page.
     }
 
     Sm_Ui_slotDesc_(&me->splashDsc, pixels);
@@ -430,39 +454,126 @@ static SM_StatePtr Sm_Ui_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT {
     W_Switch_init(&self->sw);
     W_Ram_init(&self->ram);
     Sm_Ui_pageInit_(self);
-    return _SM_INIT(&Sm_Ui_splashing);
+    Sm_Ui_screenBase_(self->pageRoot);
+    self->timeoutCount = 0U;
+    self->nvmPublished = 0U;
+    return _SM_INIT(&Sm_Ui_standby);
 }
 //............................................................................
-// State-Splashing
+// State-Standby: UI remains responsive while Flash owns initialization.
+static SM_RetState Sm_Ui_standby_(void *me, void const *e) {
+    Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
+    SST_Evt const * const evt = e;
+
+    switch (evt->sig) {
+        case BRING_UP_READY_SIG:
+            return _SM_TRAN(&Sm_Ui_readySplash);
+        case UI_LED_ON_SIG:
+        case UI_LED_OFF_SIG:
+            self->ledOn = (evt->sig == UI_LED_ON_SIG);
+            ++self->ledEdges;
+            return _SM_HANDLED();
+        default:
+            return _SM_SUPER();
+    }
+}
+
+static void Sm_Ui_readySplash_entry_(SM_Hsm *me) {
+    static SST_Evt const go = {
+        .sig = UI_GO_SPLASHING_SIG, .poolId = 0U, .refCtr = 0U
+    };
+    (void)me;
+
+    // Automatic startup policy. A future key source can supply this same
+    // event instead; entering earlyReadyShow does not re-enter this parent.
+    Ui_post(&go);
+}
+
+static SM_RetState Sm_Ui_readySplash_(void *me, void const *e) {
+    SST_Evt const * const evt = e;
+
+    switch (evt->sig) {
+        case UI_GO_SPLASHING_SIG:
+            return _SM_TRAN(&Sm_Ui_splashing);
+        case BRING_UP_ASSETS_LOADED_SIG:
+            return _SM_TRAN(&Sm_Ui_earlyReadyShow);
+        default:
+            return _SM_SUPER();
+    }
+}
+
+static SM_RetState Sm_Ui_earlyReadyShow_(void *me, void const *e) {
+    SST_Evt const * const evt = e;
+
+    switch (evt->sig) {
+        case UI_GO_SPLASHING_SIG:
+            return _SM_TRAN(&Sm_Ui_readyShow);
+        default:
+            return _SM_SUPER();
+    }
+}
+
+// Drop the borrowed provisional descriptor if whole-pack validation failed.
+// SRAM contents are never rewritten underneath the UI by this fallback.
+static void Sm_Ui_rejectInvalidSplash_(Sm_Ui *self) {
+    if (Asset_splash() == NULL) {
+        lv_obj_set_style_bg_image_src(self->pageRoot, NULL, 0);
+        Ui_dbgSplashOk_ = 0U;
+        self->display->requestFrame(self->display->context);
+    }
+}
+
+// State-Splashing: arm once on entry, using the existing fixed UI timebase.
 static void Sm_Ui_splashing_entry_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
 
     self->display->setBacklight(self->display->context, true);
-    // Without an image, the first timeout skips the splash hold.
     self->timeoutCount = Sm_Ui_splashView_(self)
-                         ? 0U : SM_UI_SPLASH_BEATS;
+        ? 0U : SM_UI_SPLASH_BEATS - 1U;
 }
+
 static SM_RetState Sm_Ui_splashing_(void * const me,
                                     void const * const e) SM_HSM_RETT {
     Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
-    SST_Evt const * const evt = (SST_Evt const *)e;
+    SST_Evt const * const evt = e;
+    static SST_Evt const timeout = {
+        .sig = UI_SPLASH_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
+    };
 
     switch (evt->sig) {
-        case UI_TIMEOUT_SIG: {
-            if (++self->timeoutCount >= SM_UI_SPLASH_BEATS) {
-                return _SM_TRAN(&Sm_Ui_active);
+        case UI_TIMEOUT_SIG:
+            if ((self->timeoutCount < SM_UI_SPLASH_BEATS)
+                && (++self->timeoutCount == SM_UI_SPLASH_BEATS)) {
+                Ui_post(&timeout);
             }
-            return _SM_HANDLED();   // the boot image owns the glass
-        }
+            return _SM_HANDLED();
+        case UI_SPLASH_TIMEOUT_SIG:
+            return _SM_TRAN(&Sm_Ui_readyShow);
+        case BRING_UP_ASSETS_LOADED_SIG:
+            Sm_Ui_rejectInvalidSplash_(self);
+            return _SM_TRAN(&Sm_Ui_readyShow);
         case UI_LED_ON_SIG:
-        case UI_LED_OFF_SIG: {
+        case UI_LED_OFF_SIG:
             self->ledOn = (evt->sig == UI_LED_ON_SIG);
             ++self->ledEdges;
             return _SM_HANDLED();
-        }
-        default: {
+        default:
             return _SM_SUPER();
-        }
+    }
+}
+
+static SM_RetState Sm_Ui_readyShow_(void *me, void const *e) {
+    Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
+    SST_Evt const * const evt = e;
+
+    switch (evt->sig) {
+        case UI_SPLASH_TIMEOUT_SIG:
+            return _SM_TRAN(&Sm_Ui_active);
+        case BRING_UP_ASSETS_LOADED_SIG:
+            Sm_Ui_rejectInvalidSplash_(self);
+            return _SM_TRAN(&Sm_Ui_active);
+        default:
+            return _SM_SUPER();
     }
 }
 //............................................................................

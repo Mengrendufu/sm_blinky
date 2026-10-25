@@ -11,17 +11,20 @@
 #define SM_UI_EVT_H_
 
 #include "sst.h"
+#include "application_evt.h"
 
 // UI signals use the standard SST_Evt header. Static events have poolId=0;
 // payload events embed SST_Evt as their first member.
 
 enum {
     UI_NULL_SIG = 0,
-    UI_LED_ON_SIG,
+    UI_LED_ON_SIG = APPLICATION_PUB_SIG_MAX,
     UI_LED_OFF_SIG,
     // Fixed-frequency UI timebase: states count pulses for transition
     // guards and update their controls on the same event.
-    UI_TIMEOUT_SIG
+    UI_TIMEOUT_SIG,
+    UI_GO_SPLASHING_SIG,
+    UI_SPLASH_TIMEOUT_SIG
 };
 
 #endif // SM_UI_EVT_H_

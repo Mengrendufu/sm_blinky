@@ -13,7 +13,10 @@
 #include "bsp_lcd.h"
 #include "bsp_flash.h"
 #include "application.h"
+#include "application_evt.h"
+#include "sst_pubsub.h"
 #include "ui_evt.h"
+#include "sm_ui_evt.h"
 #include "flash.h"
 
 // Class =====================================================================
@@ -88,15 +91,10 @@ void Blinky_ctor(void) {
 }
 //............................................................................
 static void Blinky_init(Blinky * const me, SST_Evt const * const ie) {
-    // What bring-up could not push, it kept, and this is where it reports:
-    // the panel's bring-up lines, the asset's, the fault stash and the boot
-    // timeline. Only the *pushes* wait for the scheduler - a push enters a
-    // FreeRTOS critical section (ports/sm_port.h), and before the scheduler
-    // that leaves interrupts masked for the rest of the boot, which used to
-    // freeze HAL_GetTick() from the middle of the panel bring-up on. The
-    // tracer itself is built, as it always was, first thing in BSP_init():
-    // its constructor is plain RAM writes.
-    Application_dbgBootReport();
+    // Feature demonstration: both events reach the HSM and remain
+    // unhandled there. Subscription adds no Blinky business behavior.
+    SST_Task_subscribe(AO_Blinky, BRING_UP_READY_SIG);
+    SST_Task_subscribe(AO_Blinky, BRING_UP_ASSETS_LOADED_SIG);
 
     (void)ie;
     SM_Hsm_init_(&me->sm_hsm_, (SM_InitHandler)Blinky_TOP_initial_);
@@ -120,7 +118,9 @@ static SM_StatePtr Blinky_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT {
 static void Blinky_on_entry_(SM_Hsm * const me) SM_HSM_RETT {
     (void)me;
     BSP_ledOn();
-    (void)Ui_postLedOn();
+    SST_Evt *evt = SST_NEW(SST_Evt);
+    evt->sig = UI_LED_ON_SIG;
+    Ui_post(evt);
 }
 static SM_RetState Blinky_on_(Blinky * const me,
                               SST_Evt const * const e) SM_HSM_RETT {
@@ -138,7 +138,9 @@ static SM_RetState Blinky_on_(Blinky * const me,
 static void Blinky_off_entry_(SM_Hsm * const me) SM_HSM_RETT {
     (void)me;
     BSP_ledOff();
-    (void)Ui_postLedOff();
+    SST_Evt *evt = SST_NEW(SST_Evt);
+    evt->sig = UI_LED_OFF_SIG;
+    Ui_post(evt);
 }
 static SM_RetState Blinky_off_(Blinky * const me,
                                SST_Evt const * const e) SM_HSM_RETT {

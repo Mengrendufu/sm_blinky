@@ -36,8 +36,8 @@
 // the blocking wait keeps alive, and the completion is a notification on the
 // caller's own slot.
 //
-// Call these from a task, once the scheduler is running: the wait is an RTOS
-// block and a request posted before that could not be served.
+// Call from a task after Flash has entered ready and restored NVS. Ingress
+// is bound only then; a request before binding violates the contract.
 //
 // Up to eight accepted RPCs, including the one executing. Further calls
 // return false without borrowing the buffer. Callers must not call these

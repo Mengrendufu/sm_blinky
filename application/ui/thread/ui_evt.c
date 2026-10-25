@@ -97,19 +97,3 @@ void Ui_post(SST_Evt const *evt) {
     Ui_push_(evt);
     Ui_wake_();
 }
-//............................................................................
-void Ui_postLedOn(void) {
-    static SST_Evt const evt = {
-        .sig = UI_LED_ON_SIG, .poolId = 0U, .refCtr = 0U
-    };
-
-    Ui_post(&evt);
-}
-//............................................................................
-void Ui_postLedOff(void) {
-    static SST_Evt const evt = {
-        .sig = UI_LED_OFF_SIG, .poolId = 0U, .refCtr = 0U
-    };
-
-    Ui_post(&evt);
-}

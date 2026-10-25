@@ -13,12 +13,6 @@
 
 static volatile uint32_t Nvm_blinky_;
 
-void Nvm_setBlinky(uint32_t value) {
-    taskENTER_CRITICAL();
-    Nvm_blinky_ = value;
-    taskEXIT_CRITICAL();
-}
-
 void Nvm_addBlinky(uint32_t edges) {
     taskENTER_CRITICAL();
     Nvm_blinky_ += edges;

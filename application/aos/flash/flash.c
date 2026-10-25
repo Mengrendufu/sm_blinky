@@ -12,6 +12,7 @@
 
 #include "bsp.h"
 #include "flash.h"
+#include "application.h"
 #include "bsp_flash.h"
 #include "sm_flash.h"
 #include "flash_req_priv.h"
@@ -61,8 +62,7 @@ void Flash_ctor(void) {
     SST_TimeEvt_ctor(&Flash_checkpoint_, FLASH_CHECKPOINT_SIG, AO_Flash);
 }
 //............................................................................
-// NVS belongs to this AO. TOP initialization mounts and restores it in the
-// starter context, before the scheduler starts.
+// NVS belongs to this AO. Restore runs on its task after asset loading.
 static struct nvs_fs Flash_nvs_;
 static uint32_t Flash_boot_;
 
@@ -129,7 +129,8 @@ static void Flash_nvsBoot_(void) {
 
         if (nvs_read(&Flash_nvs_, NVM_BLINKY_KEY, &blinky, sizeof(blinky))
             == (ssize_t)sizeof(blinky)) {
-            Nvm_setBlinky(blinky);
+            // Preserve deltas already published by the running UI.
+            Nvm_addBlinky(blinky);
         }
     }
 }
@@ -143,66 +144,6 @@ bool Flash_kvWrite(uint16_t id, void const *src, uint32_t len) {
 bool Flash_kvRead(uint16_t id, void *dst, uint32_t len) {
     return (nvs_read(&Flash_nvs_, id, dst, len) == (ssize_t)len);
 }
-
-//============================================================================
-// INIT WAIT OPERATIONS -- caller context, before the scheduler; no RTOS wait.
-typedef struct {
-    bool done;
-} Flash_InitWait;
-
-static Flash_InitWait Flash_initWait_;
-
-static bool Flash_initIsCaller_(void *context) {
-    return (context == &Flash_initWait_)
-           && (xPortIsInsideInterrupt() == pdFALSE)
-           && (xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED);
-}
-
-static bool Flash_initWaitDone_(void *context, uint32_t timeoutMs) {
-    Flash_InitWait * const wait = context;
-    bool const done = wait->done;
-
-    (void)timeoutMs; // Poll operations have already completed inline.
-    wait->done = false;
-    return done;
-}
-
-static void Flash_initNotifyDone_(void *context) {
-    Flash_InitWait * const wait = context;
-
-    wait->done = true;
-}
-
-static uint32_t Flash_initNow_(void *context) {
-    (void)context;
-    return DWT->CYCCNT;
-}
-
-static uint32_t Flash_initElapsedMs_(void *context, uint32_t started) {
-    (void)context;
-    return (uint32_t)(DWT->CYCCNT - started) / (SystemCoreClock / 1000U);
-}
-
-static void Flash_initSleepMs_(void *context, uint32_t delayMs) {
-    uint32_t const started = Flash_initNow_(context);
-
-    while (Flash_initElapsedMs_(context, started) < delayMs) {
-    }
-}
-
-static void Flash_initYield_(void *context) {
-    (void)context;
-}
-
-static BSP_flashWaitOperations const Flash_initWaitOperations_ = {
-    .isCaller = &Flash_initIsCaller_,
-    .waitDone = &Flash_initWaitDone_,
-    .notifyDone = &Flash_initNotifyDone_,
-    .sleepMs = &Flash_initSleepMs_,
-    .yield = &Flash_initYield_,
-    .now = &Flash_initNow_,
-    .elapsedMs = &Flash_initElapsedMs_,
-};
 
 //============================================================================
 // RUN WAIT OPERATIONS -- the AO task; slot 0 is SST, slot 1 is hardware/RPC.
@@ -267,16 +208,17 @@ static BSP_flashWaitOperations const Flash_runWaitOperations_ = {
 };
 
 //============================================================================
-// LIFECYCLE BINDING -- one device and NVS handle, two execution contexts.
-void Flash_initStorage(void) {
-    BSP_Flash * const flash = BSP_flashDevice();
-
-    configASSERT(xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED);
-    BSP_flashBind(flash, &BSP_flashPollOperations,
-                   &Flash_initWaitOperations_, &Flash_initWait_);
-    Flash_nvsBoot_();
-    BSP_flashBind(flash, &BSP_flashDmaOperations,
+// LIFECYCLE -- all device operations run on the owning AO task.
+void Flash_bindRuntime(void) {
+    configASSERT(xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED);
+    configASSERT(xTaskGetCurrentTaskHandle() == AO_Flash->thread);
+    Application_dbgBootReport();
+    BSP_flashBind(BSP_flashDevice(), &BSP_flashDmaOperations,
                    &Flash_runWaitOperations_, (void *)AO_Flash->thread);
+}
+
+void Flash_initStorage(void) {
+    Flash_nvsBoot_();
     Flash_reqBind(AO_Flash);
 }
 

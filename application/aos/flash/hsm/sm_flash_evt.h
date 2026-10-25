@@ -11,6 +11,7 @@
 #define SM_FLASH_EVT_H_
 
 #include "sst.h"
+#include "application_evt.h"
 #include "flash_req.h"
 
 //============================================================================
@@ -28,8 +29,10 @@ typedef struct {
 
 enum {
     FLASH_NULL_SIG = 0,
-    FLASH_REQ_SIG,
-    FLASH_CHECKPOINT_SIG
+    FLASH_REQ_SIG = APPLICATION_PUB_SIG_MAX,
+    FLASH_CHECKPOINT_SIG,
+    LOADING_SPLASH_ASSETS_SIG,
+    LOADING_ASSETS_SIG
 };
 
 #endif // SM_FLASH_EVT_H_

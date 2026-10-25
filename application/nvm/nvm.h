@@ -11,13 +11,10 @@
 
 #include <stdint.h>
 
-// The application's snapshot of what the NVM holds. Two threads meet here -
-// the UI publishes counts, the flash task reads them out every ten seconds -
-// so both ends go through these two calls, each a short critical section: a
-// u32 load or store, nothing else. The store itself (mount, read, write, the
-// NOR) is the flash task's business and never leaks out of it.
-void Nvm_setBlinky(uint32_t value);   // boot restore: NVM -> snapshot
-void Nvm_addBlinky(uint32_t edges);   // producers: add what they counted
+// Cumulative snapshot: UI adds this boot's deltas; Flash adds the restored
+// base once and checkpoints the total. Addition preserves either ordering.
+// Every operation uses a short critical section; NOR access stays in Flash.
+void Nvm_addBlinky(uint32_t edges);
 uint32_t Nvm_blinky(void);
 
 #endif /* NVM_H_ */

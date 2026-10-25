@@ -83,6 +83,7 @@ set(SRC_ALL
     ${CMAKE_SOURCE_DIR}/ports/sst_port.c
     ${CMAKE_SOURCE_DIR}/ports/static_pool/sst_evt_pool.c
     ${ROOT_SST}/sst_c/src/sst.c
+    ${ROOT_SST}/sst_c/src/sst_pubsub.c
     ${ROOT_HSM}/src/sm_hsm.c
     ${ROOT_HSM}/src/sm_tracer.c
     ${ROOT_COMMON}/src/static_pool/static_pool.c

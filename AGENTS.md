@@ -248,3 +248,26 @@ python3 ~/.config/opencode/skills/sm/uml-sync/scripts/export_model_tree.py \
   使用 sm_assert.h 的 SM_REQUIRE/SM_ENSURE/SM_ASSERT，并声明模块名。
   configASSERT 仅用于强 FreeRTOS 关联文件中的任务、调度与通知契约；
   不因文件间接包含 FreeRTOS 头文件而使用它检查普通应用对象。
+
+
+## 2026-10-25 启动 HSM 与发布订阅（以本条覆盖旧启动说明）
+
+- main 不再搬运资产；先完成 BSP，再建 tick/UI/事件池/AO，最后启动
+  调度器。UI 收件箱绑定先于 Blinky 初始 entry 的池化 LED 通知。
+- Flash TOP 自投递静态 LOADING_SPLASH_ASSETS。实际事件中绑定
+  DMA + AO 通知等待，先加载 Splash，再自投递 LOADING_ASSETS。
+  第二阶段读取其余资产、校验整包，随后进入 ready 并初始化 NVS。
+- Blinky 订阅两个公开就绪信号，仅展示 SST 发布订阅的投递入口，
+  HSM 无业务处理。UI 是普通任务，另用 Ui_post 接收同一静态通知。
+- UI 保留最新版 QM 层级：standby/readySplash/earlyReadyShow，
+  splashing/readyShow，active/Sys/Live。固定时基只生成一次 Splash
+  超时事件；模型依赖两种完成通知各自一次，不自行改造模型。
+- 资产格式保留整包 CRC。允许先展示未完成整包校验的 Splash；
+  最后校验失败时 UI 卸下图片并使用纯色页面。后续搬运不覆盖已发布
+  Splash 的 SRAM 区域，Asset_slot 仍只提供通过整包校验的页面图片。
+- 发布表先于订阅初始化，订阅先于调度器启动；公开信号用共享编号。
+  NVS ready 不由 ASSETS_LOADED 代表，后者按模型在 NVS 初始化前发出。
+- 2026-10-25 已构建烧录并验证暖复位启动链路，见 §27：Flash 两阶段
+  到 ready，UI standby/readySplash → splashing/readyShow → Sys。
+  Flash 栈历史最小剩余 119/256 words（476 B）；34.273 s 内启动
+  计数稳定、NVS 写指针推进 3 次。冷上电和真实坏资产尚未板验。

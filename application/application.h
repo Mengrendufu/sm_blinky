@@ -12,10 +12,10 @@
 
 //============================================================================
 // The boot phase's records, including the timeline the tracer cannot push
-// itself: call once, from the first task to run.
+// itself: call once, from the Flash first bring-up event.
 void Application_dbgBootReport(void);
 
-// Mount the system tick clients after assets, before scheduler startup.
+// Mount tick clients after BSP bring-up, before scheduler startup.
 void Application_tickStart(void);
 
 void AO_start(void);

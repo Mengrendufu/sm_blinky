@@ -11,7 +11,8 @@
 #include "sst_port.h"
 #include "static_pool.h"
 #include "application.h"
-#include "asset.h"
+#include "application_evt.h"
+#include "sst_pubsub.h"
 #include "bsp.h"
 #include "bsp_lcd.h"
 #include "flash.h"
@@ -20,14 +21,13 @@
 
 //============================================================================
 // Everything that happened before the scheduler reports through here, called
-// from the first task that runs (Blinky_init). Bring-up cannot push records
+// from the Flash AO first bring-up event. Bring-up cannot push records
 // itself: a push before the scheduler enters a FreeRTOS critical section
 // whose nesting counter still holds its sentinel, which leaves interrupts
 // masked for the rest of the boot (see bsp.c).
 void Application_dbgBootReport(void) {
     BSP_dbgBootReport();
     BSP_dbgLcdBootReport();
-    Asset_dbgBootReport();
 }
 //............................................................................
 static void Application_sstTick_(void *context) {
@@ -46,8 +46,11 @@ void Application_tickStart(void) {
 //............................................................................
 void AO_start(void) {
     //........................................................................
-    // AOs......
-    // AO_Flash: initialize storage before other AOs can post requests.
+    // Register all subscriptions before the scheduler can publish.
+    static SST_SubscrSet subscriptions[APPLICATION_PUB_SIG_MAX];
+    SST_PubSub_init(subscriptions, APPLICATION_PUB_SIG_MAX);
+
+    // AO_Flash: TOP init only queues its first bring-up event.
     Flash_ctor();
     static SST_Evt const *Flash_qSto[FLASH_QUEUE_LEN];
     SST_Task_start(AO_Flash,

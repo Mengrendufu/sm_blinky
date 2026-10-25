@@ -12,11 +12,11 @@
 
 //============================================================================
 // The UI thread: a plain FreeRTOS task with an HSM inside, not an SST AO. At
-// run time it owns the panel and the SRAM, and it will be the only caller of
-// lv_* once the display layer lands.
+// run time it owns the panel and all lv_* calls. Asset pixels are borrowed
+// from the SRAM ranges published by the Flash asset loader.
 //
 // Called from main() before the scheduler starts: creates the static task and
-// binds the inbox to it. Events posted before that simply wait in the inbox.
+// binds the inbox. Post only after binding; queued events wait for dispatch.
 
 // The UI task's static stack, in words. The stats page reads its own
 // high-water mark against this, so the number lives in exactly one place.

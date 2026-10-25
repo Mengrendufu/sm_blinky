@@ -1,6 +1,5 @@
 #include "stm32f1xx_hal.h"
 #include "sst.h"
-#include "asset.h"
 #include "bsp.h"
 #include "application.h"
 #include "ui.h"
@@ -41,31 +40,19 @@ int main(void) {
     BSP_init();
 
     BSP_dbgBootMark();   // 1: panel out of sleep, SRAM and SPI flash ready
+    BSP_dbgBootMark();   // 2: retired pre-scheduler asset interval
 
 
-    // The asset the bootloader wrote, if it got that far. Read here on
-    // purpose:
-    // the NOR and the external SRAM are both up after BSP_init(), and this is
-    // still before the first FreeRTOS call. The UI thread picks the result up
-    // when it builds its screen.
-    (void)Asset_load();
-
-    // The boot splash is not pushed here any more: it is the UI state
-    // machine's first page (application/ui/hsm/sm_ui.c), so the thread that
-    // owns the panel is the one that pushes it, holds it and hands the glass
-    // over. Slot 2 of the asset is the image it pushes.
-
-    BSP_dbgBootMark();   // 2: the asset is in the external SRAM, CRC checked
-
+    // Flash AO loads assets after scheduling; UI waits on readiness events.
     Application_tickStart();
 
     // Bind before post: UI inbox and Flash AO queue must exist before any
     // AO submits work. SST_Task_start initializes synchronously before
-    // returning, so NVS restore precedes every Flash request.
+    // returning; Flash TOP only posts its first initialization event.
     Ui_start();
     SST_init();
+    SST_start(); // Initialize event pools before AO entry actions allocate.
     AO_start();
-    SST_start();
 
     BSP_dbgBootMark();   // 3: everything is created, the scheduler is next
 

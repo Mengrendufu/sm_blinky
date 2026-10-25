@@ -12,7 +12,7 @@
 
 // The bank's base, and with it the one place that says what lives where: the
 // asset takes the first 450 KB (the bootloader writes it into the NOR from
-// 0x00081000 and Asset_load copies it here), the rest of the bank is free.
+// 0x00081000 and the Flash AO copies it here); the remaining bank is free.
 // Both the SRAM driver and the asset loader take their base from here.
 #define BSP_SRAM_BASE 0x68000000U
 

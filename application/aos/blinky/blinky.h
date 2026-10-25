@@ -11,8 +11,10 @@
 #define BLINKY_H_
 
 //============================================================================
+#include "application_evt.h"
+
 enum BlinkySignals {
-    BLINKY_TIMEOUT_SIG = 1U,
+    BLINKY_TIMEOUT_SIG = APPLICATION_PUB_SIG_MAX,
     BLINKYSIGNALS_MAX
 };
 

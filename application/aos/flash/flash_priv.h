@@ -15,7 +15,10 @@
 
 #include "flash_req.h"
 
-// TOP init only: poll while mounting/restoring, then bind run-time waits.
+// First bring-up event binds the DMA operations and AO-task waits.
+void Flash_bindRuntime(void);
+
+// Ready entry: restore NVS, then expose synchronous RPC ingress.
 void Flash_initStorage(void);
 
 // One-shot checkpoint scheduling and storage actions, selected by the HSM.

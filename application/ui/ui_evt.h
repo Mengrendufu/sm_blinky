@@ -19,11 +19,7 @@
 // The inbox must have capacity: overflow asserts, following SST semantics.
 // Posting acquires a queue reference; the UI calls SST_GC after dispatch.
 // Do not access an event after handing off its last reference. Static events
-// (poolId=0) are immutable and must outlive every queued reference; current
-// signal wrappers use static storage.
+// (poolId=0) are immutable and must outlive every queued reference.
 void Ui_post(SST_Evt const *evt);
-
-void Ui_postLedOn(void);
-void Ui_postLedOff(void);
 
 #endif // UI_EVT_H_

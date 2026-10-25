@@ -29,12 +29,11 @@
 // inbox drain -- never through an SST queue, so the UI thread is the only one
 // that touches it.
 //
-// Top-level phases: splashing shows the boot image for UI_SPLASH_MS;
-// active initializes to Sys; timeout-count guards alternate Sys/Live.
-// Initialization always enters splashing; without an image its first
-// timeout enters active. Both phases track LED events without resetting
-// the shared LED state/count at the phase boundary.
-// Content-page updates belong to active's respective child states.
+// TOP enters standby. readySplash accepts GO after splash preparation;
+// earlyReadyShow remembers content assets completing before GO. Splash and
+// readyShow join the two one-shot events: hold elapsed and assets complete.
+// Active starts at Sys; its fixed-pulse guards continue alternating pages.
+// Standby, Splash and Active all preserve the shared LED state/count.
 
 #define UI_SPLASH_MS 1500U   // how long the boot image holds the glass
 #define UI_PAGE_MS   8000U   // how long a page holds the glass (the live

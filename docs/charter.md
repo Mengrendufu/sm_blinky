@@ -580,7 +580,7 @@ BSP 声明 BSP_TickOperations（context/tick），持有启动期挂载的只读
 表及 context 长期有效，挂载只在调度器启动前做一次。
 
 启动顺序仍是 BSP_init → Asset_load → Application_tickStart →
-Ui_start/SST_init/AO_start/SST_start → 调度器。
+Ui_start/SST_init/SST_start/AO_start → 调度器。
 Ui_start 在调度器启动前绑定收件箱；时基默认运行，初始化期间的
 事件留在收件箱，由 UI 线程在 HSM 初始化完成后开始消费。
 
@@ -722,3 +722,99 @@ cmake debug preset 构建通过；应用 HEX 为 2026-10-24 08:53:51，
 DHCSR S_HALT 清零。NVS 始终 ready，ATE 写位置推进 4 次；
 资产始终有效，共 460,800 B。CPU 实时口径保持，Live FPS 读到 30/31。
 这些是运行中 RAM 采样结果，跨字段并非原子快照。
+
+## 25. Blinky 产生池化 UI LED 事件（2026-10-24）
+
+按 QM 导出的 Blinky entry 动作，ON/OFF 通知由 Blinky 各自的
+entry 通过 SST_NEW(SST_Evt) 申请并设置 UI_LED_ON/OFF_SIG，
+再交给 Ui_post；删除 UI 层原有的静态 LED 事件包装函数。
+参考导出尚未填写 OFF 通知动作，此处保留现有 OFF 对称通知行为。
+UI 入队取得引用，派发后 SST_GC 回收；生产者交付后不再访问事件。
+100 Hz TIMEOUT 继续使用不可变静态事件，不消耗池块。
+
+SST_start 只初始化事件池，现提前到 AO_start 之前，确保初始 ON
+entry 也能分配事件；Ui_start 仍先绑定收件箱，所有步骤仍在资产
+加载后、调度器启动前完成。未改 SST 的同步初始化虚函数路径。
+
+## 26. 事件驱动启动与发布订阅样板（2026-10-25）
+
+按最新 QM 导出，Flash 为 bringUpStageOne/bringUpStageTwo/ready；
+UI 为 standby（含 readySplash/earlyReadyShow）、splashing（含
+readyShow）与 active（Sys/Live）。TOP 只排入静态启动事件，Flash
+的绑定、资产搬运及 NVS 初始化均在调度器启动后的事件处理路径执行。
+SST_Task_start 的同步初始化虚函数机制保持。
+
+启动顺序现为 BSP_init → Application_tickStart → Ui_start → SST_init
+→ SST_start（事件池）→ AO_start（订阅表、Flash、Blinky）→ 调度器。
+Blinky 初始化订阅 BRING_UP_READY/BRING_UP_ASSETS_LOADED；发布事件
+仍交给其 HSM，未新增业务处理分支。CMake 接入 sst_pubsub.c，port
+补齐 SST_LOG2。公共信号位于 [1, APPLICATION_PUB_SIG_MAX)，
+UI、Flash、Blinky 的私有信号均从该边界开始，不再靠固定数值留空。
+不同收件箱的私有编号可以复用；公共事件与任一接收者的私有事件不能
+重叠。两个就绪事件都是静态事件。
+UI 不是 SST_Task，两个通知另经 Ui_post 定向投递，不伪造 SST 订阅者。
+所有订阅和收件箱绑定都在首次发布之前完成。
+
+Flash 首个事件以 DMA + 通知等待读取头部和 Splash 槽；第二阶段
+读取其余区域，保持已交给 LVGL 的 Splash SRAM 内容不变。
+沿用原资产格式：Splash 暂不受整包 CRC 保证，剩余数据读完后才校验
+整包；失败时撤销图片可用性，UI 在完成事件中卸下背景，进入纯色页面。
+缺图、读取失败也经过同一就绪事件路径，不能让 UI 永久等待。
+Asset_slot 仅暴露整包校验后的正常页面资源，Asset_splash 用于启动期
+临时借用；状态变更由临界区发布，元数据在第一条通知前成型。
+
+UI readySplash entry 仍自投递 GO；今后可替换为外部按键事件源。
+GO 前到达的第二阶段通知由 earlyReadyShow 记住。readyShow 保留
+模型的两个一次性条件汇合：固定 UI 时基仅生成一次 SPLASH_TIMEOUT，
+资产完成通知每次启动也仅投递一次；没有静默增加标志或修改模型拓扑。
+开机图未就绪前到达的外部 GO 按模型忽略。后台资源事件表示资产处理
+完成，NVS 按模型在其后恢复，不隐含 NVS ready；UI 的既有累计计数
+使用加法合入恢复基值，避免覆盖初始化期间已产生的增量。
+
+原 Flash 初始化专用轮询等待表与资产本地自旋等待随调用点一起删除。
+Bootloader 的 Poll/DMA 绑定机制不变。启动记录延后到 Flash 首个事件，
+原启动资产计时间隔保留为相邻打桩；旧记录中的资产耗时不代表新链路。
+
+宿主使用真实 SST/HSM 内核、发布器、事件池、Flash HSM、Blinky、
+UI 收件箱与原样 UI 状态处理函数，外设及控件边界用桩。ASan/UBSan
+覆盖正常顺序、后台提前完成、Splash 先超时、CRC 失败、头读取失败、
+Splash 读取失败和单槽资产；验证发布/定向投递、Blinky 无业务动作、
+GC、计时只生成一次、页切换和已发布 Splash 不被后续读取覆盖。
+真实头文件语法检查通过；本轮未构建或烧录固件。Flash 初始化现在
+使用 AO 栈，实际初始化耗时、并行总线负载和栈高水位仍待板端验证。
+
+## 27. 启动链路板端验证（2026-10-25）
+
+cmake debug 构建通过，只有既有 LTO 串行编译提示。应用 HEX 为
+2026-10-25 21:46:24，557,410 B；text/data/bss 为
+198,076/56/58,272 B。tools/flash.sh -nobuild 烧录并复位运行，
+应用 198,132 B 与 bootloader 10,048 B 的读回均匹配保留 ELF 二进制。
+
+受控暖复位后连续 160 点采样（宿主 2.683 s），观察到 Flash
+bringUpStageOne → bringUpStageTwo → ready，以及 UI standby →
+splashing → readyShow → sys。以调度器 tick 为基准，约 110 ms
+读到 Splash 状态，499 ms 读到资产有效且进入 readyShow，514 ms
+读到 NVS ready，529 ms 读到 Flash ready，1599 ms 读到 Sys。
+本次资产先完成，UI 继续等待约 150 个固定时基脉冲再进入正常页。
+采样非原子，时间仅为各状态或标志首次被采到的近似点；不代表上电
+到首帧显示的耗时。尤其嵌套初始 entry 可在 curr 已指向子状态时执行，
+Flash ready-entry 的 NVS 工作则先于 curr 从 stageTwo 更新为 ready。
+
+另一次硬件断点在 Sm_Ui_readySplash_ 命中：UI curr 为 readySplash，
+事件参数是 UI_GO_SPLASHING（6），Flash 仍在第二阶段。
+这条停核实验仅验证瞬时状态与事件，不用于耗时判断。已确认六个硬件
+断点比较器清空，并恢复运行。earlyReadyShow 是后台在 GO 前完成的
+条件分支，本次正常板端启动未经过，其顺序由宿主场景覆盖。
+
+后续 35 点跨 34.273 s 设备时间：Flash 始终 ready，NVS 始终 ready，
+写指针推进 3 次；启动计数保持 100、tick 连续，端点 CFSR/HFSR 为零。
+资产始终有效，共 460,800 B；订阅表 [0,1,1]，两个公共信号均由
+Blinky（逻辑优先级 1）订阅。UI Sys/Live 切换 5 次，LED 边沿 +68，
+CPU 17—69%，收件箱最低剩余 14/32（历史最高积压 18）。
+
+栈 A5 前缀读回的历史最小剩余：Flash 119/256 words（476 B），
+Blinky 224/256 words（896 B），UI 1255/2048 words（5020 B）。
+用户确认开机图、切页和 Live 圆弧正常。目标最终运行，J-Link 进程
+已退出；未加临时固件探针。本次没有验证冷上电面板时延或真实故障资产。
+原始脚本、ELF/HEX、布局、日志与采样位于
+/tmp/startup-board-verify-9tra63o5/，其中 report.md 记录验证边界。

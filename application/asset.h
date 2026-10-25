@@ -8,19 +8,7 @@
 // See http://www.wtfpl.net/ for more details.
 //============================================================================
 //============================================================================
-//=== The asset the bootloader wrote into the NOR
-//
-// One image, read once. The bootloader's 16-byte header sits at the base
-// and the payload in the sector after it; this module copies the payload into
-// the external SRAM and checks that copy against the CRC the header carries.
-// The pixels the UI gets are therefore verified end to end: the bootloader
-// checked them when it wrote them (read-back per block), and this checks the
-// path they take back (NOR -> SPI -> FSMC -> the buffer LVGL reads).
-//
-// Called from main() before the first FreeRTOS call: header uses Poll,
-// payload uses DMA with a local flag wait. Interrupts/tick must still run;
-// the first RTOS timer call can mask them (see the comment in main.c).
-//============================================================================
+// Two-stage asset loading on the Flash AO task, using its bound DMA waits.
 #ifndef ASSET_H_
 #define ASSET_H_
 
@@ -45,22 +33,23 @@ typedef struct {
     void const *pixels;         // RGB565, in the external SRAM
 } Asset;
 
-// Read and verify the asset. Call once, from main(). The record it used to
-// push is deferred to Asset_dbgBootReport(), called once the tracer is up.
-Asset Asset_load(void);
+// Call once each, in order, on the Flash AO. Splash is provisional until
+// loadRemaining validates the whole payload. Its SRAM region stays stable.
+void Asset_loadSplash(void);
+void Asset_loadRemaining(void);
 
-// The load's result again, as a record, for the first task to report.
-void Asset_dbgBootReport(void);
+// Provisional splash pixels, or NULL. Returns NULL after final CRC failure;
+// the UI detaches any borrowed descriptor when notified of completion.
+void const *Asset_splash(void);
 
-// What Asset_load() found. Never NULL.
+// Metadata is fixed before the first notification; present is published
+// under a critical section and is consumed through Asset_slot.
 Asset const *Asset_get(void);
 
-// How many bytes of the external SRAM the asset occupies (0 when absent).
-// Anything that writes into that SRAM has to stay out of this range.
+// Reserved SRAM extent, including provisional or subsequently invalid data.
 uint32_t Asset_bytes(void);
 
-// The pixels of slot i, or NULL when the asset is not present or i is past
-// last slot.
+// Only verified content-page pixels are exposed through this accessor.
 void const *Asset_slot(Asset const *asset, uint32_t i);
 
 #endif // ASSET_H_
