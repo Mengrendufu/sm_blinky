@@ -20,11 +20,14 @@ enum {
     UI_NULL_SIG = 0,
     UI_LED_ON_SIG = APPLICATION_PUB_SIG_MAX,
     UI_LED_OFF_SIG,
-    // Fixed-frequency UI timebase: states count pulses for transition
-    // guards and update their controls on the same event.
+    // Fixed-frequency UI timebase updates controls; state transitions
+    // use explicit deadlines; periodic events drive stats and arc steps.
     UI_TIMEOUT_SIG,
     UI_GO_SPLASHING_SIG,
-    UI_SPLASH_TIMEOUT_SIG
+    UI_SPLASH_TIMEOUT_SIG,
+    UI_PAGE_TIMEOUT_SIG,
+    UI_HEADER_TIMEOUT_SIG,
+    UI_DIAL_TIMEOUT_SIG
 };
 
 #endif // SM_UI_EVT_H_

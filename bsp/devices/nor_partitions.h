@@ -26,7 +26,8 @@
 #define NOR_ASSET_SLOT   0x00025800U
 #define NOR_ASSET_SLOTS  3U
 #define NOR_ASSET_SIZE   (NOR_ASSET_SLOTS * NOR_ASSET_SLOT)
-#define NOR_ASSET_END    (NOR_ASSET_BASE + NOR_ASSET_SIZE)
+#define NOR_ASSET_DATA   (NOR_ASSET_BASE + FLASH_DEV_SECTOR)
+#define NOR_ASSET_END    (NOR_ASSET_DATA + NOR_ASSET_SIZE)
 
 /* The NVS log: 64 sectors, the region the port's primitives are bound to. */
 #define NOR_NVS_BASE     0x00100000U

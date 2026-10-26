@@ -18,6 +18,8 @@ void W_Topbar_init(struct W_Topbar *bar) {
     bar->fps = (struct _lv_obj_t *)0;
     bar->cpu = (struct _lv_obj_t *)0;
     bar->led = (struct _lv_obj_t *)0;
+    bar->cpuValid = false;
+    bar->fpsValid = false;
 }
 //............................................................................
 void W_Topbar_create(struct W_Topbar *bar, struct _lv_obj_t *parent,
@@ -45,10 +47,20 @@ void W_Topbar_setTitle(struct W_Topbar *bar, char const *title) {
 }
 //............................................................................
 void W_Topbar_setFps(struct W_Topbar *bar, unsigned fps) {
+    if (bar->fpsValid && bar->shownFps == fps) {
+        return;
+    }
+    bar->shownFps = fps;
+    bar->fpsValid = true;
     lv_label_set_text_fmt((lv_obj_t *)bar->fps, "fps %u", fps);
 }
 //............................................................................
 void W_Topbar_setCpu(struct W_Topbar *bar, unsigned pct) {
+    if (bar->cpuValid && bar->shownCpu == pct) {
+        return;
+    }
+    bar->shownCpu = pct;
+    bar->cpuValid = true;
     lv_label_set_text_fmt((lv_obj_t *)bar->cpu, "cpu %u%%", pct);
 }
 //............................................................................
@@ -65,4 +77,12 @@ void W_Topbar_setLed(struct W_Topbar *bar, bool on) {
     else {
         lv_led_off(led);
     }
+}
+
+void W_Topbar_destroy(struct W_Topbar *bar) {
+    lv_obj_delete((lv_obj_t *)bar->title);
+    lv_obj_delete((lv_obj_t *)bar->fps);
+    lv_obj_delete((lv_obj_t *)bar->cpu);
+    lv_obj_delete((lv_obj_t *)bar->led);
+    W_Topbar_init(bar);
 }

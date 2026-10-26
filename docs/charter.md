@@ -818,3 +818,67 @@ Blinky 224/256 words（896 B），UI 1255/2048 words（5020 B）。
 已退出；未加临时固件探针。本次没有验证冷上电面板时延或真实故障资产。
 原始脚本、ELF/HEX、布局、日志与采样位于
 /tmp/startup-board-verify-9tra63o5/，其中 report.md 记录验证边界。
+
+### AST2：整包烧写、逐资产校验（替代上文 AST1 加载约定）
+
+目录增加每图 ID、偏移、长度和 CRC32，自身亦有 CRC。BL 验证存储的
+每张图后提交目录；App 按图加载、校验，最多三次尝试。已验证 Splash
+不再依赖其余图片的结果。固定槽位和整包更新方式保持，不做单图更新。
+格式、迁移与宿主测试命令见 [asset-format.md](asset-format.md)。
+本次仅源码与宿主验证，未编译、烧录或作板端计时；旧资产需重烧 AST2。
+
+### AST2 板端应用验证（2026-10-25）
+
+Bootloader/App 已重新构建并烧录，片内完整读回与对应 BIN 一致。
+COM12 整包写入 AST2：464,896 B、114 块、零重传，主机总耗时
+66.295 s。App 启动记录 45 为 `01 00000007`，三张图均通过自身校验。
+独立读回 SRAM 中的 460,800 B，与 bg-a/bg-b/bg-logo 原始数据逐字节
+一致；三图 CRC32 为 9CEB9397 / F0CE9B4D / 1E1733AF，RAM 中目录
+也与脚本生成的 68 B 目录一致。
+
+21 个运行样本覆盖 20,154 tick：Flash ready、NVS ready、三图有效，
+UI 在 Sys/Live 切换，bootCount 不变，末端 CFSR/HFSR 均为零。
+Flash/Blinky/UI 栈历史剩余分别为 119/224/1255 words。
+用户确认开机图、切页与 Live 圆弧正常。目标最终运行，J-Link 已退出。
+证据保存在 `/tmp/asset-v2-board-g05fqzy4/`。本轮未做冷上电或故障注入。
+
+### Splash 显式 arm 时间事件（宿主验证）
+
+复用 common_c 的 TimeEvt 静态链表服务（提交 777cf4f），注册时
+绑定不透明事件指针及投递 operations。项目仅提供临界区、断言适配，
+UI 自行构造静态 SST 事件。移除本地 ports/time_evt 的重复实现。
+arm/disarm 只管理倒计时。tick 挂入现有 BSP timer daemon 回调表，
+不修改 SST 或 BSP。UI 固定时基成为该链表中的周期节点，删除独立
+Ui_tick 入口；BSP 挂载表只保留 SST 与通用 TimeEvt 两条 tick 路径。
+Splash 改为父状态 entry arm、exit disarm，经注册的 Ui_post 适配投递一次超时；进入 readyShow
+不重新计时。时长仍为 1,500 ms，缺图时一拍降级。
+接口、生命周期、竞态契约与宿主测试命令见
+[ui-time-events.md](ui-time-events.md)。ASan/UBSan 覆盖服务及六种
+UI 时序，实际项目头文件语法检查通过。本轮尚未编译或烧录固件。
+
+
+### UI 跳转时间事件按事件和 ticks 注册使用（宿主验证）
+
+HSM 定义 Splash 与页面跳转静态事件，线程在调度器启动前注册对应
+节点。超时能力改为 arm(event, ticks) / disarm(event)，不再专用于
+Splash 或接收毫秒。Splash 使用 150 ticks，Sys/Live 各使用 800 ticks；
+每页 entry arm、exit disarm，Active 收到 UI_PAGE_TIMEOUT_SIG 后切页。
+删除 timeoutCount，固定 UI_TIMEOUT_SIG 只承担控件更新。
+
+六种启动到达顺序及真实页面 entry/exit 的宿主验证通过，包含 800 拍
+边界、切页后重新 arm、批量固定时基事件不提前切页。ASan/UBSan、
+实际项目头文件语法检查与行宽检查通过，尚未编译或烧录固件。
+
+
+### UI subsystem/component 显示能力整理（宿主验证）
+
+HSM 保留启动汇合、状态生命周期、事件决策与组件 API 编排；LVGL
+底面/图片描述符、页面组合、观测采样和圆弧算法分别进入有明确归属的
+能力模块。Active 管理公共顶部和 500 ms 刷新，Sys/Live 管理各自页面；
+Live 的 30 ms 步进事件推进圆弧组件，退出后取消。固定时基只刷新
+当前页的数据快照/计数，显示变化不再决定 NVM 累计值更新。
+UML 能力归属、契约、所有权及验证边界见
+[ui-components.md](ui-components.md)。权威模型本轮仅只读导出，未修改。
+六种真实 LVGL 宿主场景通过 ASan/UBSan；实际项目语法检查通过。
+宿主为 64 位、使用测试专用 64 KB LVGL 池，固件池保持 24 KB。
+本轮未编译或烧录固件，板端资源余量与显示效果尚待验证。

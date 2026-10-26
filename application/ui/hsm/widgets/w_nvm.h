@@ -10,6 +10,7 @@
 #define W_NVM_H_
 
 #include <stdint.h>
+#include <stdbool.h>
 
 struct _lv_obj_t;
 
@@ -19,6 +20,8 @@ struct _lv_obj_t;
 // wraps, so it can never push the row below it around.
 struct W_Nvm {
     struct _lv_obj_t *label;
+    uint32_t shown;
+    bool valid;
 };
 
 void W_Nvm_init(struct W_Nvm *w);

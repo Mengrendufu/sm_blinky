@@ -17,7 +17,7 @@
 #include "bsp_lcd.h"
 #include "flash.h"
 #include "bsp_tick.h"
-#include "ui.h"
+#include "time_evt.h"
 
 //============================================================================
 // Everything that happened before the scheduler reports through here, called
@@ -35,10 +35,15 @@ static void Application_sstTick_(void *context) {
     SST_TimeEvt_tick();
 }
 
+static void Application_timeEvtTick_(void *context) {
+    (void)context;
+    TimeEvt_tick();
+}
+
 void Application_tickStart(void) {
     static BSP_TickOperations const operations[] = {
         { .context = NULL, .tick = Application_sstTick_ },
-        { .context = NULL, .tick = Ui_tick }
+        { .context = NULL, .tick = Application_timeEvtTick_ }
     };
 
     BSP_tickStart(operations, ARRAY_NELEM(operations));

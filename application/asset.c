@@ -8,94 +8,108 @@
 // See http://www.wtfpl.net/ for more details.
 //============================================================================
 #include "asset.h"
+#include "asset_format.h"
 
 #include "bsp.h"
 #include "bsp_flash.h"
 #include "bsp_sram.h"
 #include "crc32.h"
-#include "FreeRTOS.h"
-#include "task.h"
 
 //============================================================================
 #define ASSET_BASE   ASSET_NOR_BASE
-#define ASSET_DATA   (ASSET_BASE + 0x1000U)
+#define ASSET_DATA   NOR_ASSET_DATA
 #define ASSET_SRAM   BSP_SRAM_BASE
-#define ASSET_MAGIC  0x41535431U
-#define ASSET_MAX    NOR_ASSET_SIZE
 #define ASSET_TRACE  45U
 #define ASSET_SPLASH_SLOT 2U
+#define ASSET_LOAD_ATTEMPTS 3U
+
+_Static_assert(ASSET_SLOT_BYTES == ASSET_FORMAT_SLOT_BYTES,
+               "asset format and NOR slots disagree");
+_Static_assert(NOR_ASSET_SLOTS == ASSET_FORMAT_SLOTS,
+               "asset format and NOR count disagree");
 
 static Asset Asset_;
-static bool Asset_splashReady_;
+static uint8_t Asset_header_[ASSET_FORMAT_HEADER];
+static bool Asset_valid_[NOR_ASSET_SLOTS];
+static uint32_t Asset_crc32_[NOR_ASSET_SLOTS];
 
 static void Asset_dbgBootReport_(void);
-static uint32_t Asset_be32_(uint8_t const *p);
 static uint32_t Asset_crc_(uint8_t const *data, uint32_t len);
 
-//============================================================================
-// Flash AO only. Device operations and waits have already been bound by the
-// owner. Metadata is fixed before the first UI readiness event is posted.
+// Only unpublished regions may be written. The Flash AO owns loading;
+// successful images stay immutable while UI borrows their SRAM pixels.
+static bool Asset_loadSlot_(uint32_t slot) {
+    uint32_t const offset = slot * ASSET_SLOT_BYTES;
+    uint8_t * const dst = (uint8_t *)(uintptr_t)(ASSET_SRAM + offset);
+
+    for (uint32_t attempt = 0U; attempt < ASSET_LOAD_ATTEMPTS; ++attempt) {
+        if (BSP_flashRead(BSP_flashDevice(), ASSET_DATA + offset,
+                          dst, ASSET_SLOT_BYTES)
+            && (Asset_crc_(dst, ASSET_SLOT_BYTES) == Asset_crc32_[slot])) {
+            Asset_valid_[slot] = true;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Flash AO only, after binding its DMA operations and yielding waits.
 void Asset_loadSplash(void) {
-    uint8_t hdr[16];
-    uint32_t len;
-
     Asset_ = (Asset){0};
-    Asset_splashReady_ = false;
-    if (!BSP_flashRead(BSP_flashDevice(), ASSET_BASE, hdr, sizeof hdr)) {
+    for (uint32_t i = 0U; i < NOR_ASSET_SLOTS; ++i) {
+        Asset_valid_[i] = false;
+    }
+    bool valid = false;
+    for (uint32_t attempt = 0U; attempt < ASSET_LOAD_ATTEMPTS; ++attempt) {
+        if (BSP_flashRead(BSP_flashDevice(), ASSET_BASE, Asset_header_,
+                          sizeof Asset_header_)
+            && AssetFormat_valid(Asset_header_)) {
+            valid = true;
+            break;
+        }
+    }
+    if (!valid) {
         return;
     }
-    len = Asset_be32_(&hdr[4]);
-    if ((Asset_be32_(hdr) != ASSET_MAGIC)
-        || (len == 0U) || (len > ASSET_MAX)) {
-        return;
-    }
-    Asset_.len = len;
-    Asset_.crc32 = Asset_be32_(&hdr[8]);
-    Asset_.slots = len / ASSET_SLOT_BYTES;
+    Asset_.len = AssetFormat_be32(&Asset_header_[12]);
+    Asset_.slots = AssetFormat_be32(&Asset_header_[8]);
     Asset_.pixels = (void const *)ASSET_SRAM;
-
+    for (uint32_t i = 0U; i < Asset_.slots; ++i) {
+        Asset_crc32_[i] = AssetFormat_be32(
+            &AssetFormat_entry(Asset_header_, i)[12]);
+    }
     if (Asset_.slots > ASSET_SPLASH_SLOT) {
-        uint32_t const offset = ASSET_SPLASH_SLOT * ASSET_SLOT_BYTES;
-        bool const ok = BSP_flashRead(BSP_flashDevice(),
-            ASSET_DATA + offset,
-            (void *)(uintptr_t)(ASSET_SRAM + offset), ASSET_SLOT_BYTES);
-
-        // The legacy header only carries a whole-payload CRC. Splash is
-        // provisional until phase two validates all slots.
-        taskENTER_CRITICAL();
-        Asset_splashReady_ = ok;
-        taskEXIT_CRITICAL();
+        (void)Asset_loadSlot_(ASSET_SPLASH_SLOT);
     }
 }
 
 void Asset_loadRemaining(void) {
-    if (Asset_.len != 0U) {
-        // A published splash is never overwritten while LVGL borrows it.
-        // If no splash was published, read the complete payload instead.
-        uint32_t const n = Asset_splashReady_
-            ? ASSET_SPLASH_SLOT * ASSET_SLOT_BYTES : Asset_.len;
-        bool const read = BSP_flashRead(BSP_flashDevice(), ASSET_DATA,
-            (void *)(uintptr_t)ASSET_SRAM, n);
-        bool const valid = read
-            && (Asset_crc_((uint8_t const *)(uintptr_t)ASSET_SRAM,
-                            Asset_.len) == Asset_.crc32);
+    bool valid = (Asset_.slots != 0U);
 
-        taskENTER_CRITICAL();
-        Asset_.present = valid;
-        Asset_splashReady_ = Asset_splashReady_ && valid;
-        taskEXIT_CRITICAL();
+    for (uint32_t i = 0U; i < Asset_.slots; ++i) {
+        // Splash was already attempted in stage one. Never overwrite a
+        // published image, nor silently retry a failed phase later.
+        if (i != ASSET_SPLASH_SLOT) {
+            (void)Asset_loadSlot_(i);
+        }
+        valid = Asset_valid_[i] && valid;
     }
+    Asset_.present = valid;
     Asset_dbgBootReport_();
 }
 
 // Report once, on the Flash task after final validation.
 static void Asset_dbgBootReport_(void) {
+    uint32_t mask = 0U;
+    for (uint32_t i = 0U; i < Asset_.slots; ++i) {
+        mask |= Asset_valid_[i] ? (1U << i) : 0U;
+    }
     SM_TRACE_BEGIN(ASSET_TRACE, 5)
         SM_TRACE_PAYLOAD_BE(Asset_.present ? 1U : 0U)
-        SM_TRACE_PAYLOAD_BE((Asset_.crc32 >> 24) & 0xFFU)
-        SM_TRACE_PAYLOAD_BE((Asset_.crc32 >> 16) & 0xFFU)
-        SM_TRACE_PAYLOAD_BE((Asset_.crc32 >> 8) & 0xFFU)
-        SM_TRACE_PAYLOAD_BE(Asset_.crc32 & 0xFFU)
+        SM_TRACE_PAYLOAD_BE((mask >> 24) & 0xFFU)
+        SM_TRACE_PAYLOAD_BE((mask >> 16) & 0xFFU)
+        SM_TRACE_PAYLOAD_BE((mask >> 8) & 0xFFU)
+        SM_TRACE_PAYLOAD_BE(mask & 0xFFU)
     SM_TRACE_END()
 }
 
@@ -104,36 +118,25 @@ Asset const *Asset_get(void) {
 }
 
 uint32_t Asset_bytes(void) {
-    // The address range stays reserved even if final CRC validation fails.
+    // The address range stays reserved even if individual images fail CRC.
     return Asset_.len;
 }
 
+// Phase-complete events publish these values. Consumers do not read a
+// phase's results while the Flash AO is still loading that phase.
 void const *Asset_splash(void) {
-    void const *pixels;
-
-    taskENTER_CRITICAL();
-    pixels = Asset_splashReady_
+    return Asset_valid_[ASSET_SPLASH_SLOT]
         ? (void const *)(uintptr_t)(ASSET_SRAM
             + ASSET_SPLASH_SLOT * ASSET_SLOT_BYTES) : (void const *)0;
-    taskEXIT_CRITICAL();
-    return pixels;
 }
 
 void const *Asset_slot(Asset const *asset, uint32_t i) {
-    void const *pixels = (void const *)0;
-
-    taskENTER_CRITICAL();
-    if (asset->present && (i < asset->slots)) {
-        pixels = (uint8_t const *)asset->pixels + i * ASSET_SLOT_BYTES;
+    if ((i < asset->slots) && Asset_valid_[i]) {
+        return (uint8_t const *)asset->pixels + i * ASSET_SLOT_BYTES;
     }
-    taskEXIT_CRITICAL();
-    return pixels;
+    return (void const *)0;
 }
 
-static uint32_t Asset_be32_(uint8_t const *p) {
-    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16)
-           | ((uint32_t)p[2] << 8) | (uint32_t)p[3];
-}
 //............................................................................
 // common_c's crc32 is the standard one - poly 0xEDB88320, init and xorout all
 // ones, checked against zlib.crc32 on the host - but its one-shot call takes

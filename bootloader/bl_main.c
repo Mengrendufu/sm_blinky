@@ -27,11 +27,12 @@
 // loads MSP and PC out of the vector table; nothing does that for a jump we
 // make ourselves, so VTOR, MSP and PC are set by hand below.
 //
-// Not here yet: the protocol itself (the skeleton stops in burn mode and says
-// so on the wire), and the NOR flash work that needs it.
+// Asset protocol and NOR verification are implemented below.
 //============================================================================
 #include "stm32f1xx_hal.h"
 #include "bsp_flash.h"
+#include "asset_format.h"
+#include "nor_partitions.h"
 #include "sm_assert.h"
 #include "sm_tracer.h"
 
@@ -79,18 +80,21 @@ void SM_Trace_push(SM_Tracer * const me, unsigned char *pfb) {
 #define BL_NAK_MAGIC   0x4EU
 #define BL_REQ_LEN     10U
 #define BL_ACK_LEN     11U   // 55 + base(4) + block(2) + crc32(4)
-#define BL_PROTO_VER   1U
+#define BL_PROTO_VER   ASSET_FORMAT_VERSION
 #define BL_BLOCK_BYTES 4096U
-#define BL_ASSET_MAX   0x00080000U  // 512 KB: three fixed-size slots today
-#define BL_ASSET_BASE  0x00081000U  // NOR assets area (charter partition plan)
-#define BL_ASSET_DATA  (BL_ASSET_BASE + 0x1000U)  // header keeps its own sector
-#define BL_HDR_MAGIC   0x41535431U  // "AST1"
-#define BL_HDR_BYTES   16U          // magic | len | crc32 | ver | 2 reserved
+#define BL_ASSET_MAX   ASSET_FORMAT_MAX_PACKAGE
+#define BL_ASSET_BASE  NOR_ASSET_BASE
+#define BL_ASSET_DATA  NOR_ASSET_DATA
+#define BL_HDR_BYTES   ASSET_FORMAT_HEADER
 #define BL_PAGE_BYTES  256U         // the device's program page
 
-// Block phase. Still no flash: the point of this step is the wire and the
-// retransmit path, and the final CRC over the whole image (the one checksum
-// this protocol insists on).
+_Static_assert(BL_ASSET_BASE + BL_ASSET_MAX == NOR_ASSET_END,
+               "bootloader and NOR asset ranges disagree");
+
+// Protocol v2 transfers a directory sector followed by fixed-size images.
+// Block zero is staged in RAM; NOR directory is invalidated before payload
+// writes, then committed only after every stored image passes its own CRC.
+// The final package CRC also protects the complete transport stream.
 //
 //   block    PC -> BL:  B1 | idx(2 BE) | len(2 BE) | crc32低16(2 BE)   7 B
 //                       then len bytes of payload
@@ -118,13 +122,15 @@ uint32_t Bl_bytes_;     // payload bytes folded into the running CRC
 uint32_t Bl_crcRun_;    // running CRC32 over the payload (folded per good block)
 uint32_t Bl_final_;     // 0 = no final frame yet, 1 = matched, 2 = mismatched
 uint32_t Bl_last_;      // index of the last block taken
-uint32_t Bl_written_;   // blocks that made it into the NOR (written + verified)
+uint32_t Bl_written_;   // accepted blocks (directory staged, data verified)
 uint32_t Bl_wrBad_;     // blocks whose erase/program/read-back failed
 
-// Needed so a re-sent block does not get folded into the running CRC twice;
-// the flash step will want the bytes anyway.
+// Stop-and-wait retransmission acknowledges the last accepted block without
+// writing it or folding it into the transport CRC twice.
 static uint8_t Bl_block_[BL_MAX_BLOCK];
-static uint8_t Bl_page_[BL_PAGE_BYTES];      // read-back bites
+static uint8_t Bl_page_[BL_PAGE_BYTES];      // read-back bytes
+static uint8_t Bl_directory_[BL_HDR_BYTES];
+static uint32_t Bl_lastCrc_;
 
 static UART_HandleTypeDef Bl_uart_;
 
@@ -261,19 +267,7 @@ static void Bl_say_(char const *text) {
 // not be folded in twice.
 static uint32_t Bl_crc32Update_(uint32_t crc, uint8_t const *data,
                                 uint32_t len) {
-    uint32_t i;
-    uint8_t bit;
-
-    crc ^= 0xFFFFFFFFU;
-    for (i = 0U; i < len; ++i) {
-        crc ^= data[i];
-        for (bit = 0U; bit < 8U; ++bit) {
-            crc = ((crc & 1U) != 0U) ? ((crc >> 1) ^ 0xEDB88320U)
-                                     : (crc >> 1);
-        }
-    }
-
-    return crc ^ 0xFFFFFFFFU;
+    return AssetFormat_crcUpdate(crc, data, len);
 }
 //............................................................................
 static uint32_t Bl_crc32_(uint8_t const *data, uint32_t len) {
@@ -300,7 +294,9 @@ static bool Bl_frameOk_(uint8_t const *frame) {
     if (ver != BL_PROTO_VER) {
         return false;
     }
-    if ((len == 0U) || (len > BL_ASSET_MAX)) {
+    if ((len <= ASSET_FORMAT_SECTOR) || (len > BL_ASSET_MAX)
+        || (((len - ASSET_FORMAT_SECTOR) % ASSET_FORMAT_SLOT_BYTES)
+            != 0U)) {
         return false;
     }
 
@@ -403,7 +399,7 @@ static void Bl_flashBindWait_(void) {
 // Program one block into the NOR and read it back. Same bus, so the read-back
 // is a check of what the device kept, not of what we think we sent.
 static bool Bl_writeBlock_(uint32_t idx, uint32_t len) {
-    uint32_t const addr = BL_ASSET_DATA + (idx * BL_MAX_BLOCK);
+    uint32_t const addr = BL_ASSET_BASE + (idx * BL_MAX_BLOCK);
     uint32_t off;
     uint32_t n;
 
@@ -428,31 +424,37 @@ static bool Bl_writeBlock_(uint32_t idx, uint32_t len) {
     return true;
 }
 //............................................................................
-// The header goes last, so a power cut anywhere before this leaves the sector
-// erased and the asset simply "not there" - which is the degradation the app
-// already knows how to handle.
+// Verify each image from NOR against the script-provided expected CRC.
+// The directory sector was erased before the first payload write. This
+// invalidates an interrupted replacement; it does not preserve the old pack.
 static bool Bl_commit_(void) {
-    uint8_t hdr[BL_HDR_BYTES];
+    uint32_t const count = AssetFormat_be32(&Bl_directory_[8]);
 
-    Bl_putBe32_(&hdr[0], BL_HDR_MAGIC);
-    Bl_putBe32_(&hdr[4], Bl_bytes_);
-    Bl_putBe32_(&hdr[8], Bl_crcRun_);
-    hdr[12] = 0U;
-    hdr[13] = (uint8_t)BL_PROTO_VER;
-    hdr[14] = 0U;
-    hdr[15] = 0U;
+    for (uint32_t i = 0U; i < count; ++i) {
+        uint8_t const * const entry = AssetFormat_entry(Bl_directory_, i);
+        uint32_t const addr = BL_ASSET_DATA + AssetFormat_be32(&entry[4]);
+        uint32_t const len = AssetFormat_be32(&entry[8]);
+        uint32_t crc = 0U;
 
-    if (!BSP_flashEraseSector(BSP_flashDevice(), BL_ASSET_BASE)) {
+        for (uint32_t off = 0U; off < len; off += BL_PAGE_BYTES) {
+            uint32_t const n = ((len - off) > BL_PAGE_BYTES)
+                ? BL_PAGE_BYTES : (len - off);
+            if (!BSP_flashRead(BSP_flashDevice(), addr + off, Bl_page_, n)) {
+                return false;
+            }
+            crc = Bl_crc32Update_(crc, Bl_page_, n);
+        }
+        if (crc != AssetFormat_be32(&entry[12])) {
+            return false;
+        }
+    }
+    if (!BSP_flashWrite(BSP_flashDevice(), BL_ASSET_BASE,
+                        Bl_directory_, BL_HDR_BYTES)
+        || !BSP_flashRead(BSP_flashDevice(), BL_ASSET_BASE,
+                          Bl_page_, BL_HDR_BYTES)) {
         return false;
     }
-    if (!BSP_flashWrite(BSP_flashDevice(), BL_ASSET_BASE, hdr, BL_HDR_BYTES)) {
-        return false;
-    }
-    if (!BSP_flashRead(BSP_flashDevice(), BL_ASSET_BASE, Bl_page_, BL_HDR_BYTES)) {
-        return false;
-    }
-
-    return memcmp(Bl_page_, hdr, BL_HDR_BYTES) == 0;
+    return memcmp(Bl_page_, Bl_directory_, BL_HDR_BYTES) == 0;
 }
 //............................................................................
 // Read exactly len bytes, one at a time. Returns false on the first gap: the
@@ -471,8 +473,7 @@ static bool Bl_readExact_(uint8_t *dst, uint32_t len) {
 //............................................................................
 // Burn mode. Three kinds of frame arrive here, told apart by their first byte:
 // the handshake (AA), a payload block (B1) and the final whole-image CRC (C1).
-// Nothing touches the NOR on purpose - the wire and the retransmit path are
-// what this step is about, plus the one checksum the protocol insists on.
+// Writes a complete package; single-image updates are not supported.
 static void Bl_burn_(void) {
     // One buffer for all three frame kinds: the handshake is the longest at
     // BL_REQ_LEN, so a block header fits with room to spare. (Sizing this to
@@ -507,6 +508,11 @@ static void Bl_burn_(void) {
                 Bl_nak_();
                 continue;
             }
+            if ((Bl_bytes_ != 0U)
+                && (Bl_len_ != Bl_be32_(&hdr[2]))) {
+                Bl_nak_();
+                continue;
+            }
             ++Bl_ok_;
             Bl_len_ = Bl_be32_(&hdr[2]);
             Bl_ackFrame_();
@@ -534,10 +540,38 @@ static void Bl_burn_(void) {
                 continue;
             }
 
-            // Into the NOR first: a block that fails its CRC never gets this
-            // far, and one that fails to write is re-sent (the erase makes the
-            // second attempt clean).
-            if (!Bl_writeBlock_(idx, len)) {
+            // Bound index/length to the negotiated complete package. The
+            // last accepted block may be replayed after a lost ACK.
+            uint32_t const offset = idx * BL_MAX_BLOCK;
+            uint32_t const crc = Bl_crc32_(Bl_block_, len);
+            if ((Bl_len_ == 0U) || (offset >= Bl_len_)
+                || (len != (((Bl_len_ - offset) > BL_MAX_BLOCK)
+                    ? BL_MAX_BLOCK : (Bl_len_ - offset)))) {
+                Bl_nak_();
+                continue;
+            }
+            if ((Bl_bytes_ != 0U) && (idx == Bl_last_)
+                && (crc == Bl_lastCrc_)) {
+                Bl_ack1_();
+                continue;
+            }
+            if (offset != Bl_bytes_) {
+                Bl_nak_();
+                continue;
+            }
+            if (idx == 0U) {
+                if (!AssetFormat_valid(Bl_block_)
+                    || (AssetFormat_be32(&Bl_block_[12])
+                        + ASSET_FORMAT_SECTOR != Bl_len_)) {
+                    Bl_nak_();
+                    continue;
+                }
+                if (!BSP_flashEraseSector(BSP_flashDevice(), BL_ASSET_BASE)) {
+                    Bl_nak_();
+                    continue;
+                }
+                memcpy(Bl_directory_, Bl_block_, BL_HDR_BYTES);
+            } else if (!Bl_writeBlock_(idx, len)) {
                 ++Bl_wrBad_;
                 Bl_nak_();
                 continue;
@@ -549,6 +583,7 @@ static void Bl_burn_(void) {
             Bl_crcRun_ = Bl_crc32Update_(Bl_crcRun_, Bl_block_, len);
             Bl_bytes_ += len;
             Bl_last_ = idx;
+            Bl_lastCrc_ = crc;
             ++Bl_blocks_;
             ++Bl_written_;
             Bl_ack1_();
@@ -560,21 +595,20 @@ static void Bl_burn_(void) {
             if (!Bl_readExact_(&fin[1], BL_FIN_LEN - 1U)) {
                 continue;
             }
-            if ((Bl_be32_(&fin[1]) != Bl_bytes_)
+            if ((Bl_len_ == 0U) || (Bl_bytes_ != Bl_len_)
+                || (Bl_be32_(&fin[1]) != Bl_len_)
                 || (Bl_be32_(&fin[5]) != Bl_crcRun_)) {
                 Bl_final_ = 2U;
                 Bl_nak_();
                 continue;
             }
-            // CRC agrees: write the header, which is the atomic point. Only
-            // then is the asset "there", and only then does the flag go away.
+            // Transport complete: verify stored images, then commit AST2.
             if (Bl_commit_()) {
                 Bl_final_ = 1U;
                 _snoinit = 0U;
                 Bl_ack1_();
                 // The work is done and the flag is gone: reset so the board
-                // comes up in the app on its own. The counters live in RAM and
-                // survive the reset, so a probe can still read them.
+                // comes up in the app on its own.
                 HAL_Delay(50U);
                 NVIC_SystemReset();
             } else {

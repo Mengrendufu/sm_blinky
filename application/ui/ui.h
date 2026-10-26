@@ -24,8 +24,4 @@
 
 void Ui_start(void);
 
-// Mounted by the application on the BSP tick host; timer daemon context.
-// Always posts UI_TIMEOUT_SIG; Ui_start binds the inbox before scheduling.
-void Ui_tick(void *context);
-
 #endif // UI_H_

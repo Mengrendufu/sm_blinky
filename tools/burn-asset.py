@@ -1,19 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""草案（未进仓库、未在硬件上跑过）：单脚本管全程 —— 串口常开 → J-Link 置标志复位 → 握手 → 分块烧写。
+"""Burn a complete AST2 package over UART, with per-image stored CRC32.
 
-流程（对应图上 ①~⑥）：
-  ① open_serial_quiet()：先设 dtr/rts=False 再 open → 打开瞬间即 deassert，不碰 NRST
-  ② jlink_flag_and_reset()：写 noinit 标志 + NRST 复位（串口此时已开，但控制线是 deassert，NRST 归 J-Link）
-  ③ handshake()：重复发握手直到 ACK（带超时与诊断）
-  ④ 分块停等传输（NAK 重传）
-  ⑤ 打印时间账
-  ⑥ 关串口
-
-协议里还没定的部分标了 TODO —— 定完就能真跑。
+Input is concatenated raw RGB565 slots (Sys, Live, Splash). The script builds
+an AST2 directory, then transfers directory sector and payload as one package.
+Bootloader verifies stored images before committing the directory.
 """
 import argparse, os, struct, subprocess, sys, time, zlib
 import serial  # pyserial
+
+from asset_pack import build_pack, VERSION
 
 JLINK = r"C:\mengrendufu\software_ins\JLink\JLink.exe"
 JL_OPTS = "-device STM32F103ZE -if SWD -speed 4000 -autoconnect 1 -ExitOnError 1 -NoGui 1"
@@ -25,9 +21,9 @@ CMD = "cmd.exe"
 #   reply    BL -> PC:  55 | base(4 BE) | block(2 BE) | crc32(4 BE)  11 B
 #                        crc32 覆盖前 7 B（帧头也在内）
 #   refusal  BL -> PC:  4E（版本 / 长度 / 帧 CRC 任一不过）
-# 块级载荷还没定（下一步），但整张的最终校验定了：资产头里的 CRC32。
+# v2: complete AST2 directory sector + image payload; transport CRC retained.
 REQ_MAGIC, ACK_MAGIC, NAK_MAGIC = 0xAA, 0x55, 0x4E
-PROTO_VER = 1
+PROTO_VER = VERSION
 REQ_LEN, ACK_LEN = 10, 11
 BLK_MAGIC, FIN_MAGIC = 0xB1, 0xC1
 BLK_HDR_LEN, FIN_LEN = 7, 9
@@ -86,7 +82,7 @@ def jlink_flag_and_reset(addr, tpl):
 
 
 def handshake(ser, img_len):
-    """③ 重复发握手帧直到 ACK；对回帧自己再算一遍 CRC（本轮唯一的硬要求：最终校验）。"""
+    """Negotiate package length and verify the handshake reply CRC."""
     core = struct.pack(">BI", PROTO_VER, img_len)
     req = bytes([REQ_MAGIC]) + core + struct.pack(">I", zlib.crc32(core) & 0xFFFFFFFF)
     deadline = time.time() + HANDSHAKE_TIMEOUT_S
@@ -162,10 +158,12 @@ def send_blocks(ser, img, corrupt=None):
 
 
 def send_final(ser, img):
-    """⑤ 最终校验：整张的字节数 + CRC32 —— 本协议唯一的硬要求。"""
+    """Finish transport; target checks NOR images before directory commit."""
     crc = zlib.crc32(img) & 0xFFFFFFFF
     fin = bytes([FIN_MAGIC]) + struct.pack(">I", len(img)) + struct.pack(">I", crc)
     ser.write(fin)
+    # Final verification rereads all stored images before sending ACK.
+    ser.timeout = 10.0
     r = ser.read(1)
     if not (r and r[0] == ACK_MAGIC):
         sys.exit(f"[burn] 最终校验没过（目标机回 {r.hex() if r else '无应答'}）")
@@ -175,18 +173,24 @@ def send_final(ser, img):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", default="COM5")
-    ap.add_argument("--image", required=True, help="RGB565 裸数据（240x320x2 = 153600 B）")
+    ap.add_argument("--image", required=True,
+                    help="1-3 raw RGB565 slots, 153600 B each; "
+                         "Sys, Live, Splash")
     ap.add_argument("--elf", default="build/debug/sm_blinky.elf")
     ap.add_argument("--noinit", help="noinit base hex; skips arm-none-eabi-nm (WSL only)")
     ap.add_argument("--tpl", default=os.path.join(os.path.dirname(__file__), "enter-burn.jlink.tpl"))
     ap.add_argument("--no-jlink", action="store_true", help="跳过 J-Link（标志已置好时用，便于调协议）")
     ap.add_argument("--handshake-only", action="store_true", help="握上手就停（联调用，不碰 flash）")
-    ap.add_argument("--blocks-only", action="store_true", help="块 + 最终校验做完就停（不碰 flash）")
+    ap.add_argument("--blocks-only", action="store_true",
+                    help="完整烧写并提交后结束（兼容旧参数）")
     ap.add_argument("--corrupt-block", type=int, default=None, metavar="N",
                     help="故意弄坏第 N 块，验重传路径")
     a = ap.parse_args()
 
-    img = open(a.image, "rb").read()
+    try:
+        img = build_pack(open(a.image, "rb").read())
+    except ValueError as error:
+        ap.error(str(error))
     crc = zlib.crc32(img) & 0xFFFFFFFF
     print(f"[burn] 镜像 {len(img)} B，CRC32 {crc}（0x{crc:08X}）")
 
@@ -202,7 +206,7 @@ def main():
         send_blocks(ser, img, a.corrupt_block)            # ④
         send_final(ser, img)                             # ⑤
         if a.blocks_only:
-            print("[burn] --blocks-only：到此为止（没碰 flash）")
+            print("[burn] --blocks-only：完整资产包已烧写并提交")
             return
     finally:
         ser.close()                                      # ⑥

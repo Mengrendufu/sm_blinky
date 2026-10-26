@@ -13,6 +13,8 @@
 //............................................................................
 void W_Dial_init(struct W_Dial *d) {
     d->arc = (struct _lv_obj_t *)0;
+    d->value = 0U;
+    d->rising = true;
 }
 //............................................................................
 void W_Dial_create(struct W_Dial *d, struct _lv_obj_t *parent,
@@ -37,6 +39,8 @@ void W_Dial_create(struct W_Dial *d, struct _lv_obj_t *parent,
     lv_obj_set_style_shadow_width(arc, 0, LV_PART_KNOB);
     lv_obj_set_style_pad_all(arc, 0, LV_PART_KNOB);
     d->arc = (struct _lv_obj_t *)arc;
+    d->rising = true;
+    W_Dial_setValue(d, 0U);
 }
 //............................................................................
 // One step, one dirty band: the arc's whole rows across the full width. A
@@ -45,6 +49,7 @@ void W_Dial_setValue(struct W_Dial *d, unsigned pct) {
     lv_area_t box;
     lv_area_t band;
 
+    d->value = pct;
     lv_arc_set_value((lv_obj_t *)d->arc, (int32_t)pct);
 
     lv_obj_get_coords((lv_obj_t *)d->arc, &box);
@@ -54,4 +59,21 @@ void W_Dial_setValue(struct W_Dial *d, unsigned pct) {
     band.y1 = box.y1;
     band.y2 = box.y2;
     lv_obj_invalidate_area(lv_screen_active(), &band);
+}
+
+void W_Dial_step(struct W_Dial *d) {
+    unsigned value = d->value;
+    if (d->rising) {
+        value += 2U;
+        if (value >= 100U) {
+            value = 100U;
+            d->rising = false;
+        }
+    } else {
+        value = (value > 2U) ? value - 2U : 0U;
+        if (value == 0U) {
+            d->rising = true;
+        }
+    }
+    W_Dial_setValue(d, value);
 }

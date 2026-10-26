@@ -44,7 +44,6 @@ set(SRC_ALL
     ${CMAKE_SOURCE_DIR}/application/aos/blinky/blinky.c
     ${CMAKE_SOURCE_DIR}/application/ui/thread/ui.c
     ${CMAKE_SOURCE_DIR}/application/ui/thread/ui_evt.c
-    ${CMAKE_SOURCE_DIR}/application/ui/thread/ui_tick.c
     ${CMAKE_SOURCE_DIR}/application/ui/thread/ui_disp.c
     ${CMAKE_SOURCE_DIR}/application/ui/hsm/widgets/widget_io_priv.c
     ${CMAKE_SOURCE_DIR}/application/ui/hsm/widgets/w_topbar.c
@@ -55,6 +54,10 @@ set(SRC_ALL
     ${CMAKE_SOURCE_DIR}/application/ui/hsm/widgets/w_dial.c
     ${CMAKE_SOURCE_DIR}/application/ui/hsm/widgets/w_nvm.c
     ${CMAKE_SOURCE_DIR}/application/ui/hsm/widgets/w_ram.c
+    ${CMAKE_SOURCE_DIR}/application/ui/hsm/views/ui_surface.c
+    ${CMAKE_SOURCE_DIR}/application/ui/hsm/views/ui_sys_page.c
+    ${CMAKE_SOURCE_DIR}/application/ui/hsm/views/ui_live_page.c
+    ${CMAKE_SOURCE_DIR}/application/ui/hsm/metrics/ui_metrics.c
     ${CMAKE_SOURCE_DIR}/application/ui/hsm/sm_ui.c
     ${CMAKE_SOURCE_DIR}/application/nvm/nvm.c
     ${CMAKE_SOURCE_DIR}/application/aos/flash
@@ -81,6 +84,7 @@ set(SRC_ALL
     ${ROOT_CMSIS_DEVICE}/Source/Templates/system_stm32f1xx.c
     ${ROOT_CMSIS_DEVICE}/Source/Templates/gcc/startup_stm32f103xe.s
     ${CMAKE_SOURCE_DIR}/ports/sst_port.c
+    ${ROOT_COMMON}/src/time_evt/time_evt.c
     ${CMAKE_SOURCE_DIR}/ports/static_pool/sst_evt_pool.c
     ${ROOT_SST}/sst_c/src/sst.c
     ${ROOT_SST}/sst_c/src/sst_pubsub.c
@@ -101,6 +105,7 @@ set_source_files_properties(${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/src/nvs.c
 add_executable(${PROJECT_NAME}.elf ${SRC_ALL})
 
 target_include_directories(${PROJECT_NAME}.elf PRIVATE
+    ${CMAKE_SOURCE_DIR}/shared
     ${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/include
     ${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/src
     ${CMAKE_SOURCE_DIR}/3rd_party/sm_nvs/include
@@ -188,6 +193,7 @@ set(SRC_BL
 add_executable(bootloader.elf ${SRC_BL})
 
 target_include_directories(bootloader.elf PRIVATE
+    ${CMAKE_SOURCE_DIR}/shared
     ${CMAKE_SOURCE_DIR}/bootloader
     ${CMAKE_SOURCE_DIR}/bsp
     ${CMAKE_SOURCE_DIR}/bsp/devices

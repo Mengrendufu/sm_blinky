@@ -14,10 +14,12 @@
 //............................................................................
 void W_Nvm_init(struct W_Nvm *w) {
     w->label = (struct _lv_obj_t *)0;
+    w->valid = false;
 }
 //............................................................................
 void W_Nvm_create(struct W_Nvm *w, struct _lv_obj_t *parent,
                   int32_t x, int32_t y) {
+    w->valid = false;
     w->label = WidgetIO_label(parent, "NVM_Blinky -", 0xFFFFFFU);
     lv_obj_set_pos((lv_obj_t *)w->label, (lv_coord_t)x, (lv_coord_t)y);
     // 220 px from x=12: the longest text is "NVM_Blinky 4294967295", twenty
@@ -29,6 +31,11 @@ void W_Nvm_create(struct W_Nvm *w, struct _lv_obj_t *parent,
 }
 //............................................................................
 void W_Nvm_set(struct W_Nvm *w, uint32_t value) {
+    if (w->valid && w->shown == value) {
+        return;
+    }
+    w->shown = value;
+    w->valid = true;
     lv_label_set_text_fmt((lv_obj_t *)w->label, "NVM_Blinky %u",
                           (unsigned)value);
 }

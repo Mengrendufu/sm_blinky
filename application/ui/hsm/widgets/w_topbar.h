@@ -21,11 +21,16 @@ struct W_Topbar {
     struct _lv_obj_t *fps;
     struct _lv_obj_t *cpu;
     struct _lv_obj_t *led;
+    unsigned shownCpu;
+    unsigned shownFps;
+    bool cpuValid;
+    bool fpsValid;
 };
 
 void W_Topbar_init(struct W_Topbar *bar);
 void W_Topbar_create(struct W_Topbar *bar, struct _lv_obj_t *parent,
                      char const *title);
+void W_Topbar_destroy(struct W_Topbar *bar);
 void W_Topbar_setTitle(struct W_Topbar *bar, char const *title);
 void W_Topbar_setFps(struct W_Topbar *bar, unsigned fps);
 void W_Topbar_setCpu(struct W_Topbar *bar, unsigned pct);

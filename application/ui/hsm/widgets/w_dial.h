@@ -10,6 +10,7 @@
 #define W_DIAL_H_
 
 #include <stdint.h>
+#include <stdbool.h>
 
 struct _lv_obj_t;
 
@@ -20,11 +21,15 @@ struct _lv_obj_t;
 // 2026-10-13). One step is a full-width band, exactly like the CPU gauge.
 struct W_Dial {
     struct _lv_obj_t *arc;
+    unsigned value;
+    bool rising;
 };
 
 void W_Dial_init(struct W_Dial *d);
 void W_Dial_create(struct W_Dial *d, struct _lv_obj_t *parent,
                    int32_t x, int32_t y, int32_t size);
 void W_Dial_setValue(struct W_Dial *d, unsigned pct);
+// Advance the empty/full/empty sweep by two percentage points.
+void W_Dial_step(struct W_Dial *d);
 
 #endif // W_DIAL_H_
