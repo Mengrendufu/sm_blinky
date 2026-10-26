@@ -17,7 +17,7 @@ struct _lv_obj_t;
 // A fixed grid of "one line per resource": name, bar, percentage, raw number.
 // The rows are made once and only ever written, so a refresh costs the rows
 // whose value actually moved.
-#define W_BARPANEL_ROWS 8U
+#define W_BARPANEL_ROWS 9U
 
 struct W_BarPanel {
     char const *unit[W_BARPANEL_ROWS];   // how the raw number is spelled

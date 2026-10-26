@@ -20,12 +20,11 @@ enum {
     UI_NULL_SIG = 0,
     UI_LED_ON_SIG = APPLICATION_PUB_SIG_MAX,
     UI_LED_OFF_SIG,
-    // Fixed-frequency UI timebase updates controls; state transitions
-    // use explicit deadlines; periodic events drive stats and arc steps.
-    UI_TIMEOUT_SIG,
     UI_GO_SPLASHING_SIG,
-    UI_SPLASH_TIMEOUT_SIG,
-    UI_PAGE_TIMEOUT_SIG,
+    // Shared by mutually exclusive Splash/Sys/Live deadline owners.
+    UI_STATE_TIMEOUT_SIG,
+    // Posted after Active updates shared data; pages render that data.
+    UI_REFRESH_SIG,
     UI_HEADER_TIMEOUT_SIG,
     UI_DIAL_TIMEOUT_SIG
 };

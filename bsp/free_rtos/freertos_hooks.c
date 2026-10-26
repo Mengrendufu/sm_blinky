@@ -3,8 +3,8 @@
 #include "sst.h"
 
 // CPU load, sampled on the tick: how many of the last N ticks found the idle
-// task on the CPU. The tick is 10 ms here (BSP_TICKS_PER_SEC 100), so a
-// 500 ms window is fifty samples - a percentage to the nearest two. The cost
+// task on the CPU. FreeRTOS ticks at 1 kHz, independently of the 100 Hz
+// event timebase; a 500 ms window normally contains 500 samples. The cost
 // is one pointer compare and two increments in an interrupt that already
 // runs, without needing a separate timer or a core-cycle time base.
 // The tracer's pump runs inside idle, so pumping records reads as idle.

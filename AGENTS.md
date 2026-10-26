@@ -12,7 +12,8 @@ STM32F103ZET6 固件骨架：FreeRTOS 内核 + `sm_sst` 的 AO/事件层 + HMI �
 cmake --preset debug && cmake --build --preset build-debug
 ```
 
-- 优化：`toolchain_arm.cmake` 里显式带 `-O2`。Debug 构建默认是 -O0，而 LVGL 的软件渲染在 -O0 下慢到肉眼可见（实测一次局部刷新 28 ms，其中渲染 21~25 ms、我们自己的刷屏循环 4 ms），加 -O2 后 text 也从 257 KB 降到 166 KB。调渲染相关的行为时别把这一条去掉。（`-O3` / `-flto` 已评估、暂不采用，量级与理由见 `docs/charter.md` §6）
+- 优化：toolchain_arm.cmake 显式配置 -O2 -flto。
+  不使用 Debug 默认的 -O0；历史渲染测量与取舍见 docs/charter.md §6。
 - WSL 依赖：`arm-none-eabi-gcc` 13.2.1（`/usr/bin`）、`cmake` 3.28.3、`ninja` 1.11.1。
 - 产物：`build/debug/sm_blinky.elf`、`.hex`、`.map`。`build/` 是本机生成，勿跨平台复用。
 
@@ -71,10 +72,10 @@ cmake --preset debug && cmake --build --preset build-debug
 
 | 目录 | 内容 |
 |---|---|
-| `application/` | `main.c`、`application.c`（AO 启动）、`aos/blinky/`（唯一的 AO）、`ui/`（UI 线程：`thread/` 线程与收件箱、`hsm/` 状态机；不是 AO） |
-| `bsp/` | 根下只有 `bsp.[ch]`：板级基础（时钟/DWT、LED 引脚与开关、`SM_onAssert`、tracer 出口与构造、`BSP_dbgMemReport`） |
-| `bsp/devices/` | FSMC 上的两颗器件：`bsp_lcd`（ST7789，总线 + 面板 bring-up）、`bsp_sram`（IS62WV51216，总线初始化） |
-| `bsp/free_rtos/` | FreeRTOS：`FreeRTOSConfig.h` 与 `freertos_hooks.c`（idle/timer 静态内存、栈溢出钩子） |
+| `application/` | Flash/Blinky AO、UI 线程/HSM、资产与 NVM |
+| `bsp/` | 板级初始化、LED、tracer、启动与故障记录 |
+| `bsp/devices/` | LCD/SRAM 的 FSMC 口、SPI2 Flash 对象 |
+| `bsp/free_rtos/` | FreeRTOS 配置、hooks、tick 挂载服务 |
 | `bsp/lvgl/` | LVGL 配置（`lv_conf.h`）。显示适配层最终没放这里，落在 `application/ui/thread/ui_disp.c` ✓ |
 | `bsp/platform/` | 平台样板：HAL conf、MSP、TIM1 时基、中断向量、newlib 桩（`syscalls`/`sysmem`）、链接脚本。原来的 `main.h` 已删除，LED 引脚宏移到 `bsp.h` |
 | `ports/` | SST 骑 FreeRTOS 的口；`ports/static_pool/` 是事件池适配 |
@@ -112,7 +113,11 @@ python3 ~/.config/opencode/skills/sm/uml-sync/scripts/export_model_tree.py \
 - **尺寸单位**：本项目按 ST 链接脚本的口径，**KB = 1024 B**（`512KBytes FLASH` / `64KBytes RAM` 对应的就是 `0x80000` / `0x10000`），不用 KiB —— 引 ST 文档时两套写法会打架。会进预算表或要跟别人对齐的尺寸，旁边写上字节数（如 `15 KB = 15,360 B`）；十进制 KB（1000）出现在存储容量、链路速率那一类语境里，和内存尺寸不是一回事。
 - **固件编译与烧录只在用户明确要求时执行**（说"编译"或"烧录"）。平时只做只读检查、读代码、跑宿主机契约测试；真要编/烧时，先说明跑哪条命令、烧哪份产物（时间戳 + 大小）。
 - **FreeRTOS 走全静态分配**（`configSUPPORT_DYNAMIC_ALLOCATION 0`，不编 `heap_4.c`）。任务栈由各 AO 自己声明（`StaticTask_t` + `StackType_t[]`，见 `blinky.c`），idle/timer 任务的内存由 `bsp/free_rtos/freertos_hooks.c` 提供；新增 AO 必须自带静态栈。栈够不够用 `[MEM][STACK]` 记录（`BSP_dbgMemReport`）的高水位来定，不靠猜。
-- **绑定先于派发**：新建或改动「环 + 唤醒目标」形态的通道时，`xxx_start()` 必须先把环与唤醒目标一起成型，之后才允许任何生产者投递（含 AO 的初始转移）；未绑定时的投递是静默丢唤醒，不是安全操作。机制与证据见「启动顺序」条。**待落地**（顺序已保证，代码尚未强制）：① 未绑定时的投递仍是静默接受（`ui_evt.c:49-55`、`flash_req.c:66-73`），应改成 fail-stop 或至少 trace 留痕；② flash 的「被拒」（`Flash_submit_` 返回 false）与「执行失败」（`req.ok` 为 false）仍压成一个返回值（`flash_req.c:138`、`149`）——**而且现在连调用点都没有了**（2026-10-10 探针全删，运行期 RPC 暂无使用者 ⇒ 源保留、`--gc-sections` 丢掉），这条待落地顺延到第一个真正的客户端；③ UI 环满仍「拒收最新」（`ui_evt.c:38-46`）——状态语义的通道应改成覆盖最新，或改成状态发布（`Sm_Ui` 这个「普通线程 + 内嵌 HSM」示范件保不保留未定）；④ UI 首帧按初值绘制、早于第一次排空（`ui.c:79` 先画、`ui.c:84` 才首次排空）。
+- **绑定先于派发**：UI 收件箱须先绑定，再允许 AO 初始 entry 投递。
+  Ui_post 对未绑定、队列满均断言。Flash 裸区入口在存储初始化后绑定；
+  未绑定调用违反契约。NVM 保存请求在入口未绑定时返回 false。
+  Flash 同步 RPC 的容量拒绝与 IO 失败仍共用 false 返回值，
+  第一个实际客户端接入时再明确是否需要区分。
 - **调试 / 仪器代码（2026-10-10）**：只留两类 —— ① **tracer 的记录**（`BSP_dbgMemReport` / `BSP_dbgBootReport` / `Application_dbgBootReport` / `Asset_dbgBootReport` / `BSP_dbgLcdBootReport`）；② **运行时 RAM 打桩**（`BSP_dbgBootMark` → `BSP_dbgBootMs_`、`BSP_dbgFaultStash` → .noinit 故障帧）。**硬件探针类 API 一律不留** ✗（`BSP_dbgLcdCheck` / `BSP_dbgFlashProbe` / `Flash_dbgProbe` 与第 60 拍那段已删）。命名：诊断/仪器一律带 **`dbg` 段**紧跟模块前缀，文件内实现跟着走（`BSP_dbgTraceStack_` / `BSP_dbgLcdBootId_` / `lcd_dbgBootId_`）；**尾随下划线仍只表示「文件私有」，不表示调试** ✗。记录 id 常量用 `*_TRACE_*` ⇒ 视为已标记 ✓；调试代码块再加 banner `// == DEBUG: … ==` ✓。**刻意不改名**：`flashTxStatus_` / `flashRxStatus_`（生产状态、留给调试器看 ✓）。**2026-10-12 一次清账**：UI 的三条计时记录（帧 / 刷屏 / 分块，**id 39/40/41**）连 `Ui_flushes_` / `Ui_flushPx_` / `Ui_flushUs_` / `Ui_lastFlushEnd_` / `Ui_us_()` 一并拆除、id 退休不回收 ✗ —— 结论（整屏帧 = 10 × 240×32、稳态 `3 flushes / 8 KiB` ≈ 12.5 ms、拆证明后每个首帧省 ~39 ms）都已落本文 ✓；LED 两条时间戳记录 **id 10/11** 同批拆除 ✓；顺手删掉没人用的 `SRAM_BANK_ADDR`（一条**注释还说谎**的别名：它声称"资产加载器从这里取基址"，实际用的是 `BSP_SRAM_BASE` ✗）。**留下的仪器**：bring-up / fault 上报（12/13/20/45/66/67/79）、`[MEM][STACK]` 栈高水位量具（21~24、38）、运行时 RAM 打桩（`BSP_dbgBootMs_` / `BSP_dbgLcdSentinel_` / `Ui_dbgSplashOk_`）—— 都是"每开一次机几条记录"或 J-Link 直读的量级。
 - 依赖以云端 submodule 为准；本地拷贝只作对照。适配远端时允许改 `ports/`、CMake、BSP，但保留 `free_rtos_blinky` 已验证的板级参数。
 - 要改 `sm_sst` 时：先在本地镜像 `C:\mengrendufu\workshop\local_prjs\sm_sst` 改并推送，再回本仓库同步 submodule 指针。
@@ -130,7 +135,10 @@ python3 ~/.config/opencode/skills/sm/uml-sync/scripts/export_model_tree.py \
   ⑤ 编译 + `python3 tools/check_line_width.py`；
   ⑥ 上板确认：**没有串口时走 RAM 通道**（boot 标记 `BSP_dbgBootMs_` + `xTickCount` 是否跨过关键拍 ⇒ 有没有在第 N 拍复位 ✓）；探针自己的结果块也曾是这条通道 ✓。
 
-## 当前状态与已知坑
+## 历史调查与测量（不作为当前实现约定）
+
+以下保留旧版本的故障证据、实验数字和决策背景。
+当前队列、启动、事件、背光和存储流程以文末“当前架构约定”为准。
 
 - **AO 的事件处理里不能跑长活儿**：SST 的定时事件是**按周期无条件投递**的（`sst_c/src/sst.c:157` 的 `SST_TimeEvt_tick` → `SST_Task_post`），而每个 AO 的队列只有 8 格（Blinky = `Blinky_qSto[8]`）。只要 handler 比 beat 慢，事件就堆积；满 8 格后 `SST_Task_post` 的 `DBC_REQUIRE(300, me->nUsed <= me->end)`（`sst.c:87`）断言、板子复位——日志上是 `[ASSERTION][+0000000300][sst]`。**「按 beat 切片」救不了**（试过 8 扇区/拍，实测一拍 1.28 s > 500 ms beat，照样堆），`vTaskDelay` 也救不了。正确做法是**把长活儿放进独立任务**：普通 FreeRTOS 任务没有这个队列、可以阻塞，给足静态栈 + 低于 AO 的优先级即可——flash 自检就是这么改的（`BSP_flashSelfTestStart()` 建 `fwt` 任务，优先级 20、栈 256 words）。
 - 实测值：**这颗 flash 的扇区擦除约 160 ms**（自检期间 LED 间隔 1280 ms ÷ 8 扇区反推），另有 DMA 写入路径上按 tick 量到的 167 / 170 ms。**对照手册（板子资料里的 W25Q128BV Rev E，AC 特性表 p.67，2026-10-10 核对）**：4 KB 扇区擦除 **30 ms 典型 / 200 ms 最大（<50k 次擦写）/ 400 ms（50k~100k 次）**、页编程 0.7/3 ms、32 KB 块擦 120/800 ms、64 KB 块擦 150/1000 ms、写状态寄存器 10/15 ms、**整片擦 25 典型 / 40 最大 s**、字节编程（典型）= 首字节 30 µs + 每字节 2.5 µs。⇒ 我们这 130~160 ms **落在「<50k 次的 200 ms 上限」之内：慢，但合法**（不是超规格），预算按 200 ms 留；**整片 4096 扇区逐个擦 ≈11 分钟是「逐扇区」的代价、不是器件的极限 —— 器件自己的 Chip Erase（C7h/60h）只要 25 s 典型，快 20 倍**。
@@ -212,62 +220,64 @@ python3 ~/.config/opencode/skills/sm/uml-sync/scripts/export_model_tree.py \
   正常应长期是 `16/16`（或偶发 `15/16`）✓。
 
 
-## 2026-10-23：Flash AO、同步初始化与 UI 控件目录
+## 当前架构约定（2026-10-26）
 
-- Flash 位于 `application/aos/flash/`，与 Blinky 同归 AO 目录。
-  根下为 AO/请求适配，`hsm/` 为状态机；不再设置 `thread/` 层。
-- `AO_start()` 集中调用 `Flash_ctor()`、`SST_Task_start()`，Flash 在前。
-  其初始化和请求通道绑定完成后，再初始化可能投递请求的 Blinky。
-- SST 保持原有时序：`SST_Task_start()` 直接调用 init 虚函数。
-  init 在启动者上下文同步执行，dispatch 才运行于 AO 任务。
-  init/dispatch 直接注册，禁止重复包装派发或为此改框架初始化时机。
-- NVS 在 HSM 顶层初始化，AO Flash 给同一 BSP_Flash 对象绑定
-  Poll operations 和初始化等待上下文；不用任务通知或 DMA 中断。
-  初始化后换绑 DMA operations 与任务等待上下文，NVS 设备句柄不变。
-  初始化使用 DWT，运行期使用 HAL tick；设备 BUSY 等待可让出 CPU。
-- Flash 的 SST 队列为 9 格：8 个请求封装 + 1 个单次持久化事件。
-  handler 可让出 CPU，但一事件完成前不派发下一事件。
-- UI 控件放在 `application/ui/hsm/widgets/`，由 HSM 持有和操作。
-- 当前启动链路：BSP/资产 → 定时器 → UI → SST_init → AO_start
-  → SST_start → 调度器。启动期 SPI 轮询须能在中断屏蔽时完成并超时。
-- Flash/LCD 各自只有一个 BSP 对象；传输 operations 和等待 operations
-  分别绑定。只允许旧所有者在完整操作结束、完成已消费后换绑。
-  普通完成与 ISR 完成必须各用对应的 indexed 通知 API。
-- LCD WriteArea 同步完成：窗口、所有分块与等待保持独占。
-  flush_ready 和首帧背光调度归 UI 线程，ISR 不调用 lv_*。
-- Sys 页 Flsh/Blky 两行按 AO_Flash/AO_Blinky 的线程句柄匹配。
-  SST 任务名同为 ao，不能依赖名字区分；水位是历史最低剩余栈字数。
-- 目录迁移、同步初始化、Flash/LCD 对象化的验证见
-  `docs/charter.md` §13—15；历史板端数据不能充当新镜像验证。
+本节与源码描述当前实现。上面的带日期调查保留历史测量与结论，
+其中旧 API、队列容量、等待策略和页面布局不作为当前实现约定。
 
-- **UI 收件箱试验（2026-10-24）**：容量从 16 改为 32，满队列
-  按 SST 规范断言，不再返回拒收。Ui_post/Ui_postLedOn/Off 改为 void。
-  历史最小剩余量仍由入队路径维护；原拒收记录 RecID 90 退休，不复用。
+- main 顺序：HAL/时钟/GPIO/UART → BSP_init → Application_tickStart
+  → Ui_start → SST_init → SST_start（事件池）→ AO_start → 调度器。
+  BSP_init 仍在调度前初始化 LCD、SRAM、SPI；资产/NVS 在调度后加载。
+- AO_start 先初始化发布表，再创建 Flash 和 Blinky。
+  SST_Task_start 同步调用 init 虚函数；dispatch 在 AO 任务运行。
+  Flash TOP 只自投递首个加载事件，不在 TOP 执行存储 IO。
+- Flash 首个事件绑定 DMA transport 与任务通知等待，加载 Splash；
+  第二阶段加载其余资产，进入 ready 的 entry 先发资产完成通知，
+  再挂载、恢复 NVS，最后绑定请求入口。资产完成不代表 NVS 就绪。
+  NVS 初始化失败后的准入仍待整理，不能把入口绑定视为成功证据。
+- Flash 队列十格，最多八个在途裸区 RPC；handler 内允许让出等待，
+  返回后才消费下一事件。事件直接交 HSM，不加二次操作路由。
+  请求块/缓冲借用调用者栈，完成通知后不再访问请求。
+- Flash/LCD 使用 BSP 对象、传输 operations 和等待 operations。
+  只在操作完整结束、完成已消费后换绑。App Flash 使用 DMA + 通知，
+  Bootloader 使用 DMA + 自旋；器件 BUSY 分别让出轮询、阻塞轮询。
+  SPI 超时、设备 BUSY 和 NVS 诊断使用 HAL tick，不使用 DWT。
+  HAL tick 必须运行，DMA 还需要完成中断。
+- 通知槽 0 用于 SST/UI 收件箱，槽 1 用于同步 DMA/RPC 完成。
+  普通完成与 ISR 完成分别使用对应的 indexed 通知 API。
+- 非时间事件全部由 SST_NEW 分配，post/publish 后派发并 GC。
+  小池 4 B × 48，中池 8 B × 16，按尺寸选首个合适池；不自动转借。
+  时间事件保留静态事件。UI post 获取引用，dispatch 后执行 SST_GC。
+  UI 队列 32 格，未绑定或满队列断言；不再拒收并丢弃最新事件。
+- Blinky 订阅两个公共就绪信号，仅展示特性，不处理业务。
+  UI 是普通线程 + HSM，不是 SST AO；Flash 另分配事件定向 Ui_post。
+  公共信号共享编号，UI/Flash 私有枚举从公共信号上界之后开始。
+- AST2 整包烧写，目录和每张图分别 CRC 校验；App 每图最多读三次。
+  先发布已验证 Splash，再加载其余图；已发布 SRAM 图片不再覆盖。
+  失败图片返回 NULL，UI 使用纯色降级，不依赖整包 CRC 判定单图。
+- UI TOP 进入 standby，保留 readySplash/earlyReadyShow、
+  splashing/readyShow 的两阶段准备与开机触发空间；当前自投递 GO。
+  Splash 父状态持有展示期限，资产完成与期限到达各一次完成汇合。
+- UI 控件归 hsm/：views 组合页面，widgets 封装 LVGL，metrics 采样。
+  Active 管公共顶栏；Sys/Live entry 建控件、exit 销毁本页控件。
+  ui_disp 只做显示适配。背光在 Splash entry 打开，早于首帧渲染；
+  flush 同步调用 BSP_lcdWriteArea，返回后 flush_ready；ISR 不调 lv_*。
+- BSP timer daemon 以 100 Hz 并列驱动 SST 和 common_c TimeEvt。
+  UI HSM 直接持有三个节点：状态期限、顶栏刷新、Live 圆弧。
+  Splash 150 ticks，Sys 500，Live 1000，顶栏周期 50，圆弧周期 3。
+  entry arm、exit disarm；已承诺投递的超时不能撤回。
+- NVM 信息头下标 = 逻辑 ID = NVS key，按 size 统一复制恢复/保存。
+  Blinky ON/OFF entry 累计快照，恢复前增量由 NVM 暂存后合并。
+  每 20 个半秒节拍分别请求保存两项；Flash 不主动周期保存。
+  Live 只读全局快照显示，不再发布增量。详见 docs/nvm-storage.md。
+- Sys 九行：ui/Flsh/Blky/tmr/idle 栈水位、tracer、收件箱、小池、中池。
+  AO 按线程句柄匹配；smin/mmin 各显历史最低剩余块数/总块数。
+  CPU 保持实时窗口统计，FreeRTOS tick 为 1 ms，不是事件时基 10 ms。
+- 启动计时为三个打点、两段耗时：BSP 初始化、任务装配。
+  新 trace 94：四字节，两个大端 uint16 毫秒值；旧 trace 79 退休。
+  不含资产/NVS 或首帧；NVS mount/restore 耗时仍用 trace 91。
+- HSM/组件/事件协议使用 sm_assert；强 FreeRTOS 关联的任务、调度、
+  通知契约使用 configASSERT。历史测量不充当当前镜像验证结果。
 
-- **应用断言边界（2026-10-24）**：HSM、组件绑定、事件和队列协议
-  使用 sm_assert.h 的 SM_REQUIRE/SM_ENSURE/SM_ASSERT，并声明模块名。
-  configASSERT 仅用于强 FreeRTOS 关联文件中的任务、调度与通知契约；
-  不因文件间接包含 FreeRTOS 头文件而使用它检查普通应用对象。
-
-
-## 2026-10-25 启动 HSM 与发布订阅（以本条覆盖旧启动说明）
-
-- main 不再搬运资产；先完成 BSP，再建 tick/UI/事件池/AO，最后启动
-  调度器。UI 收件箱绑定先于 Blinky 初始 entry 的池化 LED 通知。
-- Flash TOP 自投递静态 LOADING_SPLASH_ASSETS。实际事件中绑定
-  DMA + AO 通知等待，先加载 Splash，再自投递 LOADING_ASSETS。
-  第二阶段读取其余资产、校验整包，随后进入 ready 并初始化 NVS。
-- Blinky 订阅两个公开就绪信号，仅展示 SST 发布订阅的投递入口，
-  HSM 无业务处理。UI 是普通任务，另用 Ui_post 接收同一静态通知。
-- UI 保留最新版 QM 层级：standby/readySplash/earlyReadyShow，
-  splashing/readyShow，active/Sys/Live。固定时基只生成一次 Splash
-  超时事件；模型依赖两种完成通知各自一次，不自行改造模型。
-- 资产格式保留整包 CRC。允许先展示未完成整包校验的 Splash；
-  最后校验失败时 UI 卸下图片并使用纯色页面。后续搬运不覆盖已发布
-  Splash 的 SRAM 区域，Asset_slot 仍只提供通过整包校验的页面图片。
-- 发布表先于订阅初始化，订阅先于调度器启动；公开信号用共享编号。
-  NVS ready 不由 ASSETS_LOADED 代表，后者按模型在 NVS 初始化前发出。
-- 2026-10-25 已构建烧录并验证暖复位启动链路，见 §27：Flash 两阶段
-  到 ready，UI standby/readySplash → splashing/readyShow → Sys。
-  Flash 栈历史最小剩余 119/256 words（476 B）；34.273 s 内启动
-  计数稳定、NVS 写指针推进 3 次。冷上电和真实坏资产尚未板验。
+当前接口和验证边界另见 docs/ui-components.md、docs/ui-time-events.md、
+docs/asset-format.md、docs/nvm-storage.md 和 docs/charter.md §28。

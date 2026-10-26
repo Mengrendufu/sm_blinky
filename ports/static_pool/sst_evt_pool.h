@@ -11,6 +11,15 @@
 
 void SST_EvtPool_init(void *sto, PoolCtr poolSize, PoolCtr blockSize);
 
+typedef struct {
+    unsigned min;
+    unsigned total;
+} SST_EvtPoolLevel;
+
+// Registered poolId starts at 1, matching SST_Evt.poolId. Read atomically;
+// min is the historical minimum free-block count, not current free blocks.
+SST_EvtPoolLevel SST_EvtPool_level(unsigned poolId);
+
 // What is left in the pools, for the UI's resource page. Both walk every pool
 // that was initialised, under the port's own critical section.
 unsigned SST_EvtPool_total(void);

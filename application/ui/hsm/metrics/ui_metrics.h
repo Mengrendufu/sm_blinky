@@ -14,7 +14,7 @@
 #include <stdint.h>
 
 #define UI_METRIC_TASK_ROWS 5U
-#define UI_METRIC_ROWS 8U
+#define UI_METRIC_ROWS 9U
 
 typedef struct {
     uint32_t free;

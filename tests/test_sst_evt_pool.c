@@ -29,6 +29,16 @@ int main(void)
     assert(small->poolId == 1U);
     assert(large->super.poolId == 2U);
     assert(small->refCtr == 0U);
+    SST_EvtPoolLevel level = SST_EvtPool_level(1U);
+    assert(level.min == 1U && level.total == 2U);
+    SST_Evt *second = SST_NEW(SST_Evt);
+    level = SST_EvtPool_level(1U);
+    assert(level.min == 0U && level.total == 2U);
+    level = SST_EvtPool_level(2U);
+    assert(level.min == 1U && level.total == 2U);
+    SST_GC(second);
+    // Returning blocks must not raise the historical minimum.
+    assert(SST_EvtPool_level(1U).min == 0U);
 
     small->refCtr = 2U;
     SST_GC(small);

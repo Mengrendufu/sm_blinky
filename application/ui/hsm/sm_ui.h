@@ -11,6 +11,7 @@
 #define SM_UI_H_
 
 #include "sm_hsm.h"
+#include "time_evt.h"
 #include "sm_ui_evt.h"
 #include "views/ui_surface.h"
 #include "views/ui_sys_page.h"
@@ -38,12 +39,6 @@
 #define UI_HEADER_TICKS 50U
 #define UI_DIAL_TICKS   3U
 
-// HSM-owned static events, registered by the thread before scheduling.
-extern SST_Evt const Sm_Ui_splashTimeoutEvt;
-extern SST_Evt const Sm_Ui_pageTimeoutEvt;
-extern SST_Evt const Sm_Ui_headerTimeoutEvt;
-extern SST_Evt const Sm_Ui_dialTimeoutEvt;
-
 // Required display capabilities, called synchronously on the UI thread.
 // requestFrame submits a repaint request; it does not wait for rendering.
 // readFps returns the adapter's cached completed-refresh rate.
@@ -55,25 +50,15 @@ typedef struct {
     uint32_t (*readFps)(void *context);
 } Sm_Ui_DisplayOperations;
 
-// Required timeout capabilities. Bind before initialization. Only registered
-// event addresses are valid. Delay/interval are in timebase ticks;
-// interval=0 is one-shot, positive interval repeats until disarmed;
-// disarm cannot recall an expiration already committed to delivery.
-// Tables/events outlive the HSM; operations never dispatch it inline.
-typedef struct {
-    void *context;
-    void (*arm)(void *context, SST_Evt const *event, uint32_t ticks,
-                uint32_t interval);
-    void (*disarm)(void *context, SST_Evt const *event);
-} Sm_Ui_TimeoutOperations;
-
 typedef struct {
     SM_Hsm sm_hsm_;
     Sm_Ui_DisplayOperations const *display;
-    Sm_Ui_TimeoutOperations const *timeout;
+    // Registered before scheduling; states directly arm/disarm their nodes.
+    TimeEvt stateTimeout;
+    TimeEvt headerTimeout;
+    TimeEvt dialTimeout;
     bool ledOn;
     uint32_t ledEdges;
-    uint32_t nvmPublished;
 
     // UI subsystem storage: HSM coordinates these independent capabilities.
     // Physical embedding is not UML containment within a leaf Component.
@@ -86,8 +71,8 @@ typedef struct {
 
 void Sm_Ui_bindDisplay(Sm_Ui * const me,
                        Sm_Ui_DisplayOperations const *operations);
-void Sm_Ui_bindTimeout(Sm_Ui * const me,
-                       Sm_Ui_TimeoutOperations const *operations);
+// Construct once before the tick driver starts; timeouts queue to Ui_post.
+void Sm_Ui_ctor(Sm_Ui * const me);
 void Sm_Ui_init(Sm_Ui * const me);
 void Sm_Ui_dispatch(Sm_Ui * const me, SST_Evt const * const e);
 

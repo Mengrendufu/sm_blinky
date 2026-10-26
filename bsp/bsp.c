@@ -24,7 +24,7 @@
 // SM_Trace_push enter a FreeRTOS critical section (ports/sm_port.h), and
 // before the scheduler its nesting counter still holds the sentinel, so
 // interrupts stay masked from then on. That is why every record now waits for
-// a task (Application_dbgBootReport, from Blinky_init) and bring-up keeps its
+// the Flash AO first event (Application_dbgBootReport); bring-up keeps its
 // own facts instead (BSP_dbgBootMark / BSP_dbgBootReport, the panel's and the
 // asset's own deferred reports). Pool and queue are file statics: no
 // allocation.
@@ -55,11 +55,11 @@ void BSP_Tracer_init(void) {
 //............................................................................
 //============================================================================
 // == DEBUG: boot phase timing ==
-// The replacement for the records a deferred tracer cannot
-// push: four marks, three deltas, reported as one record once the tracer is
-// up. Before the move above the tick was frozen from the first record on, so
-// this is also the check that the boot clock works at all.
-#define BSP_DBG_BOOT_MARKS 4U
+// Three pre-scheduler boundaries: before BSP_init, after BSP_init, and
+// after task setup. Assets/NVS load later on the Flash AO and are excluded.
+// Record 79 (three intervals, including old asset loading) is retired.
+#define BSP_DBG_BOOT_MARKS 3U
+#define BSP_TRACE_BOOT_TIMING 94U
 
 static uint32_t BSP_dbgBootMs_[BSP_DBG_BOOT_MARKS];
 static uint8_t BSP_dbgBootMarkIdx_;
@@ -71,12 +71,11 @@ void BSP_dbgBootMark(void) {
     }
 }
 //............................................................................
-// Three deltas, two bytes each: panel bring-up, the retired asset interval
-// (adjacent marks), and task setup. Assets now load on the Flash AO task.
+// Record 94: BSP bring-up and task setup, each a big-endian uint16 ms.
+// BSP time includes LCD, SRAM and SPI setup; this is not time to first frame.
 void BSP_dbgBootReport(void) {
-    uint32_t const panel = BSP_dbgBootMs_[1] - BSP_dbgBootMs_[0];
-    uint32_t const asset = BSP_dbgBootMs_[2] - BSP_dbgBootMs_[1];
-    uint32_t const rest = BSP_dbgBootMs_[3] - BSP_dbgBootMs_[2];
+    uint32_t const board = BSP_dbgBootMs_[1] - BSP_dbgBootMs_[0];
+    uint32_t const tasks = BSP_dbgBootMs_[2] - BSP_dbgBootMs_[1];
 
     // A fault from a previous life leaves its frame in the cross reset area
     // (bsp/platform/stm32f1xx_it.c). Reported here rather than on the way up:
@@ -112,13 +111,11 @@ void BSP_dbgBootReport(void) {
         }
     }
 
-    SM_TRACE_BEGIN(79U, 6)
-        SM_TRACE_PAYLOAD_BE((uint8_t)((panel >> 8) & 0xFFU))
-        SM_TRACE_PAYLOAD_BE((uint8_t)(panel & 0xFFU))
-        SM_TRACE_PAYLOAD_BE((uint8_t)((asset >> 8) & 0xFFU))
-        SM_TRACE_PAYLOAD_BE((uint8_t)(asset & 0xFFU))
-        SM_TRACE_PAYLOAD_BE((uint8_t)((rest >> 8) & 0xFFU))
-        SM_TRACE_PAYLOAD_BE((uint8_t)(rest & 0xFFU))
+    SM_TRACE_BEGIN(BSP_TRACE_BOOT_TIMING, 4)
+        SM_TRACE_PAYLOAD_BE((uint8_t)((board >> 8) & 0xFFU))
+        SM_TRACE_PAYLOAD_BE((uint8_t)(board & 0xFFU))
+        SM_TRACE_PAYLOAD_BE((uint8_t)((tasks >> 8) & 0xFFU))
+        SM_TRACE_PAYLOAD_BE((uint8_t)(tasks & 0xFFU))
     SM_TRACE_END()
 }
 //............................................................................

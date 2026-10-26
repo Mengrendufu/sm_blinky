@@ -16,16 +16,13 @@
 
 SM_DEFINE_MODULE("sm_ui")
 
-SST_Evt const Sm_Ui_splashTimeoutEvt = {
-    .sig = UI_SPLASH_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
+static SST_Evt const Sm_Ui_stateTimeoutEvt = {
+    .sig = UI_STATE_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
 };
-SST_Evt const Sm_Ui_pageTimeoutEvt = {
-    .sig = UI_PAGE_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
-};
-SST_Evt const Sm_Ui_headerTimeoutEvt = {
+static SST_Evt const Sm_Ui_headerTimeoutEvt = {
     .sig = UI_HEADER_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
 };
-SST_Evt const Sm_Ui_dialTimeoutEvt = {
+static SST_Evt const Sm_Ui_dialTimeoutEvt = {
     .sig = UI_DIAL_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
 };
 
@@ -123,12 +120,19 @@ void Sm_Ui_bindDisplay(Sm_Ui * const me,
     me->display = operations;
 }
 //............................................................................
-void Sm_Ui_bindTimeout(Sm_Ui * const me,
-                       Sm_Ui_TimeoutOperations const *operations) {
+static void Sm_Ui_deliverTimeout_(void *context, void const *evt) {
+    (void)context;
+    Ui_post((SST_Evt const *)evt);
+}
+
+void Sm_Ui_ctor(Sm_Ui * const me) {
+    static TimeEvt_PostOperations const delivery = {
+        .context = NULL, .post = Sm_Ui_deliverTimeout_
+    };
     SM_REQUIRE(me != NULL);
-    SM_REQUIRE(operations != NULL);
-    SM_REQUIRE(operations->arm != NULL && operations->disarm != NULL);
-    me->timeout = operations;
+    TimeEvt_ctor(&me->stateTimeout, &Sm_Ui_stateTimeoutEvt, &delivery);
+    TimeEvt_ctor(&me->headerTimeout, &Sm_Ui_headerTimeoutEvt, &delivery);
+    TimeEvt_ctor(&me->dialTimeout, &Sm_Ui_dialTimeoutEvt, &delivery);
 }
 //............................................................................
 void Sm_Ui_init(Sm_Ui * const me) {
@@ -143,10 +147,8 @@ static SM_StatePtr Sm_Ui_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
 
     SM_REQUIRE(self->display != NULL);
-    SM_REQUIRE(self->timeout != NULL);
     self->ledOn = false;
     self->ledEdges = 0U;
-    self->nvmPublished = 0U;
     UiMetrics_init(&self->metrics);
     UiSurface_init(&self->surface);
     W_Topbar_init(&self->top);
@@ -176,15 +178,18 @@ static SM_RetState Sm_Ui_standby_(void *me, void const *e) {
     }
 }
 
+static void Sm_Ui_post_(SST_Signal sig) {
+    SST_Evt *evt = SST_NEW(SST_Evt);
+    evt->sig = sig;
+    Ui_post(evt);
+}
+
 static void Sm_Ui_readySplash_entry_(SM_Hsm *me) {
-    static SST_Evt const go = {
-        .sig = UI_GO_SPLASHING_SIG, .poolId = 0U, .refCtr = 0U
-    };
     (void)me;
 
     // Automatic startup policy. A future key source can supply this same
     // event instead; entering earlyReadyShow does not re-enter this parent.
-    Ui_post(&go);
+    Sm_Ui_post_(UI_GO_SPLASHING_SIG);
 }
 
 static SM_RetState Sm_Ui_readySplash_(void *me, void const *e) {
@@ -219,13 +224,12 @@ static void Sm_Ui_splashing_entry_(SM_Hsm * const me) SM_HSM_RETT {
     bool const shown = UiSurface_showSplash(&self->surface, Asset_splash());
     Ui_dbgSplashOk_ = shown ? 1U : 0U;
     self->display->requestFrame(self->display->context);
-    self->timeout->arm(self->timeout->context, &Sm_Ui_splashTimeoutEvt,
-                       shown ? UI_SPLASH_TICKS : 1U, 0U);
+    TimeEvt_arm(&self->stateTimeout, shown ? UI_SPLASH_TICKS : 1U, 0U);
 }
 
 static void Sm_Ui_splashing_exit_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
-    self->timeout->disarm(self->timeout->context, &Sm_Ui_splashTimeoutEvt);
+    (void)TimeEvt_disarm(&self->stateTimeout);
 }
 
 static SM_RetState Sm_Ui_splashing_(void * const me,
@@ -234,7 +238,7 @@ static SM_RetState Sm_Ui_splashing_(void * const me,
     SST_Evt const * const evt = e;
 
     switch (evt->sig) {
-        case UI_SPLASH_TIMEOUT_SIG:
+        case UI_STATE_TIMEOUT_SIG:
             return _SM_TRAN(&Sm_Ui_readyShow);
         case BRING_UP_ASSETS_LOADED_SIG:
             return _SM_TRAN(&Sm_Ui_readyShow);
@@ -256,7 +260,7 @@ static SM_RetState Sm_Ui_readyShow_(void *me, void const *e) {
     SST_Evt const * const evt = e;
 
     switch (evt->sig) {
-        case UI_SPLASH_TIMEOUT_SIG:
+        case UI_STATE_TIMEOUT_SIG:
             return _SM_TRAN(&Sm_Ui_active);
         case BRING_UP_ASSETS_LOADED_SIG:
             return _SM_TRAN(&Sm_Ui_active);
@@ -276,13 +280,12 @@ static void Sm_Ui_active_entry_(SM_Hsm *me) {
     W_Topbar_setCpu(&self->top, self->metrics.snapshot.cpuPct);
     W_Topbar_setFps(&self->top,
         self->display->readFps(self->display->context));
-    self->timeout->arm(self->timeout->context, &Sm_Ui_headerTimeoutEvt,
-                       UI_HEADER_TICKS, UI_HEADER_TICKS);
+    TimeEvt_arm(&self->headerTimeout, UI_HEADER_TICKS, UI_HEADER_TICKS);
 }
 
 static void Sm_Ui_active_exit_(SM_Hsm *me) {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
-    self->timeout->disarm(self->timeout->context, &Sm_Ui_headerTimeoutEvt);
+    (void)TimeEvt_disarm(&self->headerTimeout);
     W_Topbar_destroy(&self->top);
 }
 
@@ -302,16 +305,19 @@ static SM_RetState Sm_Ui_active_(void * const me,
             W_Topbar_setCpu(&self->top, self->metrics.snapshot.cpuPct);
             W_Topbar_setFps(&self->top,
                 self->display->readFps(self->display->context));
+            Sm_Ui_post_(UI_REFRESH_SIG);
             return _SM_HANDLED();
         case UI_LED_ON_SIG:
             self->ledOn = true;
             ++self->ledEdges;
             W_Topbar_setLed(&self->top, true);
+            Sm_Ui_post_(UI_REFRESH_SIG);
             return _SM_HANDLED();
         case UI_LED_OFF_SIG:
             self->ledOn = false;
             ++self->ledEdges;
             W_Topbar_setLed(&self->top, false);
+            Sm_Ui_post_(UI_REFRESH_SIG);
             return _SM_HANDLED();
         default:
             return _SM_SUPER();
@@ -326,13 +332,12 @@ static void Sm_Ui_sys_entry_(SM_Hsm * const me) SM_HSM_RETT {
     UiSysPage_create(&self->sys, UiSurface_content(&self->surface));
     UiSysPage_refresh(&self->sys, &self->metrics.snapshot);
     self->display->requestFrame(self->display->context);
-    self->timeout->arm(self->timeout->context, &Sm_Ui_pageTimeoutEvt,
-                       UI_SYS_TICKS, 0U);
+    TimeEvt_arm(&self->stateTimeout, UI_SYS_TICKS, 0U);
 }
 
 static void Sm_Ui_sys_exit_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
-    self->timeout->disarm(self->timeout->context, &Sm_Ui_pageTimeoutEvt);
+    (void)TimeEvt_disarm(&self->stateTimeout);
     UiSysPage_destroy(&self->sys);
 }
 
@@ -342,23 +347,13 @@ static SM_RetState Sm_Ui_sys_(void * const me,
     SST_Evt const * const evt = e;
 
     switch (evt->sig) {
-        case UI_PAGE_TIMEOUT_SIG:
+        case UI_STATE_TIMEOUT_SIG:
             return _SM_TRAN(&Sm_Ui_live);
-        case UI_TIMEOUT_SIG:
+        case UI_REFRESH_SIG:
             UiSysPage_refresh(&self->sys, &self->metrics.snapshot);
             return _SM_HANDLED();
         default:
             return _SM_SUPER();
-    }
-}
-
-// Preserve the cumulative snapshot's restore/add semantics. Persistence is
-// independent of any component's changed/unchanged rendering result.
-static void Sm_Ui_publish_(Sm_Ui *self) {
-    uint32_t const delta = self->ledEdges - self->nvmPublished;
-    if (delta != 0U) {
-        Nvm_addBlinky(delta);
-        self->nvmPublished = self->ledEdges;
     }
 }
 
@@ -370,19 +365,16 @@ static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
     UiLivePage_create(&self->live, UiSurface_content(&self->surface),
         self->metrics.snapshot.ramUsed, self->metrics.snapshot.ramTotal);
     UiLivePage_setLed(&self->live, self->ledOn);
-    Sm_Ui_publish_(self);
     UiLivePage_setCounter(&self->live, Nvm_blinky());
     self->display->requestFrame(self->display->context);
-    self->timeout->arm(self->timeout->context, &Sm_Ui_pageTimeoutEvt,
-                       UI_LIVE_TICKS, 0U);
-    self->timeout->arm(self->timeout->context, &Sm_Ui_dialTimeoutEvt,
-                       UI_DIAL_TICKS, UI_DIAL_TICKS);
+    TimeEvt_arm(&self->stateTimeout, UI_LIVE_TICKS, 0U);
+    TimeEvt_arm(&self->dialTimeout, UI_DIAL_TICKS, UI_DIAL_TICKS);
 }
 
 static void Sm_Ui_live_exit_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
-    self->timeout->disarm(self->timeout->context, &Sm_Ui_dialTimeoutEvt);
-    self->timeout->disarm(self->timeout->context, &Sm_Ui_pageTimeoutEvt);
+    (void)TimeEvt_disarm(&self->dialTimeout);
+    (void)TimeEvt_disarm(&self->stateTimeout);
     UiLivePage_destroy(&self->live);
 }
 
@@ -392,21 +384,15 @@ static SM_RetState Sm_Ui_live_(void * const me,
     SST_Evt const * const evt = e;
 
     switch (evt->sig) {
-        case UI_PAGE_TIMEOUT_SIG:
+        case UI_STATE_TIMEOUT_SIG:
             return _SM_TRAN(&Sm_Ui_sys);
         case UI_DIAL_TIMEOUT_SIG:
             UiLivePage_stepArc(&self->live);
             return _SM_HANDLED();
-        case UI_TIMEOUT_SIG:
-            Sm_Ui_publish_(self);
+        case UI_REFRESH_SIG:
+            UiLivePage_setLed(&self->live, self->ledOn);
             UiLivePage_setCounter(&self->live, Nvm_blinky());
             return _SM_HANDLED();
-        case UI_LED_ON_SIG:
-            UiLivePage_setLed(&self->live, true);
-            return _SM_SUPER(); // Active updates shared model/header once.
-        case UI_LED_OFF_SIG:
-            UiLivePage_setLed(&self->live, false);
-            return _SM_SUPER();
         default:
             return _SM_SUPER();
     }

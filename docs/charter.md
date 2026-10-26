@@ -2,14 +2,18 @@
 
 起草：2026-09-17（HEAD `2cb48c3`）。随增量推进更新；与 `AGENTS.md` 的分工是：`AGENTS.md` 记"现在是什么样、坑在哪"，本文件记"为什么这么走、下一步走到哪、验收看什么"。
 
+当前实现摘要见 §28。其余章节按日期保留演进、实验与验证边界，
+历史中的旧 API、DWT 初始化方案和事件/队列形态不作为当前约定。
+
 ## 1. 阶段目标（可验收的 DoD）
 
 1. 屏上有一个**事件驱动**的状态页：LED 状态、LCD/SRAM 两个探针结果、内存水位。
-2. Blinky 只发事件，一行 LCD 代码都不碰。
+2. Blinky 管理 LED 与业务快照，通过事件通知 UI，不调用 LCD。
 3. UI 线程自有收件箱；AO/ISR 不调用任何 `lv_*`。
-4. 刷屏耗时有记录（`[TIME]`，来自 TIM2）。DWT 的适用边界与
-   2026-10-23 的停计数验证见 §13；脱离调试即停摆的旧判断撤回。
-5. 全静态分配，栈尺寸由 `[MEM][STACK]` 高水位定量；上电到首帧的时间有记录。
+4. 显示适配层提供帧耗时读数；Flash 超时与启动诊断统一使用 HAL tick。
+   §13 保留 DWT 历史实验，当前实现不依赖 DWT。
+5. 全静态分配，栈尺寸由 `[MEM][STACK]` 水位定量；记录 BSP 与任务装配
+   耗时，不将它们解释为上电到首帧时间。
 
 ## 2. 范围
 
@@ -22,14 +26,17 @@
 | 资源 | 谁持有 | 谁可以写 |
 |---|---|---|
 | 屏（FSMC NE4） | `BSP_init()` 一次性 bring-up | 运行期只有 UI 线程 |
-| 板载 SRAM（NE3） | 同上 | 运行期 UI 线程 |
-| SPI flash（SPI2 / W25Q） | 见下面的两种生命周期 | 启动/升级期独占；运行期只有 **flash 线程**（其他线程走它的请求接口） |
+| 板载 SRAM（NE3） | BSP 初始化，Flash 加载资产 | UI 只读已发布图片 |
+| SPI Flash（SPI2） | Bootloader / App Flash AO | 当前生命周期所有者 |
 | tracer | `bsp.c` 构造（`BSP_Tracer_init`），idle 里泵 | 任何线程只投递记录 |
-| 事件 | 各 AO 投 | 唯一入口 `Ui_post*`，不阻塞，满则失败 |
+| UI 事件 | 任务生产者投递 | Ui_post 不阻塞；未绑定或满队列断言 |
 | LVGL | UI 线程 | 只有 UI 线程（`LV_OS_NONE`，没有锁） |
 | 时间 | UI 线程单源 | `lv_tick_set_cb(xTaskGetTickCount)`，不用 `lv_tick_inc` |
 
-### 显示资产的热路径（flash → SRAM）
+### 显示资产的热路径（flash → SRAM，历史设计与测量）
+
+此处保留早期方案与吞吐证据。当前 Flash AO 两阶段 DMA 加载后发布
+只读图片，UI 不执行加载循环；最新所有权与时序见 §28。
 
 图片的冷存储是 SPI flash、热数据在外挂 SRAM。flash 的一端由**独立线程**持有（它不只存图片，还要放升级镜像与配置），SRAM 的一端仍在 UI 线程手里，于是这条链路上有一次**跨线程交接**——按借用语义做：调用者给缓冲、等待期间不碰、flash 线程在窗口内独占写、完成后归还，因此既不需要锁，也不需要双缓冲。两条线程形状同构，各自的理由不同：
 
@@ -353,7 +360,10 @@ SRAM 布局：背景槽只在资产表里存在"图片形态"条目时才占位�
 **四个坑**（详见 AGENTS.md，全部由**故障转存**定位）：`__HAL_LINKDMA`（`Parent` 为 NULL ⇒ 野指针 ⇒ IMPRECISERR）、完成钩子是 `HAL_SPI_RxCpltCallback`（`BUSY_RX` 分支）、完成回调里不许再 arm（分块交调用方）、使能 NVIC 前必须先有向量（否则 `Default_Handler` 死循环、静默停机）。
 
 
-## 13. Flash 接入 SST AO（2026-10-23）
+## 13. Flash 接入 SST AO（2026-10-23，历史方案）
+
+本节同步 NVS/DWT 初始化方案已由调度后 DMA/通知等待替代，见 §28。
+下列实验仅证明当时版本，不表示当前实现仍有这些入口或等待路径。
 
 Flash 使用 SST 自带队列和线程入口，逐事件 RTC 派发。
 事件 handler 内允许 DMA 通知等待和让出式设备 BUSY 轮询。
@@ -882,3 +892,66 @@ UML 能力归属、契约、所有权及验证边界见
 六种真实 LVGL 宿主场景通过 ASan/UBSan；实际项目语法检查通过。
 宿主为 64 位、使用测试专用 64 KB LVGL 池，固件池保持 24 KB。
 本轮未编译或烧录固件，板端资源余量与显示效果尚待验证。
+
+
+### 应用 NVM 静态映射与按项事件保存
+
+NVM 数据布局及 key 1/2 的映射统一收至 application/nvm，薄 IO 按表
+加载和保存。Flash AO 删除 checkpoint 时间事件和内部重 arm，启动
+只恢复应用内容；运行期由应用携带 Nvm_Id 投递 FLASH_NVM_WRITE_SIG。
+Blinky 每 20 个半秒节拍分别请求保存启动次数和 LED 累计值。
+应用通过 Flash_postNvm(sig, id) 分配动态 SST 事件并投递，派发后由
+SST GC 回收；没有逐项静态事件或 pending 标记。队列固定十个槽位，
+事件池仍为十六块，块大小由裸事件扩至 8 B 以容纳 ID。
+物理 key 不再通过 Flash_nvsRead/Write 暴露，裸区 RPC 保持。
+Nvm_writeResult 记录完成结果，NVS 未变化返回 0 也视为成功。
+细节与验证命令见 [nvm-storage.md](nvm-storage.md)。
+
+
+## 28. 当前启动链路与诊断口径（2026-10-26）
+
+BSP 初始化仍在调度前完成 LCD/SRAM/SPI 硬件准备。随后注册 BSP tick、
+UI 收件箱与三个 TimeEvt 节点，初始化 SST 和事件池，再创建 Flash、
+Blinky，最后启动调度器。Flash TOP 只投递初始化事件。
+
+Flash AO 首个事件绑定 DMA 与任务通知等待，加载并逐图校验 Splash；
+随后加载其余资产，在 ready entry 发布资产完成，再挂载、恢复 NVS。
+AST2 每张图独立 CRC，读入 SRAM 最多三次尝试；已发布图保持只读。
+资产完成信号不表示 NVS 已就绪；NVS 初始化失败后的准入仍待整理。
+
+App 资产与 NVS 共用 DMA + 通知等待，芯片 BUSY 使用让出式轮询。
+Bootloader 仍为 DMA + 自旋等待。SPI 超时及诊断统一使用 HAL tick，
+不依赖 DWT，也不要求 J-Link 保留调试计数器使能位。
+
+旧启动阶段记录 79 退休，不重用。main 保留三个打点：BSP 前、BSP 后、
+任务装配后。新记录 94 的 payload 为四字节：
+
+| 字节 | 含义 | 编码 |
+|---|---|---|
+| 0—1 | BSP 初始化耗时，包含 LCD/SRAM/SPI | 大端 uint16，毫秒 |
+| 2—3 | tick/UI/SST/AO 装配耗时 | 大端 uint16，毫秒 |
+
+打点用 HAL_GetTick 无符号差分，记录保存低 16 位，继承原有范围。
+该记录排除资产/NVS、调度器启动及首帧；不再预留零耗时资产字段。
+NVS mount/restore 耗时仍由记录 91 报告。tools/trace_read.py 按帧长度
+输出原始 payload，没有记录 79 的专用解码器；旧日志仍可按原格式读。
+
+UI TOP 进入 standby，收到就绪后才允许 Splash；当前 GO 为自投递。
+背光在 Splash entry 点亮，早于渲染；flush 同步完成后仅通知 LVGL，
+不再决定背光。控件、页面与观测组件归 hsm，显示适配留在 ui_disp。
+BSP timer daemon 的 100 Hz 时基驱动 SST 与 common_c TimeEvt；
+UI 直接 arm/disarm 三个节点。Sys/Live 分别停留 5 s/10 s。
+FreeRTOS tick 独立为 1 kHz，CPU 读数保留窗口口径。
+
+非时间事件均从池分配、投递、派发并 GC；时间事件保持静态。
+小池 4 B × 48，中池 8 B × 16，Sys 分别显示 smin/mmin 水位。
+Blinky 在 ON/OFF entry 更新 NVM RAM 快照，每 10 s 请求按 ID 保存；
+Live 仅读快照显示。实际接口与生命周期见 ui-components.md、
+ui-time-events.md、nvm-storage.md 和 asset-format.md。
+
+本节清理阶段字段与说明，没有新增分阶段资产计时、改动等待策略或
+修复 NVS 失败准入。最新这些改动尚未编译烧录，历史板测不作其验证。
+
+启动计时宿主检查通过：三个打点、记录 94 的四字节编码、
+uint32 tick 回绕及打点容量上限；执行源码提取的实际实现，
+ASan/UBSan 无异常。行宽和 git diff --check 通过。

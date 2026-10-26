@@ -38,7 +38,7 @@ C 结构体为了静态分配而嵌入其他实例，不等于在 UML 的叶子 
 
 | 能力 | 提供的契约 | 代码 |
 |---|---|---|
-| Runtime | 事件入列、静态节点注册、事件/ticks 的 arm/disarm | thread/ui* |
+| Runtime | 事件入列、连接计时投递与收件箱 | thread/ui* |
 | Display Adapter | 请求重绘、背光、完成帧率、显示推进 | thread/ui_disp* |
 | HSM Orchestrator | 初始化、同步消费事件 | sm_ui* |
 | Runtime Observation | 主动采样、只读值快照 | metrics/ui_metrics* |
@@ -47,8 +47,9 @@ C 结构体为了静态分配而嵌入其他实例，不等于在 UML 的叶子 
 | Sys Presentation | 创建/销毁、呈现资源快照 | views/ui_sys_page* |
 | Live Presentation | 创建/销毁、设置开关/计数、推进圆弧 | views/ui_live_page* |
 
-HSM 所需 DisplayOperations、TimeoutOperations 由线程实现并绑定，
-源码依赖指向需求契约。公共 TimeEvt 只借用不透明事件，投递适配端
+HSM 所需 DisplayOperations 由线程实现并绑定；时间事件则直接依赖
+common_c 的 TimeEvt，由 HSM 持有节点并直接 arm/disarm。公共计时
+服务只借用不透明事件，投递适配端
 负责将其恢复为静态 SST_Evt 并入列；不引入 UI 的 SST_Task 身份。
 观测组件借用 BSP、FreeRTOS、AO 句柄、收件箱和池的水位查询能力，
 向 HSM 提供只读快照；不调用显示 API。
@@ -60,17 +61,17 @@ HSM 所需 DisplayOperations、TimeoutOperations 由线程实现并绑定，
 | TOP 初始化 | 初始化观测与显示实例、创建内容底面 | — | — |
 | Splash | 显示已验证图片、arm 展示期限 | 两阶段就绪汇合 | disarm 展示期限 |
 | Active | 创建公共顶部、采样、arm 50 ticks 周期刷新 | 公共刷新及 LED | disarm 刷新、销毁顶部 |
-| Sys | 标题/背景、创建本页、arm 500 ticks | 固定时基刷新快照、页超时跳 Live | disarm、销毁本页控件 |
+| Sys | 标题/背景、创建本页、arm 500 ticks | 数据更新后呈现快照、期限到达跳 Live | disarm、销毁本页控件 |
 | Live | 标题/背景、创建本页、arm 1,000 ticks 及圆弧周期 | 圆弧步进、开关、计数、页超时跳 Sys | disarm、本页销毁 |
 
 100 Hz 时基下，公共顶部 500 ms 更新，圆弧每 3 ticks（30 ms）推进
 两个百分点，在空/满之间循环。每个页面自己消费页面超时，Active
 不查询当前子状态决定跳转。readyShow 保持 Splash 父状态的同一次计时。
 
-Live 的 LED 事件先操作本页开关，再向 Active 委托；Active 更新公共
-模型、边沿计数和顶部 LED，计数只发生一次。Standby/Splash 保留 LED
-模型，但其间不存在顶部控件。NVM 累计值仍在进入 Live 和 Live 的固定
-时基事件中合入，使用原来的恢复基值＋增量机制，不再依赖显示变化结果。
+Active 消费 LED 事件，更新公共模型、边沿计数和顶部 LED，然后
+自投递 UI_REFRESH_SIG。Live 消费已更新的数据，设置本页开关，读取
+NVM 全局快照更新计数。Standby/Splash 保留 LED 模型，其间没有顶部
+控件。Blinky 在 ON/OFF entry 更新 NVM 增量，页面不修改业务快照。
 
 ## 资源与数据显示
 
@@ -79,9 +80,14 @@ Sys/Live 在状态互斥期间独占借用该容器，拥有其中的控件；de
 只清理本页控件，不删除 Surface。顶部使用屏幕父对象，跨切页保留。
 因此没有为了逻辑分组额外引入 LVGL 容器。
 
-观测组件在 Active 的公共刷新事件中采样。Sys 用固定时基呈现最新
-快照，按 revision 过滤重复绘制；不依赖某一拍内不同计时节点的顺序。
+观测组件在 Active 的公共刷新事件中采样，再通过 UI_REFRESH_SIG
+通知页面。Sys 呈现已更新的快照，按 revision 过滤重复绘制。
+Splash 与页面期限共用一个节点，另保留公共刷新和圆弧两个节点；
+取消每 10 ms 唤醒 UI 的固定轮询节点。
 FPS/CPU 和 NVM 标签的重复值过滤分别由其显示组件负责。水位口径保持，
+Sys 资源条共九行：五个任务栈、tracer、UI 收件箱、小池、中池。
+smin/mmin 分别显示各池历史最低剩余块数与总块数，不再合并水位；
+资源条以 18 px 行距排列，最末行 y=286。
 CPU 保持实时窗口口径。圆弧进度与方向属于 Arc Sweep 组件，HSM 只决定
 Live 期间何时推进一步。
 
@@ -92,7 +98,7 @@ Live 期间何时推进一步。
 BSP、RTOS 调度/统计、NOR 资产读取和 LCD flush 的外部作用由桩提供。
 覆盖启动完成顺序、缺图与积压，公共顶部跨切页保留、本页销毁、
 5 s/10 s 切页、圆弧空/满循环及退出后的旧步进事件、LED 委托与计数、
-NVM 增量、水位快照及单独的内部到外部退出动作。
+NVM 快照只读显示、水位快照及单独的内部到外部退出动作。
 
 原生测试为 64 位对象布局，使用测试专用 64 KB LVGL 池；24 KB 的
 宿主配置出现分配失败。固件仍使用原有 24 KB 配置。

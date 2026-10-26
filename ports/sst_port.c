@@ -28,9 +28,14 @@ void SST_init(void) {
 //============================================================================
 void SST_start(void) {
     //........................................................................
-    // StaticEventPool...
-    static STATIC_POOL_ELEM_TYPE(SST_Evt) smallPoolSto[16];
+    // Register small -> medium; the allocator selects the first size fit.
+    // Small budget: UI inbox 32 + AO inbox 8 + 8 dispatch/producer slots.
+    static STATIC_POOL_ELEM_TYPE(SST_Evt) smallPoolSto[48];
     SST_EvtPool_init(smallPoolSto, sizeof(smallPoolSto), sizeof(SST_Evt));
+    // Medium budget: Flash inbox 10 + dispatch/producer + four spare slots.
+    static STATIC_POOL_ELEM_TYPE(uint64_t) mediumPoolSto[16];
+    SST_EvtPool_init(mediumPoolSto, sizeof(mediumPoolSto), sizeof(uint64_t));
+
 }
 //............................................................................
 static void SST_ao_thread(void *arg) {

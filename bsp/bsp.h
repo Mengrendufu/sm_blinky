@@ -43,8 +43,9 @@ void BSP_init(void);
 // (see bsp.c). Records pushed before the first task would be dropped.
 void BSP_Tracer_init(void);
 
-// Boot phase timing: mark at each phase boundary in main(), report once the
-// tracer is up. The marks themselves stay readable in RAM for a debugger.
+// Three main() marks bracket BSP bring-up and task setup; record 94 carries
+// two uint16 big-endian millisecond deltas. Record 79 is retired.
+// Marks remain readable in RAM; assets/NVS and first-frame time are excluded.
 void BSP_dbgBootMark(void);
 void BSP_dbgBootReport(void);
 

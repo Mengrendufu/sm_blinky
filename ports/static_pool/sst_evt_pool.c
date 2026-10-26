@@ -67,6 +67,18 @@ void SST_Evt_gc(void * const evt)
     SST_PORT_CRIT_EXIT();
 }
 
+SST_EvtPoolLevel SST_EvtPool_level(unsigned poolId)
+{
+    SST_PORT_CRIT_ENTRY();
+    DBC_REQUIRE(400, poolId > 0U && poolId <= l_evtPoolsNum);
+    StaticPool const * const pool = &l_evtPools[poolId - 1U];
+    SST_EvtPoolLevel const level = {
+        .min = (unsigned)pool->nMin, .total = (unsigned)pool->nTot
+    };
+    SST_PORT_CRIT_EXIT();
+    return level;
+}
+
 unsigned SST_EvtPool_min(void)
 {
     unsigned min_ = 0U;

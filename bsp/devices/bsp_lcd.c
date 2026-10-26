@@ -301,14 +301,9 @@ void BSP_lcdInit(void) {
 
     BSP_lcdWriteCmd_(LCD_DISPON_CMD);
 
-    // The backlight is not lit here. It belongs to the display layer now
-    // (BSP_lcdBacklight) and goes on once a whole frame is on the frame
-    // memory and proven covered, so the panel's own power-up noise, the
-    // retries above, the coverage sentinel and the strips of the first frame
-    // all happen behind a dark glass: what the user sees first is one
-    // picture, not the drawing of it. The pin itself is initialised above,
-    // idle off (2026-10-12: proving a page's frame on a lit glass put the
-    // sentinel on show as a set of bright lines).
+    // Bring-up retries and GRAM checks finish with backlight off.
+    // The UI HSM enables it on Splash entry, before that page is rendered;
+    // flush completion does not control backlight or prove frame coverage.
     lcd_dbgBootDispOn_ = true;
 
     // One identification read: the "panel is talking" line on the bench.

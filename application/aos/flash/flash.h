@@ -13,8 +13,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "sst.h"
+#include "nvm.h"
 
-#define FLASH_QUEUE_LEN 9U
+#define FLASH_QUEUE_LEN 10U
 
 //============================================================================
 //=== Flash AO -- the owner of the SPI flash at run time
@@ -22,7 +23,7 @@
 // A dedicated SST AO. Events run to completion in FIFO order; DMA waits
 // and device BUSY polling yield the CPU inside the current handler without
 // dispatching another event. Slot 0 wakes SST; slot 1 completes DMA.
-// Checkpoints use a one-shot event rearmed after processing, never a beat.
+// NVM saves run only in response to application-posted item events.
 //
 // SPI2 is one indivisible resource: two contexts on it would interleave
 // command, address and data of different transactions. So every other thread
@@ -32,14 +33,14 @@
 //
 // Buffer: borrowed for the duration of the call. The caller hands the address
 // over, must not touch it until the call returns, and gets it back filled.
-// Nothing is allocated - the request block lives on the caller's stack, which
-// the blocking wait keeps alive, and the completion is a notification on the
+// The event envelope comes from SST; the request stays on the caller's stack,
+// kept alive by the blocking wait. Completion is a notification on the
 // caller's own slot.
 //
 // Call from a task after Flash has entered ready and restored NVS. Ingress
 // is bound only then; a request before binding violates the contract.
 //
-// Up to eight accepted RPCs, including the one executing. Further calls
+// Up to eight accepted raw RPCs, including the one executing. Further calls
 // return false without borrowing the buffer. Callers must not call these
 // synchronous RPCs from the Flash AO itself. Other AOs must account for any
 // events queued on them while their handler waits for this RPC.
@@ -66,10 +67,12 @@ bool Flash_writeBlock(uint32_t address, void const *src, uint32_t len);
 bool Flash_eraseSector(uint32_t address);
 
 //============================================================================
-// NVS requests -- logical uint16_t key IDs, not physical flash addresses.
-// NVS resolves IDs and owns its partition layout. Both calls use the same
-// synchronous RPC completion; len is the value's length in bytes.
-bool Flash_nvsRead(uint16_t id, void *dst, uint32_t len);
-bool Flash_nvsWrite(uint16_t id, void const *src, uint32_t len);
+// Pool-backed NVM event ingress: operation signal + logical item ID.
+// Currently supports FLASH_NVM_WRITE_SIG from sm_flash_evt.h.
+// Nonblocking, task context. False means storage initialization is pending.
+// Every accepted call queues a separate event; no per-item coalescing.
+// Queue/pool capacity must cover pending requests, following SST contracts.
+// Saves sample RAM when handled; Nvm_writeResult reports completed IO.
+bool Flash_postNvm(SST_Signal sig, Nvm_Id id);
 
 #endif // FLASH_H_

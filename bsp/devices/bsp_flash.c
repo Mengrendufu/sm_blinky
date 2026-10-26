@@ -47,8 +47,6 @@ static void BSP_flashSpiInit_(void);
 static uint8_t flashTxStatus_ = 0xFFU;
 static uint8_t flashRxStatus_ = 0xFFU;
 
-static void BSP_flashClock_(void);
-static bool BSP_flashClockReady_(void);
 static bool BSP_flashWaitFlag_(uint32_t flag, bool set);
 static bool BSP_flashTransfer_(uint8_t const *tx, uint8_t *rx, uint32_t len);
 static bool BSP_flashXfer_(uint8_t out, uint8_t *in);
@@ -182,38 +180,18 @@ static void BSP_flashSpiInit_(void) {
     flash_spi_.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
     flash_spi_.Init.CRCPolynomial = 10U; // unused, only kept non-zero
     (void)HAL_SPI_Init(&flash_spi_);
-    BSP_flashClock_();
 }
 //............................................................................
 //============================================================================
 // SHARED PROTOCOL -- used by both operation tables.
 // Shared synchronous SPI path for command/address/status and CPU payloads.
-// Polling needs no interrupts. DWT deadlines also work after pre-scheduler
-// RTOS calls have masked the HAL tick. DMA payloads still use HAL's DMA path.
-static void BSP_flashClock_(void) {
-    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
-}
-
-// Debug tools can change trace/counter control while the CPU is running.
-// A disabled time base is an I/O failure, never an unbounded polling loop.
-static bool BSP_flashClockReady_(void) {
-    return ((CoreDebug->DEMCR & CoreDebug_DEMCR_TRCENA_Msk) != 0U)
-           && ((DWT->CTRL & DWT_CTRL_CYCCNTENA_Msk) != 0U)
-           && ((DWT->CTRL & DWT_CTRL_NOCYCCNT_Msk) == 0U);
-}
-
+// Both App transfers and bootloader burn mode run with TIM1 tick active.
+// These short SPI flag waits use the same HAL timebase in either phase.
 static bool BSP_flashWaitFlag_(uint32_t flag, bool set) {
-    if (!BSP_flashClockReady_()) {
-        return false;
-    }
-
-    uint32_t const started = DWT->CYCCNT;
-    uint32_t const budget = (SystemCoreClock / 1000U) * FLASH_XFER_MS;
+    uint32_t const started = HAL_GetTick();
 
     while (((flash_spi_.Instance->SR & flag) != 0U) != set) {
-        if (!BSP_flashClockReady_()
-            || ((uint32_t)(DWT->CYCCNT - started) >= budget)) {
+        if ((uint32_t)(HAL_GetTick() - started) >= FLASH_XFER_MS) {
             return false;
         }
     }
@@ -340,7 +318,7 @@ static bool BSP_flashEraseSectorStart_(uint32_t address) {
 //............................................................................
 
 //============================================================================
-// POLLING OPERATIONS -- CPU transfers, synchronous completion, no DMA/IRQ.
+// POLLING OPERATIONS -- CPU transfers, inline completion, no DMA IRQ.
 static void BSP_flashReadPoll_(void *device, uint32_t address, void *dst,
                                uint32_t len, BSP_flashDone done,
                                void *context) {

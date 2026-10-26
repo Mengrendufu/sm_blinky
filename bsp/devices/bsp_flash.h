@@ -97,7 +97,7 @@ void BSP_flashBind(BSP_Flash *me, BSP_flashOperations const *operations,
 //============================================================================
 // Unified synchronous API -- all phases use the same object and methods.
 // Returning succeeds only after data transfer AND chip program/erase finish.
-// DMA needs live interrupts; Poll does not. Waiting/yielding is bound policy.
+// HAL tick must advance in both modes. DMA also needs completion IRQs.
 // Writes split at page boundaries; destination must already be erased.
 // Erase addresses are aligned to 4 KB. False reports transfer/device failure.
 // Lost completion is fail-stop: an active DMA must not outlive its buffer.

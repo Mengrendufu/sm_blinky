@@ -21,7 +21,7 @@
 // The publisher selects the highest nonzero subscriber priority.
 #define SST_LOG2(x_) ((uint_fast8_t)(32U - __CLZ((uint32_t)(x_))))
 
-#define SST_EVT_POOL_NUM 1U
+#define SST_EVT_POOL_NUM 2U
 #include "sst_evt_pool.h"
 
 //============================================================================

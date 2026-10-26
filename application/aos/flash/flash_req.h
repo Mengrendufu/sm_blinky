@@ -42,23 +42,11 @@
 // other end. The call is synchronous, so a caller never has two requests in
 // flight and one slot is always enough.
 
-// Both request groups share this envelope and completion protocol. dst is
+// Raw NOR requests share this envelope and completion protocol. dst is
 // the destination for reads and source for writes; erase does not use it.
 // The buffer is borrowed until completion (see Flash_submit_ below).
-typedef enum {
-    // Raw NOR: address is a physical byte address; erase targets one sector.
-    FLASH_OP_READ,
-    FLASH_OP_WRITE,
-    FLASH_OP_ERASE,
-
-    // NVS: address carries a logical uint16_t key ID; len is value bytes.
-    FLASH_OP_NVS_READ,
-    FLASH_OP_NVS_WRITE
-} Flash_Op;
-
 typedef struct {
-    Flash_Op op;
-    uint32_t address;         // raw byte address or NVS key ID, per op
+    uint32_t address;         // physical NOR byte address
     void *dst;
     uint32_t len;
     bool ok;                  // result: written by the flash thread

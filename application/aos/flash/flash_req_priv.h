@@ -19,7 +19,7 @@
 #include "sm_flash_evt.h"
 #include "flash.h"
 
-#define FLASH_REQUEST_CAPACITY (FLASH_QUEUE_LEN - 1U)
+#define FLASH_REQUEST_CAPACITY 8U
 
 // Bind once after the AO queue exists, before any request is submitted.
 void Flash_reqBind(SST_Task *ao);

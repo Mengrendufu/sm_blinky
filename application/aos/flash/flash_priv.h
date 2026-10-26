@@ -21,16 +21,11 @@ void Flash_bindRuntime(void);
 // Ready entry: restore NVS, then expose synchronous RPC ingress.
 void Flash_initStorage(void);
 
-// One-shot checkpoint scheduling and storage actions, selected by the HSM.
-void Flash_armCheckpoint(void);
-void Flash_checkpoint(void);
+// Save one mapped RAM item in response to an application event.
+void Flash_writeNvm(Nvm_Id id);
 
 // Complete a borrowed request and report AO stack usage. No request access
 // is allowed after this call, because its caller may already have resumed.
 void Flash_completeRequest(Flash_Req * const req);
-
-// NVS access used by the HSM's request handlers, never by external clients.
-bool Flash_kvRead(uint16_t id, void *dst, uint32_t len);
-bool Flash_kvWrite(uint16_t id, void const *src, uint32_t len);
 
 #endif // FLASH_PRIV_H_

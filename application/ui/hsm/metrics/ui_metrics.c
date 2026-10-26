@@ -80,9 +80,12 @@ void UiMetrics_sample(UiMetrics *me) {
         .free = Ui_evtInboxMinFree(), .total = Ui_evtInboxLen(),
         .available = true
     };
-    me->snapshot.rows[7] = (UiResourceLevel){
-        .free = SST_EvtPool_min(), .total = SST_EvtPool_total(),
-        .available = true
-    };
+    // Registered in ascending size order: small pool 1, medium pool 2.
+    for (unsigned i = 0U; i < 2U; ++i) {
+        SST_EvtPoolLevel const level = SST_EvtPool_level(i + 1U);
+        me->snapshot.rows[7U + i] = (UiResourceLevel){
+            .free = level.min, .total = level.total, .available = true
+        };
+    }
     ++me->snapshot.revision;
 }

@@ -36,12 +36,10 @@ int main(void) {
     // still holds its sentinel, and interrupts stay masked from there until
     // the scheduler takes over (that used to freeze HAL_GetTick() mid
     // bring-up, which would hang the panel's own retry delay). The boot facts
-    // are kept and reported once a task runs - see Blinky_init.
+    // are reported from the Flash AO first bring-up event.
     BSP_init();
 
     BSP_dbgBootMark();   // 1: panel out of sleep, SRAM and SPI flash ready
-    BSP_dbgBootMark();   // 2: retired pre-scheduler asset interval
-
 
     // Flash AO loads assets after scheduling; UI waits on readiness events.
     Application_tickStart();
@@ -54,7 +52,7 @@ int main(void) {
     SST_start(); // Initialize event pools before AO entry actions allocate.
     AO_start();
 
-    BSP_dbgBootMark();   // 3: everything is created, the scheduler is next
+    BSP_dbgBootMark();   // 2: task setup is complete; start the scheduler
 
     vTaskStartScheduler();
 

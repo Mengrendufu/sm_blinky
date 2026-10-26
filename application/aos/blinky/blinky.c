@@ -18,6 +18,8 @@
 #include "ui_evt.h"
 #include "sm_ui_evt.h"
 #include "flash.h"
+#include "nvm.h"
+#include "sm_flash_evt.h"
 
 // Class =====================================================================
 typedef struct Blinky {
@@ -75,8 +77,10 @@ static StackType_t  Blinky_stack[BLINKY_STACK_WORDS];
 // learns is reported from the first task (Application_dbgBootReport), and the
 // hardware probes went with it (see AGENTS.md).
 #define BLINKY_MEM_BEATS  8U
+#define BLINKY_SAVE_BEATS 20U // 20 half-second beats = 10 s
 
 static uint16_t blinky_beats;
+static uint8_t blinky_saveBeats_;
 
 
 // Class implementation ======================================================
@@ -118,6 +122,7 @@ static SM_StatePtr Blinky_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT {
 static void Blinky_on_entry_(SM_Hsm * const me) SM_HSM_RETT {
     (void)me;
     BSP_ledOn();
+    Nvm_addBlinky(1U);
     SST_Evt *evt = SST_NEW(SST_Evt);
     evt->sig = UI_LED_ON_SIG;
     Ui_post(evt);
@@ -138,6 +143,7 @@ static SM_RetState Blinky_on_(Blinky * const me,
 static void Blinky_off_entry_(SM_Hsm * const me) SM_HSM_RETT {
     (void)me;
     BSP_ledOff();
+    Nvm_addBlinky(1U);
     SST_Evt *evt = SST_NEW(SST_Evt);
     evt->sig = UI_LED_OFF_SIG;
     Ui_post(evt);
@@ -161,6 +167,13 @@ static void Blinky_maintenance_(void) {
 
     if ((beat % BLINKY_MEM_BEATS) == 0U) {
         BSP_dbgMemReport(BSP_TRACE_STACK_BLINKY);
+    }
+    if (++blinky_saveBeats_ == BLINKY_SAVE_BEATS) {
+        blinky_saveBeats_ = 0U;
+        // If initialization is still running, retry at the next 10 s beat.
+        // The AO samples each item when its dynamic event is handled.
+        (void)Flash_postNvm(FLASH_NVM_WRITE_SIG, NVM_BOOT_COUNT);
+        (void)Flash_postNvm(FLASH_NVM_WRITE_SIG, NVM_BLINKY_EDGES);
     }
 
 }

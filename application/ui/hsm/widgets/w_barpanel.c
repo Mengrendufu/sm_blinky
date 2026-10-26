@@ -39,7 +39,7 @@ void W_BarPanel_create(struct W_BarPanel *p, struct _lv_obj_t *parent,
         // redraw the arc suffers from - see w_ring.c). Nothing here may
         // overlap anything else, and the names are kept short for that
         // reason.
-        lv_coord_t const y = (lv_coord_t)(142 + (int32_t)i * 20);
+        lv_coord_t const y = (lv_coord_t)(142 + (int32_t)i * 18);
         lv_obj_t *bar = lv_bar_create((lv_obj_t *)parent);
         char const * const name = (names[i] != (char const *)0) ? names[i]
                                                                : "-";
@@ -81,7 +81,7 @@ void W_BarPanel_create(struct W_BarPanel *p, struct _lv_obj_t *parent,
     }
 }
 //............................................................................
-// No LV_ANIM_ON here: eight animating bars would repaint eight times a frame
+// No LV_ANIM_ON here: animating bars would repaint every row each frame
 // for the length of every transition, which is the one thing this page cannot
 // afford. A direct write redraws only the rows that moved.
 void W_BarPanel_setWords(struct W_BarPanel *p, unsigned row, unsigned pct,

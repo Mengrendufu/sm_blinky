@@ -53,12 +53,11 @@ void Sm_Flash_dispatch(SST_Task * const me, SST_Evt const * const e) {
 //............................................................................
 // TOP queues work only; its initial path runs before the scheduler.
 static SM_StatePtr Sm_Flash_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT {
-    static SST_Evt const start = {
-        .sig = LOADING_SPLASH_ASSETS_SIG, .poolId = 0U, .refCtr = 0U
-    };
+    SST_Evt *start = SST_NEW(SST_Evt);
+    start->sig = LOADING_SPLASH_ASSETS_SIG;
     Sm_Flash * const self = container_of(me, Sm_Flash, sm_hsm_);
 
-    SST_Task_post(&self->super, &start);
+    SST_Task_post(&self->super, start);
     return _SM_INIT(&Sm_Flash_bringUpStageOne);
 }
 
@@ -76,19 +75,24 @@ static SM_RetState Sm_Flash_bringUpStageOne_(void *me, void const *e) {
     }
 }
 
+// Each delivery owns its event; publish may recycle before it returns.
+static void Sm_Flash_notify_(SST_Signal sig) {
+    SST_Evt *evt = SST_NEW(SST_Evt);
+    evt->sig = sig;
+    SST_publish(evt);
+
+    evt = SST_NEW(SST_Evt);
+    evt->sig = sig;
+    Ui_post(evt);
+}
+
 static void Sm_Flash_bringUpStageTwo_entry_(SM_Hsm *me) {
-    static SST_Evt const load = {
-        .sig = LOADING_ASSETS_SIG, .poolId = 0U, .refCtr = 0U
-    };
-    static SST_Evt const ready = {
-        .sig = BRING_UP_READY_SIG, .poolId = 0U, .refCtr = 0U
-    };
+    SST_Evt *load = SST_NEW(SST_Evt);
+    load->sig = LOADING_ASSETS_SIG;
     Sm_Flash * const self = container_of(me, Sm_Flash, sm_hsm_);
 
-    SST_Task_post(&self->super, &load);
-    SST_publish(&ready);
-    // UI is a plain task, so it needs a separate directed notification.
-    Ui_post(&ready);
+    SST_Task_post(&self->super, load);
+    Sm_Flash_notify_(BRING_UP_READY_SIG);
 }
 
 static SM_RetState Sm_Flash_bringUpStageTwo_(void *me, void const *e) {
@@ -105,16 +109,17 @@ static SM_RetState Sm_Flash_bringUpStageTwo_(void *me, void const *e) {
 }
 
 static void Sm_Flash_ready_entry_(SM_Hsm *me) {
-    static SST_Evt const loaded = {
-        .sig = BRING_UP_ASSETS_LOADED_SIG, .poolId = 0U, .refCtr = 0U
-    };
     (void)me;
 
     // Assets are complete; NVS restoration follows, as in the model.
-    SST_publish(&loaded);
-    Ui_post(&loaded);
+    Sm_Flash_notify_(BRING_UP_ASSETS_LOADED_SIG);
     Flash_initStorage();
-    Flash_armCheckpoint();
+}
+
+// Complete once; notifying the caller ends this handler's request borrow.
+static void Sm_Flash_complete_(Flash_Req *req, bool ok) {
+    req->ok = ok;
+    Flash_completeRequest(req);
 }
 
 // State-Flash_ready
@@ -125,50 +130,28 @@ static SM_RetState Sm_Flash_ready_(void * const me,
     (void)me;
 
     switch (evt->sig) {
-        case FLASH_REQ_SIG: {
+        // Raw NOR: physical byte addresses.
+        case FLASH_READ_SIG: {
             Flash_Req * const req = SST_EVT_DOWNCAST(Flash_Evt, evt)->req;
-
-            req->ok = false;
-
-            switch (req->op) {
-                // Raw NOR: use the physical byte address directly.
-                case FLASH_OP_READ: {
-                    req->ok = BSP_flashRead(BSP_flashDevice(),
-                        req->address, req->dst, req->len);
-                    break;
-                }
-                case FLASH_OP_WRITE: {
-                    req->ok = BSP_flashWrite(BSP_flashDevice(),
-                        req->address, req->dst, req->len);
-                    break;
-                }
-                case FLASH_OP_ERASE: {
-                    req->ok = BSP_flashEraseSector(
-                        BSP_flashDevice(), req->address);
-                    break;
-                }
-
-                // NVS: address carries a key ID, resolved by the store.
-                case FLASH_OP_NVS_READ: {
-                    req->ok = Flash_kvRead((uint16_t)req->address, req->dst,
-                                           req->len);
-                    break;
-                }
-                case FLASH_OP_NVS_WRITE: {
-                    req->ok = Flash_kvWrite((uint16_t)req->address, req->dst,
-                                            req->len);
-                    break;
-                }
-                default: {
-                    break;
-                }
-            }
-            Flash_completeRequest(req);
+            Sm_Flash_complete_(req, BSP_flashRead(BSP_flashDevice(),
+                req->address, req->dst, req->len));
             return _SM_HANDLED();
         }
-        case FLASH_CHECKPOINT_SIG: {
-            Flash_checkpoint();
-            Flash_armCheckpoint();
+        case FLASH_WRITE_SIG: {
+            Flash_Req * const req = SST_EVT_DOWNCAST(Flash_Evt, evt)->req;
+            Sm_Flash_complete_(req, BSP_flashWrite(BSP_flashDevice(),
+                req->address, req->dst, req->len));
+            return _SM_HANDLED();
+        }
+        case FLASH_ERASE_SIG: {
+            Flash_Req * const req = SST_EVT_DOWNCAST(Flash_Evt, evt)->req;
+            Sm_Flash_complete_(req, BSP_flashEraseSector(
+                BSP_flashDevice(), req->address));
+            return _SM_HANDLED();
+        }
+        case FLASH_NVM_WRITE_SIG: {
+            Nvm_Id const id = SST_EVT_DOWNCAST(Flash_NvmEvt, evt)->id;
+            Flash_writeNvm(id);
             return _SM_HANDLED();
         }
         default: {

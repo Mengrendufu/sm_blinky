@@ -85,8 +85,8 @@ void BSP_lcdBind(BSP_Lcd *me, BSP_lcdOperations const *operations,
 bool BSP_lcdWriteArea(BSP_Lcd *me, uint16_t xs, uint16_t ys, uint16_t xe,
                       uint16_t ye, uint16_t const *pixels);
 
-// Same owner/idle contract as area writes. UI enables backlight after its
-// first complete frame. Polarity keep-alive timing belongs to the adapter.
+// Same owner/idle contract as area writes. The HSM enables backlight on
+// Splash entry, before rendering. Polarity timing belongs to the adapter.
 void BSP_lcdBacklight(BSP_Lcd *me, bool on);
 void BSP_lcdReassert(BSP_Lcd *me);
 

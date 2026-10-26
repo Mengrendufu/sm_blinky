@@ -12,10 +12,10 @@
 #include "lvgl.h"
 
 static char const * const UiSysPage_names_[UI_METRIC_ROWS] = {
-    "ui", "Flsh", "Blky", "tmr", "idle", "nmin", "imin", "smin"
+    "ui", "Flsh", "Blky", "tmr", "idle", "nmin", "imin", "smin", "mmin"
 };
 static char const * const UiSysPage_units_[UI_METRIC_ROWS] = {
-    "w", "w", "w", "w", "w", "-", "-", "-"
+    "w", "w", "w", "w", "w", "-", "-", "-", "-"
 };
 
 _Static_assert(UI_METRIC_ROWS == W_BARPANEL_ROWS,

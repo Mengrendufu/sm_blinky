@@ -1,6 +1,6 @@
 #pragma once
 #include "task.h"
-#define SST_EVT_POOL_NUM 1U
+#define SST_EVT_POOL_NUM 2U
 #define SST_MAX_TASK 8U
 #define SST_LOG2(x) ((uint_fast8_t)(32U-__builtin_clz((unsigned)(x))))
 typedef uint16_t SST_TaskPrio;
