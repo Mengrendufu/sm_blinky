@@ -47,23 +47,22 @@ void UiSurface_init(UiSurface *me) {
     lv_obj_set_style_bg_opa(me->root, LV_OPA_COVER, 0);
 }
 
-static void UiSurface_show_(UiSurface *me, lv_image_dsc_t *descriptor,
-                             void const *pixels) {
+static void UiSurface_show_(UiSurface *me, void const *pixels) {
     SM_REQUIRE(lv_obj_get_child_count(me->root) == 0U);
     lv_obj_set_style_bg_image_src(me->root, NULL, 0);
     if (pixels != NULL) {
-        UiSurface_describe_(descriptor, pixels);
-        lv_obj_set_style_bg_image_src(me->root, descriptor, 0);
+        UiSurface_describe_(&me->background, pixels);
+        lv_obj_set_style_bg_image_src(me->root, &me->background, 0);
     }
 }
 
 bool UiSurface_showSplash(UiSurface *me, void const *pixels) {
-    UiSurface_show_(me, &me->splash, pixels);
+    UiSurface_show_(me, pixels);
     return pixels != NULL;
 }
 
 void UiSurface_showPage(UiSurface *me, void const *pixels) {
-    UiSurface_show_(me, &me->background, pixels);
+    UiSurface_show_(me, pixels);
 }
 
 struct _lv_obj_t *UiSurface_content(UiSurface *me) {

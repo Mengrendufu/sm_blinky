@@ -31,8 +31,3 @@ void WidgetIO_setMs(struct _lv_obj_t *label, uint32_t us) {
 }
 //............................................................................
 //............................................................................
-uint32_t WidgetIO_pct(uint32_t used, uint32_t total) {
-    uint32_t const pct = (total == 0U) ? 0U : ((used * 100U) / total);
-
-    return (pct > 100U) ? 100U : pct;
-}

@@ -16,6 +16,18 @@
 
 SM_DEFINE_MODULE("sm_ui")
 
+static char const * const Sm_Ui_resourceNames_[UI_METRIC_ROWS] = {
+    "ui", "Flsh", "Blky", "tmr", "idle", "nmin", "imin", "smin", "mmin"
+};
+static char const * const Sm_Ui_resourceUnits_[UI_METRIC_ROWS] = {
+    "w", "w", "w", "w", "w", "-", "-", "-", "-"
+};
+_Static_assert(UI_METRIC_ROWS == W_BARPANEL_ROWS,
+               "resource snapshot and panel rows disagree");
+
+static void Sm_Ui_refreshResources_(Sm_Ui *self);
+static void Sm_Ui_stepDial_(Sm_Ui *self);
+
 static SST_Evt const Sm_Ui_stateTimeoutEvt = {
     .sig = UI_STATE_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
 };
@@ -152,8 +164,13 @@ static SM_StatePtr Sm_Ui_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT {
     UiMetrics_init(&self->metrics);
     UiSurface_init(&self->surface);
     W_Topbar_init(&self->top);
-    UiSysPage_init(&self->sys);
-    UiLivePage_init(&self->live);
+    W_Gauge_init(&self->gauge);
+    W_BarPanel_init(&self->panel);
+    W_Dots_init(&self->dots);
+    W_Dial_init(&self->dial);
+    W_Switch_init(&self->sw);
+    W_Nvm_init(&self->nvm);
+    W_Ram_init(&self->ram);
     return _SM_INIT(&Sm_Ui_standby);
 }
 //............................................................................
@@ -329,8 +346,13 @@ static void Sm_Ui_sys_entry_(SM_Hsm * const me) SM_HSM_RETT {
 
     UiSurface_showPage(&self->surface, Asset_slot(Asset_get(), 0U));
     W_Topbar_setTitle(&self->top, "sys");
-    UiSysPage_create(&self->sys, UiSurface_content(&self->surface));
-    UiSysPage_refresh(&self->sys, &self->metrics.snapshot);
+    struct _lv_obj_t *parent = UiSurface_content(&self->surface);
+    W_Gauge_create(&self->gauge, parent);
+    W_BarPanel_create(&self->panel, parent, Sm_Ui_resourceNames_,
+                      Sm_Ui_resourceUnits_);
+    W_Dots_create(&self->dots, parent, 0U);
+    self->sysShown = false;
+    Sm_Ui_refreshResources_(self);
     self->display->requestFrame(self->display->context);
     TimeEvt_arm(&self->stateTimeout, UI_SYS_TICKS, 0U);
 }
@@ -338,7 +360,9 @@ static void Sm_Ui_sys_entry_(SM_Hsm * const me) SM_HSM_RETT {
 static void Sm_Ui_sys_exit_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
     (void)TimeEvt_disarm(&self->stateTimeout);
-    UiSysPage_destroy(&self->sys);
+    W_Dots_destroy(&self->dots);
+    W_BarPanel_destroy(&self->panel);
+    W_Gauge_destroy(&self->gauge);
 }
 
 static SM_RetState Sm_Ui_sys_(void * const me,
@@ -350,7 +374,7 @@ static SM_RetState Sm_Ui_sys_(void * const me,
         case UI_STATE_TIMEOUT_SIG:
             return _SM_TRAN(&Sm_Ui_live);
         case UI_REFRESH_SIG:
-            UiSysPage_refresh(&self->sys, &self->metrics.snapshot);
+            Sm_Ui_refreshResources_(self);
             return _SM_HANDLED();
         default:
             return _SM_SUPER();
@@ -362,10 +386,18 @@ static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
 
     UiSurface_showPage(&self->surface, Asset_slot(Asset_get(), 1U));
     W_Topbar_setTitle(&self->top, "live");
-    UiLivePage_create(&self->live, UiSurface_content(&self->surface),
-        self->metrics.snapshot.ramUsed, self->metrics.snapshot.ramTotal);
-    UiLivePage_setLed(&self->live, self->ledOn);
-    UiLivePage_setCounter(&self->live, Nvm_blinky());
+    struct _lv_obj_t *parent = UiSurface_content(&self->surface);
+    W_Dial_create(&self->dial, parent, 92, 40, 96);
+    W_Switch_create(&self->sw, parent, 12, 74);
+    W_Nvm_create(&self->nvm, parent, 12, 181);
+    W_Ram_create(&self->ram, parent);
+    W_Dots_create(&self->dots, parent, 1U);
+    self->dialValue = 0U;
+    self->dialRising = true;
+    W_Ram_set(&self->ram, self->metrics.snapshot.ramUsed,
+               self->metrics.snapshot.ramTotal);
+    W_Switch_set(&self->sw, self->ledOn);
+    W_Nvm_set(&self->nvm, Nvm_blinky());
     self->display->requestFrame(self->display->context);
     TimeEvt_arm(&self->stateTimeout, UI_LIVE_TICKS, 0U);
     TimeEvt_arm(&self->dialTimeout, UI_DIAL_TICKS, UI_DIAL_TICKS);
@@ -375,7 +407,11 @@ static void Sm_Ui_live_exit_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
     (void)TimeEvt_disarm(&self->dialTimeout);
     (void)TimeEvt_disarm(&self->stateTimeout);
-    UiLivePage_destroy(&self->live);
+    W_Dots_destroy(&self->dots);
+    W_Ram_destroy(&self->ram);
+    W_Nvm_destroy(&self->nvm);
+    W_Switch_destroy(&self->sw);
+    W_Dial_destroy(&self->dial);
 }
 
 static SM_RetState Sm_Ui_live_(void * const me,
@@ -387,13 +423,55 @@ static SM_RetState Sm_Ui_live_(void * const me,
         case UI_STATE_TIMEOUT_SIG:
             return _SM_TRAN(&Sm_Ui_sys);
         case UI_DIAL_TIMEOUT_SIG:
-            UiLivePage_stepArc(&self->live);
+            Sm_Ui_stepDial_(self);
             return _SM_HANDLED();
         case UI_REFRESH_SIG:
-            UiLivePage_setLed(&self->live, self->ledOn);
-            UiLivePage_setCounter(&self->live, Nvm_blinky());
+            W_Switch_set(&self->sw, self->ledOn);
+            W_Nvm_set(&self->nvm, Nvm_blinky());
             return _SM_HANDLED();
         default:
             return _SM_SUPER();
     }
+}
+
+// State actions coordinate passive components; no separate page object.
+static void Sm_Ui_refreshResources_(Sm_Ui *self) {
+    UiMetricsSnapshot const *snapshot = &self->metrics.snapshot;
+    if (self->sysShown && self->sysRevision == snapshot->revision) {
+        return;
+    }
+    W_Gauge_setValue(&self->gauge, snapshot->cpuPct);
+    for (unsigned row = 0U; row < UI_METRIC_ROWS; ++row) {
+        UiResourceLevel const *level = &snapshot->rows[row];
+        if (!level->available) {
+            continue;
+        }
+        unsigned const pct = level->total == 0U ? 0U
+            : (unsigned)((level->free * 100U) / level->total);
+        unsigned const bounded = pct > 100U ? 100U : pct;
+        if (row < UI_METRIC_TASK_ROWS) {
+            W_BarPanel_setWords(&self->panel, row, bounded, level->free);
+        } else {
+            W_BarPanel_setPair(&self->panel, row, bounded, level->free,
+                               level->total);
+        }
+    }
+    self->sysRevision = snapshot->revision;
+    self->sysShown = true;
+}
+
+static void Sm_Ui_stepDial_(Sm_Ui *self) {
+    if (self->dialRising) {
+        self->dialValue += 2U;
+        if (self->dialValue >= 100U) {
+            self->dialValue = 100U;
+            self->dialRising = false;
+        }
+    } else {
+        self->dialValue = self->dialValue > 2U ? self->dialValue - 2U : 0U;
+        if (self->dialValue == 0U) {
+            self->dialRising = true;
+        }
+    }
+    W_Dial_setValue(&self->dial, self->dialValue);
 }

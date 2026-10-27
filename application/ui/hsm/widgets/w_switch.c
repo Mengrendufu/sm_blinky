@@ -37,3 +37,8 @@ void W_Switch_set(struct W_Switch *w, bool on) {
         lv_obj_remove_state((lv_obj_t *)w->sw, LV_STATE_CHECKED);
     }
 }
+
+void W_Switch_destroy(struct W_Switch *me) {
+    lv_obj_delete((lv_obj_t *)me->sw);
+    W_Switch_init(me);
+}

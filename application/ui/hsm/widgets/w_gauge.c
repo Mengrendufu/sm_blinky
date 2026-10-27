@@ -71,3 +71,10 @@ void W_Gauge_setValue(struct W_Gauge *g, unsigned pct) {
     band.y2 = (lv_coord_t)((box.y1 + box.y2) / 2);
     lv_obj_invalidate_area(lv_screen_active(), &band);
 }
+
+void W_Gauge_destroy(struct W_Gauge *me) {
+    lv_obj_delete((lv_obj_t *)me->arc);
+    lv_obj_delete((lv_obj_t *)me->num);
+    lv_obj_delete((lv_obj_t *)me->unit);
+    W_Gauge_init(me);
+}

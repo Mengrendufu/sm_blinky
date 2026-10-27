@@ -21,6 +21,8 @@ struct W_Switch {
     struct _lv_obj_t *sw;
 };
 
+// Lifecycle is owned by the HSM; destroy only this component's objects.
+void W_Switch_destroy(struct W_Switch *me);
 void W_Switch_init(struct W_Switch *w);
 void W_Switch_create(struct W_Switch *w, struct _lv_obj_t *parent,
                      int32_t x, int32_t y);

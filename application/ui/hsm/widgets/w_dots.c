@@ -34,3 +34,15 @@ void W_Dots_create(struct W_Dots *w, struct _lv_obj_t *parent,
         w->dot[i] = (struct _lv_obj_t *)dot;
     }
 }
+
+void W_Dots_init(struct W_Dots *me) {
+    me->dot[0] = NULL;
+    me->dot[1] = NULL;
+}
+
+void W_Dots_destroy(struct W_Dots *me) {
+    for (unsigned i = 0U; i < 2U; ++i) {
+        lv_obj_delete((lv_obj_t *)me->dot[i]);
+    }
+    W_Dots_init(me);
+}

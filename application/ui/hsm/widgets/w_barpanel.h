@@ -28,6 +28,7 @@ struct W_BarPanel {
 };
 
 void W_BarPanel_init(struct W_BarPanel *p);
+void W_BarPanel_destroy(struct W_BarPanel *me);
 void W_BarPanel_create(struct W_BarPanel *p, struct _lv_obj_t *parent,
                        char const *const *names,
                        char const *const *units);

@@ -98,3 +98,13 @@ void W_BarPanel_setPair(struct W_BarPanel *p, unsigned row, unsigned pct,
     lv_label_set_text_fmt((lv_obj_t *)p->pct[row], "%u%%", pct);
     lv_label_set_text_fmt((lv_obj_t *)p->val[row], "%u/%u", used, total);
 }
+
+void W_BarPanel_destroy(struct W_BarPanel *me) {
+    for (unsigned i = 0U; i < W_BARPANEL_ROWS; ++i) {
+        lv_obj_delete((lv_obj_t *)me->name[i]);
+        lv_obj_delete((lv_obj_t *)me->bar[i]);
+        lv_obj_delete((lv_obj_t *)me->pct[i]);
+        lv_obj_delete((lv_obj_t *)me->val[i]);
+    }
+    W_BarPanel_init(me);
+}

@@ -21,6 +21,8 @@ struct W_Ram {
     struct _lv_obj_t *lineB;   // "free 6.1 KB"
 };
 
+// Lifecycle is owned by the HSM; destroy only this component's objects.
+void W_Ram_destroy(struct W_Ram *me);
 void W_Ram_init(struct W_Ram *r);
 void W_Ram_create(struct W_Ram *r, struct _lv_obj_t *parent);
 void W_Ram_set(struct W_Ram *r, uint32_t usedBytes, uint32_t totalBytes);

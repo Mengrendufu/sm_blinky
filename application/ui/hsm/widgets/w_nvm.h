@@ -14,16 +14,16 @@
 
 struct _lv_obj_t;
 
-// The one readout that comes out of the NOR by itself: a counter that keeps
-// counting across a power cycle. The label is as wide as the value can get
-// (twenty one characters at the default font is 163 px) and clips rather than
-// wraps, so it can never push the row below it around.
+// Passive counter label. The HSM supplies the RAM snapshot value;
+// this component never accesses persistent storage.
 struct W_Nvm {
     struct _lv_obj_t *label;
     uint32_t shown;
     bool valid;
 };
 
+// Lifecycle is owned by the HSM; destroy only this component's objects.
+void W_Nvm_destroy(struct W_Nvm *me);
 void W_Nvm_init(struct W_Nvm *w);
 void W_Nvm_create(struct W_Nvm *w, struct _lv_obj_t *parent,
                   int32_t x, int32_t y);

@@ -18,7 +18,6 @@ struct _lv_obj_t;
 struct _lv_obj_t *WidgetIO_label(struct _lv_obj_t *parent, char const *text,
                                  uint32_t colour);
 void WidgetIO_setMs(struct _lv_obj_t *label, uint32_t us);
-uint32_t WidgetIO_pct(uint32_t used, uint32_t total);
 // The LVGL pool's used percentage. It lives here because it is an lv_* call,
 // and the state machine that wants the number does not include lvgl.h.
 

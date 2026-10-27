@@ -20,6 +20,8 @@ struct W_Gauge {
     struct _lv_obj_t *unit;
 };
 
+// Lifecycle is owned by the HSM; destroy only this component's objects.
+void W_Gauge_destroy(struct W_Gauge *me);
 void W_Gauge_init(struct W_Gauge *g);
 void W_Gauge_create(struct W_Gauge *g, struct _lv_obj_t *parent);
 void W_Gauge_setValue(struct W_Gauge *g, unsigned pct);

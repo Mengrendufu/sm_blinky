@@ -42,3 +42,9 @@ void W_Ram_set(struct W_Ram *r, uint32_t usedBytes, uint32_t totalBytes) {
                           (unsigned)(freeTenths / 10U),
                           (unsigned)(freeTenths % 10U));
 }
+
+void W_Ram_destroy(struct W_Ram *me) {
+    lv_obj_delete((lv_obj_t *)me->lineA);
+    lv_obj_delete((lv_obj_t *)me->lineB);
+    W_Ram_init(me);
+}

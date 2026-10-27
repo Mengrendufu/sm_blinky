@@ -39,3 +39,8 @@ void W_Nvm_set(struct W_Nvm *w, uint32_t value) {
     lv_label_set_text_fmt((lv_obj_t *)w->label, "NVM_Blinky %u",
                           (unsigned)value);
 }
+
+void W_Nvm_destroy(struct W_Nvm *me) {
+    lv_obj_delete((lv_obj_t *)me->label);
+    W_Nvm_init(me);
+}

@@ -18,6 +18,8 @@ struct W_Dots {
     struct _lv_obj_t *dot[2];
 };
 
+void W_Dots_init(struct W_Dots *me);
+void W_Dots_destroy(struct W_Dots *me);
 void W_Dots_create(struct W_Dots *w, struct _lv_obj_t *parent,
                    unsigned active);
 

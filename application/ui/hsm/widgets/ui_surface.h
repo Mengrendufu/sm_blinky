@@ -13,13 +13,12 @@
 #include "lvgl.h"
 #include <stdbool.h>
 
-// Background-surface component. Owns the content root and image descriptors;
+// Owns the content root and one descriptor for the current background;
 // borrows verified RGB565 pixels for the lifetime of their presentation.
 // Destroy the current page presentation before changing its background.
 typedef struct {
     lv_obj_t *root;
     lv_image_dsc_t background;
-    lv_image_dsc_t splash;
 } UiSurface;
 
 void UiSurface_init(UiSurface *me);

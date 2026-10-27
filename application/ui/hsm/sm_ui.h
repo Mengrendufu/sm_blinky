@@ -13,9 +13,14 @@
 #include "sm_hsm.h"
 #include "time_evt.h"
 #include "sm_ui_evt.h"
-#include "views/ui_surface.h"
-#include "views/ui_sys_page.h"
-#include "views/ui_live_page.h"
+#include "widgets/ui_surface.h"
+#include "widgets/w_gauge.h"
+#include "widgets/w_barpanel.h"
+#include "widgets/w_dial.h"
+#include "widgets/w_switch.h"
+#include "widgets/w_nvm.h"
+#include "widgets/w_ram.h"
+#include "widgets/w_dots.h"
 #include "widgets/w_topbar.h"
 #include "metrics/ui_metrics.h"
 
@@ -60,13 +65,21 @@ typedef struct {
     bool ledOn;
     uint32_t ledEdges;
 
-    // UI subsystem storage: HSM coordinates these independent capabilities.
-    // Physical embedding is not UML containment within a leaf Component.
+    // Passive display components, directly owned by this HSM.
     UiSurface surface;
     struct W_Topbar top;
-    UiSysPage sys;
-    UiLivePage live;
+    struct W_Gauge gauge;
+    struct W_BarPanel panel;
+    struct W_Dots dots;
+    struct W_Dial dial;
+    struct W_Switch sw;
+    struct W_Nvm nvm;
+    struct W_Ram ram;
     UiMetrics metrics;
+    bool sysShown;
+    uint32_t sysRevision;
+    unsigned dialValue;
+    bool dialRising;
 } Sm_Ui;
 
 void Sm_Ui_bindDisplay(Sm_Ui * const me,

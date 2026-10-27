@@ -54,9 +54,7 @@ set(SRC_ALL
     ${CMAKE_SOURCE_DIR}/application/ui/hsm/widgets/w_dial.c
     ${CMAKE_SOURCE_DIR}/application/ui/hsm/widgets/w_nvm.c
     ${CMAKE_SOURCE_DIR}/application/ui/hsm/widgets/w_ram.c
-    ${CMAKE_SOURCE_DIR}/application/ui/hsm/views/ui_surface.c
-    ${CMAKE_SOURCE_DIR}/application/ui/hsm/views/ui_sys_page.c
-    ${CMAKE_SOURCE_DIR}/application/ui/hsm/views/ui_live_page.c
+    ${CMAKE_SOURCE_DIR}/application/ui/hsm/widgets/ui_surface.c
     ${CMAKE_SOURCE_DIR}/application/ui/hsm/metrics/ui_metrics.c
     ${CMAKE_SOURCE_DIR}/application/ui/hsm/sm_ui.c
     ${CMAKE_SOURCE_DIR}/application/nvm/nvm.c

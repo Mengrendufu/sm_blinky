@@ -36,7 +36,7 @@ def main():
         "ports/static_pool/sst_evt_pool.c",
         "3rd_party/common_c/src/static_pool/static_pool.c",
     ]]
-    for folder in ["views", "metrics", "widgets"]:
+    for folder in ["metrics", "widgets"]:
         sources += sorted((ROOT / "application/ui/hsm" / folder).glob("*.c"))
     quote = lambda paths: " ".join(f'"{p}"' for p in paths)
     cmake = f'''cmake_minimum_required(VERSION 3.25)

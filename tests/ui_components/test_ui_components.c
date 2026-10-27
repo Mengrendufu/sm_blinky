@@ -198,10 +198,10 @@ int main(int argc,char **argv){
         assert(Ui_sm_.metrics.snapshot.rows[7+i].free==level.min);
         assert(Ui_sm_.metrics.snapshot.rows[7+i].total==level.total);
     }
-    assert(!strcmp(lv_label_get_text(Ui_sm_.sys.panel.name[7]),"smin"));
-    assert(!strcmp(lv_label_get_text(Ui_sm_.sys.panel.name[8]),"mmin"));
-    lv_obj_update_layout(Ui_sm_.sys.root);
-    assert(lv_obj_get_y(Ui_sm_.sys.panel.name[8])==286);
+    assert(!strcmp(lv_label_get_text(Ui_sm_.panel.name[7]),"smin"));
+    assert(!strcmp(lv_label_get_text(Ui_sm_.panel.name[8]),"mmin"));
+    lv_obj_update_layout(Ui_sm_.surface.root);
+    assert(lv_obj_get_y(Ui_sm_.panel.name[8])==286);
     assert(Ui_sm_.metrics.snapshot.ramUsed==0xE000);
     assert(Ui_sm_.metrics.snapshot.ramTotal==0xFFE0);
     Nvm_addBlinky(4); // Business progresses while Sys is visible.
@@ -215,36 +215,38 @@ int main(int argc,char **argv){
     assert(samples==sampled);
     pulse(49);assert(samples==sampled);
     pulse(1);assert(samples==sampled+1);
-    assert(Ui_sm_.sys.revision==Ui_sm_.metrics.snapshot.revision);
+    assert(Ui_sm_.sysRevision==Ui_sm_.metrics.snapshot.revision);
     pulse(449);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sys);
     pulse(1);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_live);
     render();
     capture("live-empty.rgb565");
-    assert(Ui_sm_.top.title==header && Ui_sm_.sys.root==NULL);
+    assert(Ui_sm_.top.title==header && Ui_sm_.gauge.arc==NULL);
     assert(!strcmp(lv_label_get_text(header),"live"));
     assert(lv_obj_get_child_count(Ui_sm_.surface.root)==7);
     assert(Ui_sm_.dialTimeout.interval==3);
-    assert(Ui_sm_.live.dial.value==0);
-    assert(Nvm_blinky()==54 && Ui_sm_.live.nvm.shown==54);
+    assert(Ui_sm_.dial.value==0);
+    assert(Nvm_blinky()==54 && Ui_sm_.nvm.shown==54);
     Nvm_addBlinky(1); // Blinky updates before notifying the UI.
     send(UI_LED_ON_SIG);Ui_drain_();
     assert(Ui_sm_.ledOn && Ui_sm_.ledEdges==5);
-    assert(lv_obj_has_state(Ui_sm_.live.sw.sw,LV_STATE_CHECKED));
-    assert(Nvm_blinky()==55 && Ui_sm_.live.nvm.shown==55);
+    assert(lv_obj_has_state(Ui_sm_.sw.sw,LV_STATE_CHECKED));
+    assert(Nvm_blinky()==55 && Ui_sm_.nvm.shown==55);
     Nvm_addBlinky(1);
     send(UI_LED_OFF_SIG);Ui_drain_();
     assert(!Ui_sm_.ledOn && Ui_sm_.ledEdges==6);
-    assert(!lv_obj_has_state(Ui_sm_.live.sw.sw,LV_STATE_CHECKED));
-    assert(Nvm_blinky()==56 && Ui_sm_.live.nvm.shown==56);
-    pulse(150);assert(Ui_sm_.live.dial.value==100);
+    assert(!lv_obj_has_state(Ui_sm_.sw.sw,LV_STATE_CHECKED));
+    assert(Nvm_blinky()==56 && Ui_sm_.nvm.shown==56);
+    pulse(150);assert(Ui_sm_.dial.value==100);
     capture("live-full.rgb565");
-    pulse(150);assert(Ui_sm_.live.dial.value==0);
-    assert(Nvm_blinky()==56 && Ui_sm_.live.nvm.shown==56);
+    pulse(150);assert(Ui_sm_.dial.value==0);
+    assert(Nvm_blinky()==56 && Ui_sm_.nvm.shown==56);
     unsigned before=samples;send(UI_HEADER_TIMEOUT_SIG);
     assert(samples==before+1 && Ui_sm_.top.title==header);
     pulse(699);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_live);
     pulse(1);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sys);
-    assert(!Ui_sm_.live.root && !Ui_sm_.dialTimeout.remaining);
+    assert(!Ui_sm_.dial.arc && !Ui_sm_.dialTimeout.remaining);
+    assert(!Ui_sm_.sw.sw && !Ui_sm_.nvm.label);
+    assert(!Ui_sm_.ram.lineA && !Ui_sm_.ram.lineB);
     send(UI_DIAL_TIMEOUT_SIG); // Committed old callback cannot touch dead UI.
     assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sys);
     for(unsigned i=0;i<3;++i){pulse(500);pulse(1000);}
@@ -257,10 +259,21 @@ int main(int argc,char **argv){
            scenario,memory.total_size-memory.free_size,memory.max_used);
     // Exercise the actual page/parent exit actions in inside-out order.
     // No dispatch follows this teardown (the production graph stays Active).
+    // A sibling borrowed from the same parent must survive component exits.
+    lv_obj_t *sentinel=lv_obj_create(Ui_sm_.surface.root);
     Sm_Ui_sys.exit_(&Ui_sm_.sm_hsm_);
+    assert(lv_obj_is_valid(sentinel));
+    assert(lv_obj_get_child_count(Ui_sm_.surface.root)==1);
+    assert(!Ui_sm_.gauge.arc && !Ui_sm_.gauge.num && !Ui_sm_.gauge.unit);
+    assert(!Ui_sm_.dots.dot[0] && !Ui_sm_.dots.dot[1]);
+    for(unsigned i=0;i<W_BARPANEL_ROWS;++i){
+        assert(!Ui_sm_.panel.name[i] && !Ui_sm_.panel.bar[i]);
+        assert(!Ui_sm_.panel.pct[i] && !Ui_sm_.panel.val[i]);
+    }
+    lv_obj_delete(sentinel);
     Sm_Ui_active.exit_(&Ui_sm_.sm_hsm_);
     assert(!Ui_sm_.headerTimeout.remaining);
-    assert(!Ui_sm_.top.title && !Ui_sm_.sys.root);
+    assert(!Ui_sm_.top.title && !Ui_sm_.gauge.arc);
     assert(lv_obj_get_child_count(lv_screen_active())==1);
     assert(!lv_obj_get_child_count(Ui_sm_.surface.root));
     assert(!Host_critical);
