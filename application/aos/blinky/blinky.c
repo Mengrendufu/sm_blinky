@@ -36,12 +36,22 @@ static void Blinky_maintenance_(void);
 // SM_Hsm ====================================================================
 // UML-Top-Initial
 static SM_StatePtr Blinky_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT;
+static SM_RetState Blinky_inactive_(Blinky *me, SST_Evt const *e);
+static SM_StatePtr Blinky_active_initial_(SM_Hsm *me);
+static SM_RetState Blinky_active_(Blinky *me, SST_Evt const *e);
+static SM_HsmState SM_HSM_ROM Blinky_inactive = {
+    SM_HSM_TOP, 0, 0, 0, (SM_StateHandler)&Blinky_inactive_
+};
+static SM_HsmState SM_HSM_ROM Blinky_active = {
+    SM_HSM_TOP, (SM_InitHandler)&Blinky_active_initial_, 0, 0,
+    (SM_StateHandler)&Blinky_active_
+};
 // State-Blinky_on
 static void Blinky_on_entry_(SM_Hsm * const me) SM_HSM_RETT;
 static SM_RetState Blinky_on_(Blinky * const me,
                               SST_Evt const * const e) SM_HSM_RETT;
 SM_HsmState SM_HSM_ROM Blinky_on = {
-    (SM_StatePtr)0,              // super
+    &Blinky_active,              // super
     (SM_InitHandler)0,    // init_
     (SM_ActionHandler)&Blinky_on_entry_, // entry_
     (SM_ActionHandler)0,  // exit_
@@ -52,7 +62,7 @@ static void Blinky_off_entry_(SM_Hsm * const me) SM_HSM_RETT;
 static SM_RetState Blinky_off_(Blinky * const me,
                                SST_Evt const * const e) SM_HSM_RETT;
 SM_HsmState SM_HSM_ROM Blinky_off = {
-    (SM_StatePtr)0,              // super
+    &Blinky_active,              // super
     (SM_InitHandler)0,    // init_
     (SM_ActionHandler)&Blinky_off_entry_, // entry_
     (SM_ActionHandler)0,  // exit_
@@ -66,20 +76,13 @@ SST_Task * const AO_Blinky = &Blinky_inst.super;
 // Task storage. The AO owns its stack, so its size is visible here and in the
 // link map instead of hiding inside an RTOS heap. 128 words was enough when
 // this AO only blinked, and the probes that once ran here needed the rest.
-// With them gone the number is generous: re-measure from [MEM] before
-// trimming it.
+// Check the Sys page stack watermark before trimming it.
 #define BLINKY_STACK_WORDS 256U // 256 words = 1 KB
 static StaticTask_t Blinky_tcb;
 static StackType_t  Blinky_stack[BLINKY_STACK_WORDS];
 
-// Periodic maintenance beats. One beat is 500 ms, so this is a stack report
-// every 4 s. The probe set that used to run 30 s in is gone: what bring-up
-// learns is reported from the first task (Application_dbgBootReport), and the
-// hardware probes went with it (see AGENTS.md).
-#define BLINKY_MEM_BEATS  8U
 #define BLINKY_SAVE_BEATS 20U // 20 half-second beats = 10 s
 
-static uint16_t blinky_beats;
 static uint8_t blinky_saveBeats_;
 
 
@@ -95,11 +98,6 @@ void Blinky_ctor(void) {
 }
 //............................................................................
 static void Blinky_init(Blinky * const me, SST_Evt const * const ie) {
-    // Feature demonstration: both events reach the HSM and remain
-    // unhandled there. Subscription adds no Blinky business behavior.
-    SST_Task_subscribe(AO_Blinky, BRING_UP_READY_SIG);
-    SST_Task_subscribe(AO_Blinky, BRING_UP_ASSETS_LOADED_SIG);
-
     (void)ie;
     SM_Hsm_init_(&me->sm_hsm_, (SM_InitHandler)Blinky_TOP_initial_);
 }
@@ -112,11 +110,35 @@ static void Blinky_dispatch(Blinky * const me, SST_Evt const * const e) {
 // SM_Hsm ====================================================================
 // UML-Top-Initial
 static SM_StatePtr Blinky_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT {
-    // The panel and the SRAM come up in BSP_init(), before the scheduler, so
-    // this AO owns nothing but its own heartbeat.
+    // Subscribe before scheduler startup can execute Flash bring-up.
+    SST_Task_subscribe(AO_Blinky, BRING_UP_READY_SIG);
+    SST_Task_subscribe(AO_Blinky, BRING_UP_ASSETS_LOADED_SIG);
+    SST_Task_subscribe(AO_Blinky, BRING_UP_NVM_READY_SIG);
     SST_TimeEvt_arm(&container_of(me, Blinky, sm_hsm_)->timeEvt,
                     BSP_TICKS_PER_SEC / 2, BSP_TICKS_PER_SEC / 2);
+    return _SM_INIT(&Blinky_inactive);
+}
+
+static SM_RetState Blinky_inactive_(Blinky *me, SST_Evt const *e) {
+    (void)me;
+    switch (e->sig) {
+        case BRING_UP_NVM_READY_SIG:
+            (void)Flash_postNvm(FLASH_NVM_WRITE_SIG, NVM_BOOT_COUNT);
+            return _SM_TRAN(&Blinky_active);
+        default:
+            return _SM_SUPER();
+    }
+}
+
+static SM_StatePtr Blinky_active_initial_(SM_Hsm *me) {
+    (void)me;
     return _SM_INIT(&Blinky_on);
+}
+
+static SM_RetState Blinky_active_(Blinky *me, SST_Evt const *e) {
+    (void)me;
+    (void)e;
+    return _SM_SUPER();
 }
 // State-Blinky_on
 static void Blinky_on_entry_(SM_Hsm * const me) SM_HSM_RETT {
@@ -163,17 +185,9 @@ static SM_RetState Blinky_off_(Blinky * const me,
 //............................................................................
 // The same work in both states, so the beat counter lives in one place.
 static void Blinky_maintenance_(void) {
-    uint16_t const beat = ++blinky_beats;
-
-    if ((beat % BLINKY_MEM_BEATS) == 0U) {
-        BSP_dbgMemReport(BSP_TRACE_STACK_BLINKY);
-    }
     if (++blinky_saveBeats_ == BLINKY_SAVE_BEATS) {
         blinky_saveBeats_ = 0U;
-        // If initialization is still running, retry at the next 10 s beat.
-        // The AO samples each item when its dynamic event is handled.
-        (void)Flash_postNvm(FLASH_NVM_WRITE_SIG, NVM_BOOT_COUNT);
+        // The AO snapshots the counter when this event is handled.
         (void)Flash_postNvm(FLASH_NVM_WRITE_SIG, NVM_BLINKY_EDGES);
     }
-
 }

@@ -36,7 +36,6 @@ void SST_TimeEvt_arm(SST_TimeEvt *me,SST_TCtr count,SST_TCtr interval){
 }
 void BSP_ledOn(void){}
 void BSP_ledOff(void){}
-void BSP_dbgMemReport(unsigned id){(void)id;}
 void SM_onAssert(char const *module,int line){
     fprintf(stderr,"ASSERT %s:%d\n",module,line);abort();
 }
@@ -48,8 +47,11 @@ void SST_Task_post(SST_Task *me,SST_Evt const *e){
     if(me==AO_Blinky){
         assert(e->poolId==1 && e->refCtr==2);
         assert(e->sig==BRING_UP_READY_SIG ||
-               e->sig==BRING_UP_ASSETS_LOADED_SIG);
-        ++published;SST_GC(e);return;
+               e->sig==BRING_UP_ASSETS_LOADED_SIG ||
+               e->sig==BRING_UP_NVM_READY_SIG);
+        ++published;
+        Blinky_dispatch(&Blinky_inst,e);
+        SST_GC(e);return;
     }
     assert(me==AO_Flash && tail-head<FLASH_QUEUE_LEN);
     queue[tail++%16]=e;
@@ -120,17 +122,31 @@ int main(int argc,char **argv){
     static SST_SubscrSet subscriptions[APPLICATION_PUB_SIG_MAX];
     SST_PubSub_init(subscriptions,APPLICATION_PUB_SIG_MAX);
     AO_Blinky->prio=1;SST_tasks_[1]=AO_Blinky;
-    if(subscribed){
-        SST_Task_subscribe(AO_Blinky,BRING_UP_READY_SIG);
-        SST_Task_subscribe(AO_Blinky,BRING_UP_ASSETS_LOADED_SIG);
-    }
     Ui_evtBind((void *)3);
+    Blinky_ctor();
+    Blinky_init(&Blinky_inst,NULL);
+    SST_Evt beat={.sig=BLINKY_TIMEOUT_SIG};
+    for(unsigned i=0;i<25;++i)Blinky_dispatch(&Blinky_inst,&beat);
+    assert(!blinkyEdges && !uiLed && head==tail);
+    if(!subscribed){
+        SST_Task_unsubscribe(AO_Blinky,BRING_UP_READY_SIG);
+        SST_Task_unsubscribe(AO_Blinky,BRING_UP_ASSETS_LOADED_SIG);
+        SST_Task_unsubscribe(AO_Blinky,BRING_UP_NVM_READY_SIG);
+    }
     ao.super.thread=(void *)1;
     assert(!Flash_postNvm(FLASH_NVM_WRITE_SIG, NVM_BOOT_COUNT));
     Sm_Flash_init(AO_Flash,NULL);step();step();
-    assert(stage==3 && published==(subscribed ? 2U : 0U) && head==tail);
+    assert(stage==3 && published==(subscribed ? 3U : 0U));
     assert(uiReady==2);
-    assert(!saveCount[NVM_BOOT_COUNT] && !saveCount[NVM_BLINKY_EDGES]);
+    SST_Evt ready={.sig=BRING_UP_NVM_READY_SIG};
+    if(!subscribed)Blinky_dispatch(&Blinky_inst,&ready);
+    assert(blinkyEdges==1 && uiLed==1 && tail-head==1);
+    step();assert(saveCount[NVM_BOOT_COUNT]==1);
+    // Repeated ready does not reenter active or save the boot count again.
+    Blinky_dispatch(&Blinky_inst,&ready);
+    assert(head==tail && blinkyEdges==1);
+    saveCount[NVM_BOOT_COUNT]=0;
+    assert(!saveCount[NVM_BLINKY_EDGES]);
     for(unsigned fail=0;fail<2;++fail){
         outcome=!fail;
         expected=FLASH_READ_SIG;
@@ -180,14 +196,11 @@ int main(int argc,char **argv){
     assert(head==tail);
     for(unsigned i=0;i<19;++i)Blinky_maintenance_();
     assert(head==tail);
-    Blinky_maintenance_();assert(tail-head==2);
-    step();step();
-    assert(saveCount[NVM_BOOT_COUNT]==2 && saveCount[NVM_BLINKY_EDGES]==37);
-    // Initial ON and both transition directions update before UI delivery.
-    SM_Hsm_init_(&Blinky_inst.sm_hsm_,
-                  (SM_InitHandler)Blinky_TOP_initial_);
+    Blinky_maintenance_();assert(tail-head==1);
+    step();
+    assert(saveCount[NVM_BOOT_COUNT]==1 && saveCount[NVM_BLINKY_EDGES]==37);
+    // Both transition directions update the counter before UI delivery.
     assert(blinkyEdges==1 && uiLed==1);
-    SST_Evt beat={.sig=BLINKY_TIMEOUT_SIG};
     Blinky_dispatch(&Blinky_inst,&beat);
     assert(blinkyEdges==2 && uiLed==2);
     Blinky_dispatch(&Blinky_inst,&beat);

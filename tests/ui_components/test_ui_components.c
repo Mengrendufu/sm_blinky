@@ -28,6 +28,13 @@ ssize_t nvs_write(struct nvs_fs *fs,uint16_t id,void const *src,size_t size){
 }
 unsigned Host_critical;
 SM_Tracer SM_Tracer_inst;
+// UI must not perform storage IO or emit its failure records.
+unsigned char *SM_Trace_getBlock(SM_Tracer * const me) {
+    (void)me;assert(!"unexpected UI trace");return NULL;
+}
+void SM_Trace_push(SM_Tracer * const me,unsigned char *frame) {
+    (void)me;(void)frame;assert(!"unexpected UI trace");
+}
 static SST_Task flashTask,blinkyTask;
 SST_Task *const AO_Flash=&flashTask;
 SST_Task *const AO_Blinky=&blinkyTask;
@@ -60,7 +67,6 @@ int xTaskNotifyGiveIndexed(TaskHandle_t thread,unsigned index){
     assert(thread==(void *)1 && index==0);return 1;
 }
 TickType_t xTaskGetTickCount(void){return hostTick;}
-void BSP_dbgMemReport(unsigned id){(void)id;}
 void BSP_cpuSample(uint32_t *idle,uint32_t *total){
     idleCount+=30;totalCount+=50;*idle=idleCount;*total=totalCount;
 }

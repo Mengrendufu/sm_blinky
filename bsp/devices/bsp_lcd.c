@@ -98,6 +98,12 @@
 #define LCD_TRACE_RDID_OK   12U
 #define LCD_TRACE_RDID_BAD  13U
 #define LCD_TRACE_DISP_ON   20U
+#define LCD_TRACE_INIT_MS 103U
+#define LCD_TRACE_INIT_ATTEMPTS 104U
+#define LCD_TRACE_READY_FAILURES 105U
+#define LCD_TRACE_WRITE_FAILURES 106U
+#define LCD_TRACE_CLEAR_FAILURES 107U
+#define LCD_TRACE_INIT_VERIFIED 108U
 
 // The bring-up facts are kept here instead of pushed: the tracer comes up
 // with the first task, and a push before the scheduler enters a FreeRTOS
@@ -106,6 +112,15 @@
 // HAL_Delay in BSP_lcdInit).
 static bool lcd_dbgBootDispOn_;
 static uint16_t lcd_dbgBootId_;
+// == DEBUG: boot-only facts, published after scheduler startup. ==
+static struct {
+    uint32_t elapsedMs;
+    uint32_t attempts;
+    uint32_t readyFailures;
+    uint32_t writeFailures;
+    uint32_t clearFailures;
+    uint32_t verified;
+} lcd_dbgBoot_;
 
 
 
@@ -209,6 +224,12 @@ volatile uint16_t BSP_dbgLcdSentinel_;
 void BSP_lcdInit(void) {
     uint16_t attempt;
     uint32_t const sinceReset = HAL_GetTick();
+    lcd_dbgBoot_.elapsedMs = 0U;
+    lcd_dbgBoot_.attempts = 0U;
+    lcd_dbgBoot_.readyFailures = 0U;
+    lcd_dbgBoot_.writeFailures = 0U;
+    lcd_dbgBoot_.clearFailures = 0U;
+    lcd_dbgBoot_.verified = 0U;
 
     BSP_lcdGpioInit_();
     BSP_lcdFsmcInit_();
@@ -236,6 +257,7 @@ void BSP_lcdInit(void) {
     }
 
     for (attempt = 0U; attempt < LCD_INIT_ATTEMPTS; ++attempt) {
+        ++lcd_dbgBoot_.attempts;
         // Sleep-out and the software reset go out once. Note 1 ties the NVM
         // load (ID bytes, VCOM, ...) to the reset path with tRT up to 120 ms,
         // so re-sending the reset on every pass only restarts that load. The
@@ -255,6 +277,7 @@ void BSP_lcdInit(void) {
         // fill and its read back then run once per pass that claims to be
         // ready, as the safety net for a partial clear.
         if (!BSP_lcdReady_()) {
+            ++lcd_dbgBoot_.readyFailures;
             // The chip is asleep. Sleep out is idempotent and costs one
             // command, so ask again instead of waiting out the budget for a
             // state nothing will change: the one sleep out sent before the
@@ -270,6 +293,7 @@ void BSP_lcdInit(void) {
         // worth drawing: a frame the panel takes in part is a frame that
         // keeps part of what the glass was showing.
         if (!BSP_lcdWritable_()) {
+            ++lcd_dbgBoot_.writeFailures;
             HAL_Delay(LCD_RETRY_SETTLE_MS);
             continue;
         }
@@ -293,8 +317,10 @@ void BSP_lcdInit(void) {
         BSP_lcdFill_(LCD_BLACK);
 
         if (BSP_lcdCleared_()) {
+            lcd_dbgBoot_.verified = 1U;
             break;
         }
+        ++lcd_dbgBoot_.clearFailures;
 
         HAL_Delay(LCD_RETRY_SETTLE_MS);
     }
@@ -308,6 +334,7 @@ void BSP_lcdInit(void) {
 
     // One identification read: the "panel is talking" line on the bench.
     BSP_dbgLcdBootId_();
+    lcd_dbgBoot_.elapsedMs = HAL_GetTick() - sinceReset;
 }
 
 //............................................................................
@@ -531,9 +558,24 @@ static void BSP_dbgLcdBootId_(void) {
     lcd_dbgBootId_ = BSP_lcdReadId_();
 }
 //............................................................................
-// The two bring-up lines, once a task is running: display on, and the
-// identification read the bench looks for.
+// Full-width boot values; a DISPON command is not proof of verification.
+static void BSP_dbgLcdValue_(uint8_t record, uint32_t value) {
+    SM_TRACE_BEGIN(record, 4)
+        SM_TRACE_PAYLOAD_BE(value >> 24)
+        SM_TRACE_PAYLOAD_BE(value >> 16)
+        SM_TRACE_PAYLOAD_BE(value >> 8)
+        SM_TRACE_PAYLOAD_BE(value)
+    SM_TRACE_END(0)
+}
+
+// Report once from the Flash AO, after the scheduler has started.
 void BSP_dbgLcdBootReport(void) {
+    BSP_dbgLcdValue_(LCD_TRACE_INIT_MS, lcd_dbgBoot_.elapsedMs);
+    BSP_dbgLcdValue_(LCD_TRACE_INIT_ATTEMPTS, lcd_dbgBoot_.attempts);
+    BSP_dbgLcdValue_(LCD_TRACE_READY_FAILURES, lcd_dbgBoot_.readyFailures);
+    BSP_dbgLcdValue_(LCD_TRACE_WRITE_FAILURES, lcd_dbgBoot_.writeFailures);
+    BSP_dbgLcdValue_(LCD_TRACE_CLEAR_FAILURES, lcd_dbgBoot_.clearFailures);
+    BSP_dbgLcdValue_(LCD_TRACE_INIT_VERIFIED, lcd_dbgBoot_.verified);
     if (lcd_dbgBootDispOn_) {
         SM_TRACE_BEGIN(LCD_TRACE_DISP_ON, 0)
         SM_TRACE_END()

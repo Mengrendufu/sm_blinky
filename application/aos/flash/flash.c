@@ -28,21 +28,14 @@
 //============================================================================
 // Task storage: the thread owns its stack, so the size shows up here and in
 // the link map instead of hiding inside an RTOS heap.
-#define FLASH_STACK_WORDS 256U // 256 words = 1 KB; settle it from [MEM]
-
-// Completed requests between [MEM][STACK][FLASH] reports. The first request
-// reports as well, so a boot that issues a single one still says how much
-// stack the path took.
-#define FLASH_REPORT_EVERY 8U
+#define FLASH_STACK_WORDS 256U // 256 words = 1 KB; see Sys watermark
 
 static StaticTask_t Flash_tcb_;
 static StackType_t Flash_stack_[FLASH_STACK_WORDS];
 static Sm_Flash Flash_inst_;
 SST_Task * const AO_Flash = &Flash_inst_.super;
-static uint32_t Flash_done_;
 
 //============================================================================
-static void Flash_report_(void);
 
 //============================================================================
 void Flash_ctor(void) {
@@ -63,17 +56,28 @@ static struct nvs_fs Flash_nvs_;
 static void Flash_dbgNvsError_(uint8_t record, uint16_t detail, int error) {
     uint32_t const bits = (uint32_t)(int32_t)error;
     SM_TRACE_BEGIN(record, 6)
-    SM_TRACE_PAYLOAD_BE(detail >> 8)
-    SM_TRACE_PAYLOAD_BE(detail)
-    SM_TRACE_PAYLOAD_BE(bits >> 24)
-    SM_TRACE_PAYLOAD_BE(bits >> 16)
-    SM_TRACE_PAYLOAD_BE(bits >> 8)
-    SM_TRACE_PAYLOAD_BE(bits)
+        SM_TRACE_PAYLOAD_BE(detail >> 8)
+        SM_TRACE_PAYLOAD_BE(detail)
+        SM_TRACE_PAYLOAD_BE(bits >> 24)
+        SM_TRACE_PAYLOAD_BE(bits >> 16)
+        SM_TRACE_PAYLOAD_BE(bits >> 8)
+        SM_TRACE_PAYLOAD_BE(bits)
     SM_TRACE_END(0)
 }
 
-static uint8_t Flash_dbgNvsMs_(uint32_t ms) {
-    return (ms > 255U) ? 255U : (uint8_t)ms;
+// Record 91 is retired. Each boot value now retains all 32 bits.
+#define FLASH_TRACE_NVS_MOUNT_MS 99U
+#define FLASH_TRACE_NVS_RESTORE_MS 100U
+#define FLASH_TRACE_NVS_RESTORE_RESULT 101U
+#define FLASH_TRACE_NVM_BOOT_COUNT 102U
+
+static void Flash_dbgNvsValue_(uint8_t record, uint32_t value) {
+    SM_TRACE_BEGIN(record, 4)
+        SM_TRACE_PAYLOAD_BE(value >> 24)
+        SM_TRACE_PAYLOAD_BE(value >> 16)
+        SM_TRACE_PAYLOAD_BE(value >> 8)
+        SM_TRACE_PAYLOAD_BE(value)
+    SM_TRACE_END(0)
 }
 
 static void Flash_nvsBoot_(void) {
@@ -90,8 +94,11 @@ static void Flash_nvsBoot_(void) {
 
     t0 = HAL_GetTick();
     int mounted = 0;
-    for (unsigned attempt = 1U; attempt <= FLASH_NVS_MOUNT_ATTEMPTS;
-         ++attempt) {
+    for (
+        unsigned attempt = 1U;
+        attempt <= FLASH_NVS_MOUNT_ATTEMPTS;
+        ++attempt
+    ) {
         mounted = nvs_mount(&Flash_nvs_);
         if (mounted == 0) {
             break;
@@ -112,14 +119,11 @@ static void Flash_nvsBoot_(void) {
     readMs = HAL_GetTick() - t0;
     uint32_t const boots = Nvm_bootCount();
 
-    SM_TRACE_BEGIN(91U, 6)
-    SM_TRACE_PAYLOAD_BE(Flash_dbgNvsMs_(mountMs))
-    SM_TRACE_PAYLOAD_BE((unsigned char)(restored == 0))
-    SM_TRACE_PAYLOAD_BE(Flash_dbgNvsMs_(readMs))
-    SM_TRACE_PAYLOAD_BE((unsigned char)(boots & 0xFFU))
-    SM_TRACE_PAYLOAD_BE((unsigned char)((boots >> 8) & 0xFFU))
-    SM_TRACE_PAYLOAD_BE(3U)   // tag 3: mount/restore, no application write
-    SM_TRACE_END(0)
+    Flash_dbgNvsValue_(FLASH_TRACE_NVS_MOUNT_MS, mountMs);
+    Flash_dbgNvsValue_(FLASH_TRACE_NVS_RESTORE_MS, readMs);
+    Flash_dbgNvsValue_(FLASH_TRACE_NVS_RESTORE_RESULT,
+                       (uint32_t)(int32_t)restored);
+    Flash_dbgNvsValue_(FLASH_TRACE_NVM_BOOT_COUNT, boots);
 }
 
 //============================================================================
@@ -210,12 +214,4 @@ void Flash_writeNvm(Nvm_Id id) {
 
 void Flash_completeRequest(Flash_Req * const req) {
     Flash_reqFinish(req);
-    ++Flash_done_;
-    Flash_report_();
-}
-//............................................................................
-static void Flash_report_(void) {
-    if ((Flash_done_ == 1U) || ((Flash_done_ % FLASH_REPORT_EVERY) == 0U)) {
-        BSP_dbgMemReport(BSP_TRACE_STACK_FLASH);
-    }
 }

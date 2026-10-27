@@ -114,6 +114,10 @@ static void Sm_Flash_ready_entry_(SM_Hsm *me) {
     // Assets are complete; NVS restoration follows, as in the model.
     Sm_Flash_notify_(BRING_UP_ASSETS_LOADED_SIG);
     Flash_initStorage();
+    // Initialization and ingress binding have finished, even on failure.
+    SST_Evt *ready = SST_NEW(SST_Evt);
+    ready->sig = BRING_UP_NVM_READY_SIG;
+    SST_publish(ready);
 }
 
 // Complete once; notifying the caller ends this handler's request borrow.

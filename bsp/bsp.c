@@ -14,7 +14,6 @@
 #include "bsp_lcd.h"
 #include "bsp_sram.h"
 #include "bsp_flash.h"
-#include "timers.h"
 // #include "stm32f103xe.h"
 
 //============================================================================
@@ -136,28 +135,6 @@ void BSP_init(void) {
     BSP_flashInit();
 }
 //............................................................................
-// Stack headroom of the three tasks that always exist. The values are the
-// minimum free stack ever seen, in words (1 word = 4 B); they are the numbers
-// the static stack sizes get sized from.
-static void BSP_dbgTraceStack_(uint8_t recId, uint16_t words) {
-    SM_TRACE_BEGIN(recId, 2)
-        SM_TRACE_PAYLOAD_BE(words >> 8)
-        SM_TRACE_PAYLOAD_BE(words)
-    SM_TRACE_END()
-}
-//............................................................................
-void BSP_dbgMemReport(uint8_t selfRecId) {
-    TaskHandle_t const idle = xTaskGetIdleTaskHandle();
-    TaskHandle_t const timer = xTimerGetTimerDaemonTaskHandle();
-
-    BSP_dbgTraceStack_(selfRecId,
-                    (uint16_t)uxTaskGetStackHighWaterMark((TaskHandle_t)0));
-    BSP_dbgTraceStack_(BSP_TRACE_STACK_IDLE,
-                    (uint16_t)uxTaskGetStackHighWaterMark(idle));
-    BSP_dbgTraceStack_(BSP_TRACE_STACK_TIMER,
-                    (uint16_t)uxTaskGetStackHighWaterMark(timer));
-}
-//............................................................................
 void BSP_ledOn(void) {
     // The LED is active low: logic 0 lights it.
     HAL_GPIO_WritePin(BSP_LED_PORT, BSP_LED_PIN, 0);
@@ -184,11 +161,9 @@ SM_NORETURN SM_onAssert(char const *module, int label) {
     uint8_t tmp;
     unsigned char *pMdl;
     uint8_t chksum;
-    uint8_t escByte;
 
     //........................................................................
     pMdl = (unsigned char *)module;
-    escByte = 0x7D;
     chksum = 0;
 
     // Silent system..........................................................
@@ -212,51 +187,21 @@ SM_NORETURN SM_onAssert(char const *module, int label) {
     SM_Tracer_flush_byte_(tmp); chksum += tmp;
     // label .................................................................
     tmp = (unsigned char)(label >> 24); chksum += tmp;
-    if (tmp == 0x7E || tmp == 0x7D) {
-        SM_Tracer_flush_byte_(escByte);
-        SM_Tracer_flush_byte_(tmp ^ 0x20);
-    } else {
-        SM_Tracer_flush_byte_(tmp);
-    }
+    SM_Tracer_escFlush(tmp);
     tmp = (unsigned char)(label >> 16); chksum += tmp;
-    if (tmp == 0x7E || tmp == 0x7D) {
-        SM_Tracer_flush_byte_(escByte);
-        SM_Tracer_flush_byte_(tmp ^ 0x20);
-    } else {
-        SM_Tracer_flush_byte_(tmp);
-    }
+    SM_Tracer_escFlush(tmp);
     tmp = (unsigned char)(label >>  8); chksum += tmp;
-    if (tmp == 0x7E || tmp == 0x7D) {
-        SM_Tracer_flush_byte_(escByte);
-        SM_Tracer_flush_byte_(tmp ^ 0x20);
-    } else {
-        SM_Tracer_flush_byte_(tmp);
-    }
+    SM_Tracer_escFlush(tmp);
     tmp = (unsigned char)(label >>  0); chksum += tmp;
-    if (tmp == 0x7E || tmp == 0x7D) {
-        SM_Tracer_flush_byte_(escByte);
-        SM_Tracer_flush_byte_(tmp ^ 0x20);
-    } else {
-        SM_Tracer_flush_byte_(tmp);
-    }
+    SM_Tracer_escFlush(tmp);
     // module ................................................................
     while (*pMdl) {
         tmp = *pMdl++; chksum += tmp;
-        if (tmp == 0x7E || tmp == 0x7D) {
-            SM_Tracer_flush_byte_(escByte);
-            SM_Tracer_flush_byte_(tmp ^ 0x20);
-        } else {
-            SM_Tracer_flush_byte_(tmp);
-        }
+        SM_Tracer_escFlush(tmp);
     }
     // chksum ................................................................
     tmp = ~chksum;
-    if (tmp == 0x7E || tmp == 0x7D) {
-        SM_Tracer_flush_byte_(escByte);
-        SM_Tracer_flush_byte_(tmp ^ 0x20);
-    } else {
-        SM_Tracer_flush_byte_(tmp);
-    }
+    SM_Tracer_escFlush(tmp);
     // Flag...................................................................
     tmp = 0x7E; SM_Tracer_flush_byte_(tmp);
 

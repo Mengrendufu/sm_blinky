@@ -21,17 +21,7 @@
 #define BSP_LED_PIN  GPIO_PIN_5
 
 //============================================================================
-// Trace record ids for the stack report below. Every caller passes its own,
-// so a line says which task the numbers belong to: [MEM][STACK][<who>][<n>].
-#define BSP_TRACE_STACK_BLINKY 21U
-#define BSP_TRACE_STACK_IDLE   22U
-#define BSP_TRACE_STACK_TIMER  23U
-#define BSP_TRACE_STACK_UI     24U
-// 37 belongs to the panel's frame memory check (bsp_lcd.c), so the flash
-// thread's stack report takes 38.
-#define BSP_TRACE_STACK_FLASH  38U
-// 44 was the write self test's stack report. The test is gone (see the note
-// in bsp_flash.c), and the id stays retired, not reused.
+// Stack trace IDs 21..24, 38 and 44 are retired; never reuse.
 
 //============================================================================
 void BSP_init(void);
@@ -54,11 +44,6 @@ void BSP_dbgBootReport(void);
 uint32_t *BSP_dbgFaultStash(void);
 void BSP_ledOn(void);
 void BSP_ledOff(void);
-
-// Periodic maintenance record: remaining stack (in words, 1 word = 4 B) of
-// the calling task, the idle task and the timer task. Meant to be called from
-// a task every few ticks, to size the static stacks from measurements.
-void BSP_dbgMemReport(uint8_t selfRecId);
 
 // CPU load as seen from the tick: the idle sample count and the tick count,
 // to be differenced by the caller over its own window (see freertos_hooks.c).

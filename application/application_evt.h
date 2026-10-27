@@ -18,6 +18,8 @@
 enum ApplicationSignals {
     BRING_UP_READY_SIG = 1U,
     BRING_UP_ASSETS_LOADED_SIG,
+    // Initialization finished, including failure; not a usability promise.
+    BRING_UP_NVM_READY_SIG,
     APPLICATION_PUB_SIG_MAX
 };
 

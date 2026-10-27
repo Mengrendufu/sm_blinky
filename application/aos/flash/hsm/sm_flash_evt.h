@@ -36,7 +36,6 @@ typedef struct {
 } Flash_NvmEvt;
 
 enum {
-    FLASH_NULL_SIG = 0,
     // Raw NOR operations use physical byte addresses.
     FLASH_READ_SIG = APPLICATION_PUB_SIG_MAX,
     FLASH_WRITE_SIG,

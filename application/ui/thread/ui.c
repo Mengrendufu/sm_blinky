@@ -27,24 +27,17 @@
 // stack was overrun by roughly 400 - that was the frozen board. LVGL's own
 // requirements page asks for "> 2 kB (> 8 kB recommended)" for this thread,
 // and the measured 914 words is inside the minimum but nowhere near the
-// recommendation, so the stack matches the recommendation. [MEM][STACK][UI]
-// is re-read whenever the UI changes.
+// recommendation. Check the Sys page stack watermark after UI changes.
 #define UI_PRIORITY     23U  // under the Blinky AO (24): the heartbeat wins
-
-// LED edges between [MEM] reports, matching the AO's cadence so the two lines
-// can be read side by side while the stack sizes are being settled.
-#define UI_REPORT_EDGES 8U
 
 static StaticTask_t Ui_tcb_;
 static StackType_t Ui_stack_[UI_STACK_WORDS];
 static Sm_Ui Ui_sm_;
 static TaskHandle_t Ui_handle_;
-static uint16_t Ui_reported_; // edge batches already reported
 
 //============================================================================
 static void Ui_thread_(void *arg);
 static void Ui_drain_(void);
-static void Ui_report_(void);
 static void Ui_bindDisplay_(void);
 
 //============================================================================
@@ -82,7 +75,6 @@ static void Ui_thread_(void *arg) {
         (void)ulTaskNotifyTakeIndexed(UI_INBOX_NOTIFY_INDEX, pdTRUE, wait);
 
         Ui_drain_();
-        Ui_report_();
 
         wait = Ui_dispHeartbeat();
     }
@@ -97,14 +89,6 @@ static void Ui_drain_(void) {
     }
 }
 //............................................................................
-static void Ui_report_(void) {
-    uint16_t const batch = (uint16_t)(Ui_sm_.ledEdges / UI_REPORT_EDGES);
-
-    if (batch != Ui_reported_) {
-        Ui_reported_ = batch;
-        BSP_dbgMemReport(BSP_TRACE_STACK_UI);
-    }
-}
 //............................................................................
 // The thread supplies the HSM's required display capabilities. These adapters
 // keep the concrete display API out of the state machine.
