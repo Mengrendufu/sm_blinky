@@ -11,8 +11,8 @@
 r
 h
 // Both images, bootloader first. loadfile erases only the sectors it writes,
-// and the two live at 0x08000000 (16 KB) and 0x08004000 (496 KB), so they
-// do not overlap.
+// and the two live at 0x08000000 (16 KB) and 0x08004000 (492 KB).
+// The last 4 KB are the fault journal; neither image writes that range.
 loadfile \\wsl.localhost\Ubuntu-24.04\home\sunnymatato\projects\sm_repos\embedded\hmi\sm_blinky\build\debug\bootloader.hex
 loadfile \\wsl.localhost\Ubuntu-24.04\home\sunnymatato\projects\sm_repos\embedded\hmi\sm_blinky\build\debug\sm_blinky.hex
 r

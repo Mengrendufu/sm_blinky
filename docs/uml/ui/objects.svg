@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 800" role="img">
+<defs>
+<marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5"
+orient="auto">
+<path d="M1 1 L9 5 L1 9" fill="none" stroke="#64748b" stroke-width="1.4"/>
+</marker>
+</defs>
+<style>
+text{font-family:"Noto Sans CJK SC","Microsoft YaHei",sans-serif;
+fill:#24324a}
+ .small{font-size:14px}
+ .title{font-size:19px;
+font-weight:700}
+ .stereo{font-size:13px;
+fill:#596981}
+ .edge{fill:none;
+stroke:#64748b;
+stroke-width:1.6;
+stroke-dasharray:6 4;
+marker-end:url(#arrow)}
+
+</style>
+<rect x="425" y="25" width="430" height="100" rx="5" fill="#edf4ff"
+stroke="#a4b2c6"/>
+<text x="441" y="47" class="stereo">«object»</text>
+<text x="441" y="73" class="title">screen : lv_obj_t</text>
+<text x="441" y="101" class="small">LVGL 默认活动 screen</text>
+<rect x="60" y="225" width="520" height="130" rx="5" fill="#e7f5f0"
+stroke="#a4b2c6"/>
+<text x="76" y="247" class="stereo">«object»</text>
+<text x="76" y="273" class="title">surface.root : lv_obj_t</text>
+<text x="76" y="301" class="small">screen 的子对象 · 全屏背景容器</text>
+<text x="76" y="323" class="small">bg_image_src → 一个可复用
+lv_image_dsc_t</text>
+<text x="76" y="345" class="small">描述符借用当前 Splash / Sys / Live
+像素</text>
+<rect x="705" y="225" width="515" height="130" rx="5" fill="#fff5df"
+stroke="#a4b2c6"/>
+<text x="721" y="247" class="stereo">«objects»</text>
+<text x="721" y="273" class="title">Topbar 的四个 LVGL 对象</text>
+<text x="721" y="301" class="small">title / fps / cpu / led</text>
+<text x="721" y="323" class="small">四者直接挂在 screen 下，与 surface.root
+平级</text>
+<text x="721" y="345" class="small">W_Topbar 保存句柄；自身没有 LVGL
+容器</text>
+<path d="M640 125 V175 H320 V225 M640 175 H960 V225" fill="none"
+stroke="#64748b" stroke-width="2"/>
+<text x="335" y="207" class="small">parent / children</text>
+<text x="975" y="207" class="small">parent / children</text>
+<rect x="60" y="455" width="520" height="145" rx="5" fill="#fff"
+stroke="#a4b2c6"/>
+<text x="76" y="477" class="stereo">«objects»</text>
+<text x="76" y="503" class="title">Sys 状态下的子对象</text>
+<text x="76" y="531" class="small">Gauge：arc / num / unit</text>
+<text x="76" y="553" class="small">BarPanel：各行 name / bar / pct /
+val</text>
+<text x="76" y="575" class="small">Dots：两个 dot</text>
+<rect x="705" y="455" width="515" height="145" rx="5" fill="#fff"
+stroke="#a4b2c6"/>
+<text x="721" y="477" class="stereo">«objects»</text>
+<text x="721" y="503" class="title">Live 状态下的子对象</text>
+<text x="721" y="531" class="small">Dial.arc / Switch.sw / Nvm.label</text>
+<text x="721" y="553" class="small">Ram.lineA / Ram.lineB / 两个 dot</text>
+<text x="721" y="575" class="small">与 Sys 的控件集合互斥存在</text>
+<path d="M320 355 V405 H962 V455 M320 405 V455" fill="none" stroke="#64748b"
+stroke-width="2"/>
+<text x="410" y="393" class="small">同一个 parent：surface.root；按当前 HSM
+页面创建其中一组</text>
+<text x="60" y="654" class="small">Splash：只替换 surface.root
+的背景；此时没有 Sys / Live 子控件。</text>
+<text x="60" y="685" class="small">切页：旧状态销毁自己的组件 → root
+子对象清空 → 换背景 → 新状态创建组件。</text>
+<text x="60" y="716" class="small">Topbar：由 Active 创建/销毁，在 Sys ↔
+Live 切换期间保留。</text>
+<text x="60" y="759" class="stereo">实线 = LVGL parent /
+children；本图是运行时对象树，不是上一图的组件依赖。</text>
+</svg>

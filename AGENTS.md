@@ -17,6 +17,33 @@ cmake --preset debug && cmake --build --preset build-debug
 - WSL 依赖：`arm-none-eabi-gcc` 13.2.1（`/usr/bin`）、`cmake` 3.28.3、`ninja` 1.11.1。
 - 产物：`build/debug/sm_blinky.elf`、`.hex`、`.map`。`build/` 是本机生成，勿跨平台复用。
 
+## 单仓库模板布局（当前约定）
+
+当前以本仓库统一管理 `app/`、`bootloader/`、`project_common/`。
+`app/` 内含原 `application/`、`bsp/`、`ports/`；bootloader 已收回仓库。
+两边直接引用 `project_common/` 的 Flash 驱动、资产格式与分区、Fault
+保存汇编和记录格式。入口与 RAM 地址只在
+`project_common/startup/project_layout.h` 定义，链接脚本配置时预处理。
+初始化和等待适配各归其镜像；第三方继续使用根目录的 submodule。
+根目录 preset 默认构建两个镜像，产物仍在 `build/debug/`；
+`build-app`、`build-bootloader` 可只构建一个目标。
+历史段落中的 `application/`、`bsp/`、`ports/` 应映射到 `app/` 下；
+公共文件的当前路径以 `project_common/README.md` 为准。
+Fault 先保存 RAM；bootloader 初始化串口后比较完整现场，再追加到
+片内 Flash 尾部两个 2 KB 页，相同则跳过。持久化成功后才清 RAM。
+App 不再消费异常记录；日志输出由 bootloader 完成。
+有效新现场输出后停留，历史回放继续启动；保存成功清 RAM 后可手动
+复位恢复启动。保留 RecID 0=assertion、1/2=完整现场两帧。
+App Flash 长度为 492 KB，最后 4 KB 仅归诊断日志，不随镜像烧录。
+串口控制与应答使用 HDLC，资产载荷按块头长度原样接收，不转义。
+bootloader/application/bl_main.c 保留平台入口、回调；bl_boot.c/.h
+组织阶段 HSM、传输 HSM 与交接动作，唯一外露入口为 Bl_Boot_run。
+顶层按阶段决定命令去向；无升级标志时 200 ms 轮询 HELLO，超时检查
+并启动 App。UART 不使用中断。资产阶段另持有 control/data/resync
+HSM；握手和传输分别持有 HDLC 解码器，原始载荷不送入解码器。
+IAP/OTA 和回滚 meta 尚未实现，按当前决定待定。
+烧写模式允许诊断输出，上位机按完整消息 ID 分流，见 docs/uart-link.md。
+
 ## Git
 
 项目在 WSL 原生盘上，直接用 WSL 的 git，毫秒级。2026-10-02 之前项目在 `/mnt/c`：那时遍历工作树的 git 命令要穿 9p、逐个进 submodule 比元数据，实测 WSL 侧 `git status --porcelain` 要 96.3 s，而经 cmd.exe 的 win32 git 只要 0.21 s，所以当时规定 git 走 Windows 侧。迁盘后这条规定作废。
@@ -27,13 +54,28 @@ cmake --preset debug && cmake --build --preset build-debug
 
 ```sh
 # 事件池 GC 契约（poolId / refCtr / 静态事件不回收）
-gcc -std=c11 -Itests/ports -I3rd_party/sm_sst/include -Iports/static_pool -I3rd_party/common_c/include tests/test_sst_evt_pool.c ports/static_pool/sst_evt_pool.c 3rd_party/common_c/src/static_pool/static_pool.c -o /tmp/t_evt_pool && /tmp/t_evt_pool
+gcc -std=c11 -Itests/ports -I3rd_party/sm_sst/include \
+  -Iapp/ports/static_pool -I3rd_party/common_c/include \
+  tests/test_sst_evt_pool.c app/ports/static_pool/sst_evt_pool.c \
+  3rd_party/common_c/src/static_pool/static_pool.c -o /tmp/t_evt_pool
+/tmp/t_evt_pool
 
 # configASSERT 转发到 SM_onAssert（模块名 / 行号）
-gcc -std=c11 -Ibsp/free_rtos -I3rd_party/sm_hsm/include tests/test_freertos_assert.c -o /tmp/t_assert && /tmp/t_assert
+gcc -std=c11 -Iapp/bsp/free_rtos -I3rd_party/sm_hsm/include \
+  tests/test_freertos_assert.c -o /tmp/t_assert
+/tmp/t_assert
 
-# 复合优先级 0xRRSS 布局的编译期契约（低字节 SST，高字节 FreeRTOS）
-arm-none-eabi-gcc -std=c11 -DSTM32F103xE -DUSE_HAL_DRIVER -Iports -Iports/static_pool -Ibsp/free_rtos -Ibsp/platform -I3rd_party/sm_sst/include -I3rd_party/sm_hsm/include -I3rd_party/common_c/include -I3rd_party/FreeRTOS-Kernel/include -I3rd_party/FreeRTOS-Kernel/portable/GCC/ARM_CM3 -I3rd_party/stm32f1xx-hal-driver/Inc -I3rd_party/cmsis-core/CMSIS/Core/Include -I3rd_party/cmsis-device-f1/Include -c tests/test_sst_priority.c -o /tmp/t_prio.o
+# 复合优先级 0xRRSS 编译期契约
+arm-none-eabi-gcc -std=c11 -DSTM32F103xE -DUSE_HAL_DRIVER \
+  -Iapp/ports -Iapp/ports/static_pool -Iapp/bsp/free_rtos \
+  -Iapp/bsp/platform -I3rd_party/sm_sst/include \
+  -I3rd_party/sm_hsm/include -I3rd_party/common_c/include \
+  -I3rd_party/FreeRTOS-Kernel/include \
+  -I3rd_party/FreeRTOS-Kernel/portable/GCC/ARM_CM3 \
+  -I3rd_party/stm32f1xx-hal-driver/Inc \
+  -I3rd_party/cmsis-core/CMSIS/Core/Include \
+  -I3rd_party/cmsis-device-f1/Include \
+  -c tests/test_sst_priority.c -o /tmp/t_prio.o
 ```
 
 注意：
@@ -72,16 +114,17 @@ cmake --preset debug && cmake --build --preset build-debug
 
 | 目录 | 内容 |
 |---|---|
-| `application/` | Flash/Blinky AO、UI 线程/HSM、资产与 NVM |
-| `bsp/` | 板级初始化、LED、tracer、启动与故障记录 |
-| `bsp/devices/` | LCD/SRAM 的 FSMC 口、SPI2 Flash 对象 |
-| `bsp/free_rtos/` | FreeRTOS 配置、hooks、tick 挂载服务 |
-| `bsp/lvgl/` | LVGL 配置（`lv_conf.h`）。显示适配层最终没放这里，落在 `application/ui/thread/ui_disp.c` ✓ |
-| `bsp/platform/` | 平台样板：HAL conf、MSP、TIM1 时基、中断向量、newlib 桩（`syscalls`/`sysmem`）、链接脚本。原来的 `main.h` 已删除，LED 引脚宏移到 `bsp.h` |
-| `ports/` | SST 骑 FreeRTOS 的口；`ports/static_pool/` 是事件池适配 |
-| `tests/` | 宿主机契约测试，未接 CMake |
-| `tools/` | 烧录（`flash.sh`/`flash.jlink`/`reboot.jlink`）、资产烧写（`burn-asset.py`，Windows 侧）、tracer 采集（`trace_read.py`）、顺序图生成/校验（`mmd/`）、行宽检查（`check_line_width.py`）、探针脚本库（`probes/`） |
-| `3rd_party/` | 8 个 submodule，全部以云端仓库为准 |
+| `app/application/` | AO、UI/HSM、资产与 NVM |
+| `app/bsp/` | 板级初始化、LCD/SRAM、tracer |
+| `app/bsp/free_rtos/` | 内核配置、hooks、时基挂载 |
+| `app/bsp/lvgl/` | LVGL 配置；显示适配在 UI thread 下 |
+| `app/bsp/platform/` | MSP、HAL 时基、中断、newlib、链接脚本 |
+| `app/ports/` | SST/NVS/common_c 的项目适配 |
+| `bootloader/` | 裸机阶段 HSM、资产传输、故障日志与交接 |
+| `project_common/` | NOR 驱动、资产/地址约定、Fault、HDLC |
+| `tests/` | 宿主测试，未接 CTest |
+| `tools/` | 双镜像烧录、资产上传、串口采集、IDE 数据库 |
+| `3rd_party/` | 根目录共享的上游 submodule |
 
 依赖：FreeRTOS-Kernel、common_c、sm_hsm、sm_sst、CMSIS Core 5.4.0、CMSIS Device F1 v4.3.3、STM32F1 HAL v1.1.8、LVGL v9.5.0（`3rd_party/lvgl`）。
 第三方统一放 `3rd_party/`，不要新建 `vendor/` 或 `third_party/`。
@@ -220,7 +263,7 @@ python3 ~/.config/opencode/skills/sm/uml-sync/scripts/export_model_tree.py \
   正常应长期是 `16/16`（或偶发 `15/16`）✓。
 
 
-## 当前架构约定（2026-10-26）
+## 当前架构约定（2026-10-29）
 
 本节与源码描述当前实现。上面的带日期调查保留历史测量与结论，
 其中旧 API、队列容量、等待策略和页面布局不作为当前实现约定。
@@ -234,7 +277,8 @@ python3 ~/.config/opencode/skills/sm/uml-sync/scripts/export_model_tree.py \
 - Flash 首个事件绑定 DMA transport 与任务通知等待，加载 Splash；
   第二阶段加载其余资产，进入 ready 的 entry 先发资产完成通知，
   再挂载、恢复 NVS，最后绑定请求入口。资产完成不代表 NVS 就绪。
-  NVS 初始化失败后的准入仍待整理，不能把入口绑定视为成功证据。
+  最后发布 NVM_READY，失败也发布；错误返回并记录日志，不清空存储。
+  不能把入口绑定或流程结束通知视为成功证据。
 - Flash 队列十格，最多八个在途裸区 RPC；handler 内允许让出等待，
   返回后才消费下一事件。事件直接交 HSM，不加二次操作路由。
   请求块/缓冲借用调用者栈，完成通知后不再访问请求。
@@ -249,7 +293,8 @@ python3 ~/.config/opencode/skills/sm/uml-sync/scripts/export_model_tree.py \
   小池 4 B × 48，中池 8 B × 16，按尺寸选首个合适池；不自动转借。
   时间事件保留静态事件。UI post 获取引用，dispatch 后执行 SST_GC。
   UI 队列 32 格，未绑定或满队列断言；不再拒收并丢弃最新事件。
-- Blinky 订阅两个公共就绪信号，仅展示特性，不处理业务。
+- Blinky 订阅 READY、ASSETS_LOADED、NVM_READY 三个就绪信号。
+  前两者展示订阅特性；NVM_READY 触发启动次数保存并进入 active。
   UI 是普通线程 + HSM，不是 SST AO；Flash 另分配事件定向 Ui_post。
   公共信号共享编号，UI/Flash 私有枚举从公共信号上界之后开始。
 - AST2 整包烧写，目录和每张图分别 CRC 校验；App 每图最多读三次。
@@ -258,7 +303,8 @@ python3 ~/.config/opencode/skills/sm/uml-sync/scripts/export_model_tree.py \
 - UI TOP 进入 standby，保留 readySplash/earlyReadyShow、
   splashing/readyShow 的两阶段准备与开机触发空间；当前自投递 GO。
   Splash 父状态持有展示期限，资产完成与期限到达各一次完成汇合。
-- UI 控件归 hsm/：views 组合页面，widgets 封装 LVGL，metrics 采样。
+- UI 控件归 hsm/：widgets 封装被动原子组件，metrics 负责采样。
+  views 页面包装已删除，HSM 直接持有并驱动组件。
   Active 管公共顶栏；Sys/Live entry 建控件、exit 销毁本页控件。
   ui_disp 只做显示适配。背光在 Splash entry 打开，早于首帧渲染；
   flush 同步调用 BSP_lcdWriteArea，返回后 flush_ready；ISR 不调 lv_*。
@@ -275,9 +321,22 @@ python3 ~/.config/opencode/skills/sm/uml-sync/scripts/export_model_tree.py \
   CPU 保持实时窗口统计，FreeRTOS tick 为 1 ms，不是事件时基 10 ms。
 - 启动计时为三个打点、两段耗时：BSP 初始化、任务装配。
   新 trace 94：四字节，两个大端 uint16 毫秒值；旧 trace 79 退休。
-  不含资产/NVS 或首帧；NVS mount/restore 耗时仍用 trace 91。
+  不含资产/NVS 或首帧；NVS trace 99/100/101/102 分别为挂载耗时、
+  恢复耗时、恢复结果、启动计数，均为 32 位；旧 trace 91 退休。
 - HSM/组件/事件协议使用 sm_assert；强 FreeRTOS 关联的任务、调度、
   通知契约使用 configASSERT。历史测量不充当当前镜像验证结果。
 
 当前接口和验证边界另见 docs/ui-components.md、docs/ui-time-events.md、
 docs/asset-format.md、docs/nvm-storage.md 和 docs/charter.md §28。
+
+## 当前工具与验证（2026-10-29）
+
+- tools/flash.sh 编译并烧录两个镜像；bootloader/tools/flash.sh 只处理
+  Bootloader。loadfile 不做全片擦除，最后 4 KB 诊断日志保留。
+- tools/ide_db.sh 只配置 CMake，不编译；保留 App/Bootloader/LVGL，
+  共用源码优先 App 配置，每文件一个条目。源文件增删后重跑。
+- tools/burn-asset.py 默认通过 J-Link 升级标志进入资产阶段；
+  --no-jlink 可配合 5 s 内人工复位进入 200 ms HELLO 窗口。
+  控制命令/应答走 HDLC，资产原样发送。只支持资产，不是 IAP 工具。
+- 最新板端运行与未覆盖范围见 docs/uart-link.md、docs/fault-record.md。
+  tools/probes 和 docs/diagrams 保留历史基线，不作为当前地址或流程。

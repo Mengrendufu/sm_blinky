@@ -1,7 +1,11 @@
 # J-Link 探针脚本
 
-冷启动那次排查留下的探针。全部是 **`h`（halt）→ `mem32` 读内存/寄存器 → `g`（go）** 的形式：
-**不复位、不写 flash、不改目标状态** —— 所以固件正常跑着的时候可以直接用（当初就是这么用的）。
+这里保留历史排查脚本，不是当前固件可直接复用的只读探针集合。
+部分脚本会停核、写 LCD 命令/像素或触发复位：例如 `rw.jlink` 写
+像素，`persist.jlink` 写面板寄存器，`sysreset.jlink` 写 AIRCR。
+执行前必须阅读所选脚本、按当前 ELF 重新核对地址和副作用。
+停核/恢复也会扰动运行；不能据脚本最后有 g 就称全过程无扰。
+本轮实际验证脚本与转储位于系统临时目录，未覆盖这些历史文件。
 
 ## 怎么用
 
@@ -55,7 +59,8 @@ JLink.exe -device STM32F103ZE -if SWD -speed 4000 -autoconnect 1 -ExitOnError 1 
 脚本里 `mem32 0x...` 用的绝对地址（任务栈、widget 数组等）随构建漂移。改了代码之后按符号重取：
 
 ```sh
-arm-none-eabi-nm build/debug/sm_blinky.elf | grep -E "Ui_stack_|Blinky_stack_|Flash_stack_|Ui_strip_"
+arm-none-eabi-nm build/debug/sm_blinky.elf \
+  | rg 'Ui_stack_|Blinky_stack|Flash_stack_|Ui_strip_'
 ```
 
 **常用两行**：判"板子在不在跑" = 读两次 `xTickCount`（`baseline.jlink` 就是这么做的）；

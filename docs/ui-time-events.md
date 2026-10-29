@@ -2,7 +2,7 @@
 
 UI 直接使用 common_c 的 TimeEvt 服务（submodule 提交 777cf4f）。
 公共模块只处理链表和计时，不依赖 SST 或 FreeRTOS。项目通过
-`ports/common_c/time_evt_port.h` 提供临界区与 SM 断言适配。
+`app/ports/common_c/time_evt_port.h` 提供临界区与 SM 断言适配。
 `Application_tickStart` 将 SST 原有时间事件和通用 TimeEvt 分别挂到
 BSP 的 100 Hz 时基回调表；BSP 不理解事件信号、投递方式或 HSM。
 
@@ -73,8 +73,8 @@ UI_REFRESH_SIG 没有对应计时节点，重复呈现不改变状态期限。
 ```sh
 gcc -std=c11 -Wall -Wextra -Werror \
   -fsanitize=address,undefined -fno-pie -no-pie \
-  -Itests/time_evt_support -Itests/ports -Iports/common_c \
-  -Iports/static_pool -I3rd_party/sm_sst/include \
+  -Itests/time_evt_support -Itests/ports -Iapp/ports/common_c \
+  -Iapp/ports/static_pool -I3rd_party/sm_sst/include \
   -I3rd_party/sm_hsm/include -I3rd_party/common_c/include \
   tests/test_time_evt.c 3rd_party/common_c/src/time_evt/time_evt.c \
   -o /tmp/test-time-evt

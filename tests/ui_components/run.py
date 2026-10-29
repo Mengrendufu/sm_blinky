@@ -15,29 +15,34 @@ HERE = Path(__file__).resolve().parent
 
 def main():
     work = Path(tempfile.mkdtemp(prefix="ui-components-test-"))
-    config = (ROOT / "bsp/lvgl/lv_conf.h").read_text()
+    config = (ROOT / "app/bsp/lvgl/lv_conf.h").read_text()
     # Native objects have 64-bit pointers. This pool is test-only; it does
     # not alter firmware configuration or establish the MCU memory budget.
     config = config.replace("(24U * 1024U)", "(64U * 1024U)")
     (work / "lv_conf_host.h").write_text(config)
     includes = [HERE / "ports"] + [ROOT / path for path in [
-        "application", "application/ui", "application/ui/thread",
-        "application/ui/hsm", "application/aos/flash",
-        "application/aos/flash/hsm", "application/nvm",
-        "ports/common_c", "ports/static_pool", "bsp/devices", "ports",
+        "app/application", "app/application/ui", "app/application/ui/thread",
+        "app/application/ui/hsm", "app/application/aos/flash",
+        "app/application/aos/flash/hsm", "app/application/nvm",
+        "project_common/flash", "project_common/assets",
+        "app/ports/common_c", "app/ports/static_pool",
+        "app/bsp/devices", "app/ports",
         "3rd_party/sm_nvs/include", "3rd_party/sm_nvs/src",
         "3rd_party/common_c/include", "3rd_party/sm_hsm/include",
         "3rd_party/sm_sst/include", "3rd_party/lvgl", "3rd_party/lvgl/src",
     ]]
     sources = [HERE / "test_ui_components.c"] + [ROOT / path for path in [
-        "application/ui/hsm/sm_ui.c", "application/ui/thread/ui_evt.c",
-        "application/nvm/nvm.c", "3rd_party/common_c/src/time_evt/time_evt.c",
+        "app/application/ui/hsm/sm_ui.c",
+        "app/application/ui/thread/ui_evt.c",
+        "app/application/nvm/nvm.c",
+        "3rd_party/common_c/src/time_evt/time_evt.c",
         "3rd_party/sm_hsm/src/sm_hsm.c",
-        "ports/static_pool/sst_evt_pool.c",
+        "app/ports/static_pool/sst_evt_pool.c",
         "3rd_party/common_c/src/static_pool/static_pool.c",
     ]]
     for folder in ["metrics", "widgets"]:
-        sources += sorted((ROOT / "application/ui/hsm" / folder).glob("*.c"))
+        widget_dir = ROOT / "app/application/ui/hsm" / folder
+        sources += sorted(widget_dir.glob("*.c"))
     quote = lambda paths: " ".join(f'"{p}"' for p in paths)
     cmake = f'''cmake_minimum_required(VERSION 3.25)
 project(ui_host C)

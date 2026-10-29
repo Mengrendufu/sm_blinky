@@ -6,7 +6,9 @@ typedef struct {
     uint32_t BaudRate, WordLength, StopBits, Parity, Mode;
     uint32_t HwFlowCtl, OverSampling;
 } TestUartInit;
-typedef struct { void *Instance; TestUartInit Init; } UART_HandleTypeDef;
+typedef struct __UART_HandleTypeDef {
+    void *Instance; TestUartInit Init;
+} UART_HandleTypeDef;
 typedef struct { void *Instance; } TIM_HandleTypeDef;
 typedef struct {
     uint32_t PLLState, PLLSource, PLLMUL;

@@ -4,13 +4,15 @@
 
 当前实现摘要见 §28。其余章节按日期保留演进、实验与验证边界，
 历史中的旧 API、DWT 初始化方案和事件/队列形态不作为当前约定。
+面板检查现状见 [LCD 初始化](lcd-init.md)，采用双色 X 型验证。
+故障留存有效性与日志分类见 [内核异常留存](fault-record.md)。
 
 ## 1. 阶段目标（可验收的 DoD）
 
-1. 屏上有一个**事件驱动**的状态页：LED 状态、LCD/SRAM 两个探针结果、内存水位。
+1. 屏上有事件驱动的 Sys/Live 页面：LED 状态、FPS、CPU 与资源水位。
 2. Blinky 管理 LED 与业务快照，通过事件通知 UI，不调用 LCD。
 3. UI 线程自有收件箱；AO/ISR 不调用任何 `lv_*`。
-4. 显示适配层提供帧耗时读数；Flash 超时与启动诊断统一使用 HAL tick。
+4. 顶部显示 FPS 和 CPU；Flash 超时与启动诊断统一使用 HAL tick。
    §13 保留 DWT 历史实验，当前实现不依赖 DWT。
 5. 全静态分配，栈尺寸由 `[MEM][STACK]` 水位定量；记录 BSP 与任务装配
    耗时，不将它们解释为上电到首帧时间。
@@ -908,7 +910,20 @@ Nvm_writeResult 记录完成结果，NVS 未变化返回 0 也视为成功。
 细节与验证命令见 [nvm-storage.md](nvm-storage.md)。
 
 
-## 28. 当前启动链路与诊断口径（2026-10-26）
+## 28. 当前启动链路与诊断口径（2026-10-29）
+
+单仓库包括 app、bootloader、project_common；公共地址与 no-init
+布局从 project_common/startup/project_layout.h 派生。Bootloader
+入口与平台回调在 bl_main.c，阶段/传输 HSM 在 bl_boot.c，main
+传入已初始化 UART 后调用 Bl_Boot_run。顶层组织握手、资产传输、
+App 交接和两种停留阶段；解析器不直接决定业务去向。
+无升级标志时 200 ms 内接收合法 HELLO；超时检查 App 向量再交接。
+UART 为轮询接收、阻塞发送。IAP/OTA 与回滚 meta 先待定，不实现。
+
+Fault 先由无栈汇编写 no-init RAM 并复位；Bootloader 比较完整现场，
+追加到片内 Flash 最后 4 KB，成功后清 RAM。有效新现场输出一次并
+停留，历史回放不阻止启动。0/1/2 固定保留为 assertion/现场两帧。
+细节与实际板端边界见 fault-record.md 和 uart-link.md。
 
 BSP 初始化仍在调度前完成 LCD/SRAM/SPI 硬件准备。随后注册 BSP tick、
 UI 收件箱与三个 TimeEvt 节点，初始化 SST 和事件池，再创建 Flash、
@@ -917,7 +932,8 @@ Blinky，最后启动调度器。Flash TOP 只投递初始化事件。
 Flash AO 首个事件绑定 DMA 与任务通知等待，加载并逐图校验 Splash；
 随后加载其余资产，在 ready entry 发布资产完成，再挂载、恢复 NVS。
 AST2 每张图独立 CRC，读入 SRAM 最多三次尝试；已发布图保持只读。
-资产完成信号不表示 NVS 已就绪；NVS 初始化失败后的准入仍待整理。
+资产完成信号不表示 NVS 已就绪；挂载/恢复结束发布 NVM_READY，
+该通知不保证成功，失败保留错误返回与日志，不主动清空存储。
 
 App 资产与 NVS 共用 DMA + 通知等待，芯片 BUSY 使用让出式轮询。
 Bootloader 仍为 DMA + 自旋等待。SPI 超时及诊断统一使用 HAL tick，
@@ -933,7 +949,8 @@ Bootloader 仍为 DMA + 自旋等待。SPI 超时及诊断统一使用 HAL tick�
 
 打点用 HAL_GetTick 无符号差分，记录保存低 16 位，继承原有范围。
 该记录排除资产/NVS、调度器启动及首帧；不再预留零耗时资产字段。
-NVS mount/restore 耗时仍由记录 91 报告。tools/trace_read.py 按帧长度
+旧 NVS 记录 91 退休；99/100/101/102 分别报告挂载耗时、恢复耗时、
+恢复结果和启动计数，均为完整 32 位值。tools/trace_read.py 按帧长度
 输出原始 payload，没有记录 79 的专用解码器；旧日志仍可按原格式读。
 
 UI TOP 进入 standby，收到就绪后才允许 Splash；当前 GO 为自投递。
@@ -949,8 +966,10 @@ Blinky 在 ON/OFF entry 更新 NVM RAM 快照，每 10 s 请求按 ID 保存；
 Live 仅读快照显示。实际接口与生命周期见 ui-components.md、
 ui-time-events.md、nvm-storage.md 和 asset-format.md。
 
-本节清理阶段字段与说明，没有新增分阶段资产计时、改动等待策略或
-修复 NVS 失败准入。最新这些改动尚未编译烧录，历史板测不作其验证。
+当前版本已于 2026-10-29 编译烧录。Bootloader 为 15,996 B，16 KB
+分区余 388 B；App 为 199,180 B。正常启动、无标志串口握手及恢复
+App 通过；用户确认显示正常。具体测量与未覆盖项见 uart-link.md。
+这些数字属于本次产物，后续改动需重新链接测量。
 
 启动计时宿主检查通过：三个打点、记录 94 的四字节编码、
 uint32 tick 回绕及打点容量上限；执行源码提取的实际实现，

@@ -3,7 +3,17 @@
 这一目录是**图的源与产物**：`.mmd` 是 mermaid 文本（源），同名 `.html` 是自包含查看器（产物，用仓库自带的
 `tools/mmd/` 生成）。所有图都在**仓库里**，不再依赖 `/mnt/c/tmp_atk/`（那只是 Windows 侧的查看副本）。
 
-## 图清单
+## 适用范围（2026-10-29 复核）
+
+下表图源与 HTML 保留各自创建时的历史设计或实验基线，表中的
+“现有固件”“待落地”均指当时版本，不表示当前代码实现状态。
+本轮没有将旧图整体重绘，不能据旧地址、记录 ID 或消息数量调试
+新固件。当前启动及 UART 阶段见 [uart-link.md](../uart-link.md)，
+异常留存见 [fault-record.md](../fault-record.md)，资产格式见
+[asset-format.md](../asset-format.md)，UI 组件见
+[ui-components.md](../ui-components.md)。
+
+## 历史图清单
 
 | 文件 | 视角 | 内容 |
 |---|---|---|

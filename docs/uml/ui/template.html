@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UI subsystem · HSM 与被动显示组件</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;
+
+background:#eaf0f6;
+
+color:#24324a;
+
+font:16px/1.65 system-ui,"Microsoft YaHei",sans-serif}
+main{max-width:1450px;
+
+margin:auto;
+
+padding:32px 24px}
+h1{font-size:30px;
+
+margin:0 0 8px}
+h2{font-size:22px}
+.intro{max-width:1050px;
+
+color:#52657b}
+.pill{display:inline-block;
+
+padding:4px 12px;
+
+background:#dbede6;
+
+border-radius:20px;
+
+font-size:13px}
+nav{position:sticky;
+
+top:0;
+
+background:#eaf0f6ed;
+
+padding:12px 0;
+
+z-index:1}
+nav a{color:#226857;
+
+margin-right:24px}
+section{scroll-margin-top:70px;
+
+background:white;
+
+border-radius:14px;
+
+padding:22px;
+
+margin:22px 0;
+
+box-shadow:0 5px 25px #253f5910}
+.diagram{overflow:auto;
+
+border:1px solid #e0e7ef;
+
+border-radius:10px}
+.diagram svg{display:block;
+
+width:100%;
+
+min-width:1080px;
+
+height:auto}
+.note{padding:12px 18px;
+
+border-left:4px solid #409b7e;
+
+background:#f0f8f4}
+code{font-size:13px}
+li{margin:8px 0}
+footer{color:#62748b;
+
+font-size:13px}
+
+</style>
+<main>
+<span class="pill">当前代码映射 · c4f1f13</span>
+<h1>UI subsystem：HSM 直驱被动显示组件</h1>
+<p class="intro">HSM 根据状态与事件决定如何呈现；组件封装 LVGL
+对象和显示操作。先看能力如何协作，再看像素落在哪棵对象树上。本文是现状说明，
+没有新增页面包装或修改权威 UML 模型。</p>
+<nav>
+<a href="#architecture">① UML 组件关系</a>
+<a href="#tree">② LVGL 对象关系</a>
+<a href="#evidence">③ 代码依据</a>
+</nav>
+<section id="architecture">
+<h2>① 能力与依赖：组件平铺，HSM 直接驱动</h2>
+<p class="note">Sm_Ui 是协调者。各显示组件是 UI subsystem 的同级参与者；HSM
+的 C 结构体嵌入它们，不表示 UML Component 中再包含 Component。</p>
+<div class="diagram">
+{{COMPONENTS}}
+</div>
+</section>
+<section id="tree">
+<h2>② 运行时对象树：screen、背景容器与 Topbar</h2>
+<p class="note">组件对象的所有权和 LVGL parent 是两套关系。Topbar
+没有独立容器，但其对象有明确 parent，也有统一的组件生命周期管理。</p>
+<div class="diagram">
+{{OBJECTS}}
+</div>
+</section>
+<section id="evidence">
+<h2>③ 源码依据与阅读边界</h2>
+<ul>
+<li>
+<code>app/application/ui/hsm/sm_ui.h:49</code> — 显示能力契约与 HSM
+直接持有的组件</li>
+<li>
+<code>app/application/ui/thread/ui.c:58</code> — 线程初始化、派发、GC
+和显示能力绑定</li>
+<li>
+<code>app/application/ui/hsm/sm_ui.c:291</code> — Active / Sys / Live
+的组件生命周期和显示调用</li>
+<li>
+<code>app/application/ui/hsm/widgets/ui_surface.c:33</code> —
+背景容器、描述符复用以及 content / overlay</li>
+<li>
+<code>app/application/ui/hsm/widgets/w_topbar.c:25</code> — Topbar
+四个对象使用同一 parent</li>
+<li>
+<code>app/application/ui/hsm/metrics/ui_metrics.c:36</code> —
+运行时采样与资源水位快照</li>
+<li>
+<code>app/application/ui/thread/ui_disp.c:98</code> — LVGL display
+初始化与渲染适配</li>
+</ul>
+<p>依赖箭头描述同步调用方向，不表示另起线程。UI 线程是普通 FreeRTOS
+线程；事件使用 SST_Evt，但 HSM 不作为 SST AO 调度。Assets、NVM、TimeEvt 和
+BSP 的内部结构不在本图展开。</p>
+</section>
+<footer>离线单文件 HTML · 图形和样式全部内联 · 2026-10-28</footer>
+</main>
+</html>

@@ -96,7 +96,7 @@ uint32_t Ui_dispFps(void){return 30;}
 TickType_t Ui_dispHeartbeat(void){return 1;}
 // Include the actual thread binding/start/drain implementation. Its RTOS
 // entry stays parked; the host drives the same drain on this single owner.
-#include "../../application/ui/thread/ui.c"
+#include "../../app/application/ui/thread/ui.c"
 extern SM_HsmState Sm_Ui_standby,Sm_Ui_readySplash,Sm_Ui_earlyReadyShow;
 extern SM_HsmState Sm_Ui_splashing,Sm_Ui_readyShow,Sm_Ui_sys,Sm_Ui_live;
 extern SM_HsmState Sm_Ui_active;

@@ -27,7 +27,8 @@ LIMIT = 78
 EXTS = ('.c', '.h')
 # The trees that hold code we write. Narrowing the pathspec keeps git off the
 # submodules and the build tree, which matters on this checkout (drvfs).
-SOURCE_PATHS = ('application', 'bsp', 'ports', 'tests', 'tools')
+SOURCE_PATHS = ('app', 'bootloader', 'project_common', 'tests', 'tools',
+                'application', 'bsp', 'ports')
 RECORD = re.compile(r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@')
 
 
@@ -63,7 +64,8 @@ def added_lines(root):
     found = {}
     path = None
 
-    cmd = ['diff', '-U0', '--no-color', 'HEAD', '--'] + list(SOURCE_PATHS)
+    cmd = ['diff', '-U0', '-M', '-C', '--find-copies-harder',
+           '--no-color', 'HEAD', '--'] + list(SOURCE_PATHS)
 
     for line in git(root, cmd).splitlines():
         if line.startswith('+++ b/'):

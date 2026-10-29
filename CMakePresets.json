@@ -16,6 +16,20 @@
     {
       "name": "build-debug",
       "configurePreset": "debug"
+    },
+    {
+      "name": "build-app",
+      "configurePreset": "debug",
+      "targets": [
+        "sm_blinky.elf"
+      ]
+    },
+    {
+      "name": "build-bootloader",
+      "configurePreset": "debug",
+      "targets": [
+        "bootloader.elf"
+      ]
     }
   ]
 }

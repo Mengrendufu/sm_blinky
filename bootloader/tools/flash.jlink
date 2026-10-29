@@ -1,0 +1,8 @@
+// Bootloader-only programming. Connection parameters are in flash.sh.
+// loadfile erases and verifies only the sectors this image occupies.
+r
+h
+loadfile \\wsl.localhost\Ubuntu-24.04\home\sunnymatato\projects\sm_repos\embedded\hmi\sm_blinky\build\debug\bootloader.hex
+r
+g
+qc

@@ -1,6 +1,6 @@
 # 应用 NVM 映射与事件写入
 
-application/nvm 是应用共享模块；数据布局、逻辑 ID 与 NVS key 的
+app/application/nvm 是应用共享模块；数据布局、逻辑 ID 与 NVS key 的
 对应关系集中在这里。Flash AO 不定义业务 key，不维护 checkpoint。
 
 ## 静态映射

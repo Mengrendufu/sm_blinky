@@ -1,0 +1,183 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 1510" role="img">
+<defs>
+<marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5"
+orient="auto">
+<path d="M1 1 L9 5 L1 9" fill="none" stroke="#64748b" stroke-width="1.4"/>
+</marker>
+</defs>
+<style>
+text{font-family:"Noto Sans CJK SC","Microsoft YaHei",sans-serif;
+fill:#24324a}
+ .small{font-size:14px}
+ .title{font-size:19px;
+font-weight:700}
+ .stereo{font-size:13px;
+fill:#596981}
+ .edge{fill:none;
+stroke:#64748b;
+stroke-width:1.6;
+stroke-dasharray:6 4;
+marker-end:url(#arrow)}
+
+</style>
+<rect x="15" y="15" width="1250" height="1475" rx="8" fill="#f5f8fc"
+stroke="#8c9eb8" stroke-width="2"/>
+<text x="40" y="45" class="title">«subsystem» UI</text>
+<text x="40" y="73" class="small">当前代码的能力视图 · 所有 LVGL
+操作在同一个普通 FreeRTOS UI 线程执行</text>
+<rect x="45" y="110" width="350" height="145" rx="5" fill="#edf4ff"
+stroke="#a4b2c6"/>
+<text x="61" y="132" class="stereo">«component»</text>
+<text x="61" y="158" class="title">UI Thread / Inbox</text>
+<path d="M367 125 h14 v20 h-14 z M363 129 h8 v5 h-8 z M363 137 h8 v5 h-8 z"
+fill="white" stroke="#8394ad"/>
+<text x="61" y="186" class="small">接收事件 → 同步派发 → GC</text>
+<text x="61" y="208" class="small">持有 HSM 实例；驱动渲染心跳</text>
+<text x="61" y="230" class="small">不是 SST_Task / AO</text>
+<rect x="480" y="110" width="320" height="145" rx="5" fill="#e7f5f0"
+stroke="#a4b2c6"/>
+<text x="496" y="132" class="stereo">«component»</text>
+<text x="496" y="158" class="title">Sm_Ui · HSM</text>
+<path d="M772 125 h14 v20 h-14 z M768 129 h8 v5 h-8 z M768 137 h8 v5 h-8 z"
+fill="white" stroke="#8394ad"/>
+<text x="496" y="186" class="small">Orchestrator：决定显示内容与时机</text>
+<text x="496" y="208" class="small">直接管理组件实例和生命周期</text>
+<text x="496" y="230" class="small">Splash / Active / Sys / Live</text>
+<rect x="885" y="110" width="350" height="145" rx="5" fill="#fff5df"
+stroke="#a4b2c6"/>
+<text x="901" y="132" class="stereo">«interface»</text>
+<text x="901" y="158" class="title">DisplayOperations</text>
+<text x="901" y="186" class="small">requestFrame / setBacklight /
+readFps</text>
+<text x="901" y="208" class="small">HSM 声明所需能力</text>
+<text x="901" y="230" class="small">线程绑定实现，经包装调用 ui_disp</text>
+<path class="edge" d="M395 180 H480"/>
+<text x="402" y="165" class="stereo">dispatch</text>
+<path class="edge" d="M800 180 H885"/>
+<text x="818" y="165" class="stereo">uses</text>
+<rect x="45" y="300" width="350" height="120" rx="5" fill="#edf4ff"
+stroke="#a4b2c6"/>
+<text x="61" y="322" class="stereo">«component»</text>
+<text x="61" y="348" class="title">UiMetrics</text>
+<path d="M367 315 h14 v20 h-14 z M363 319 h8 v5 h-8 z M363 327 h8 v5 h-8 z"
+fill="white" stroke="#8394ad"/>
+<text x="61" y="376" class="small">sample → CPU / 栈 / 队列 / 池快照</text>
+<text x="61" y="398" class="small">不依赖 LVGL；HSM 取数据更新控件</text>
+<path class="edge" d="M480 220 H435 V360 H395"/>
+<text x="445" y="290" class="stereo">sample</text>
+<rect x="885" y="300" width="350" height="120" rx="5" fill="#edf4ff"
+stroke="#a4b2c6"/>
+<text x="901" y="322" class="stereo">«component»</text>
+<text x="901" y="348" class="title">Display Adapter · ui_disp</text>
+<path d="M1207 315 h14 v20 h-14 z M1203 319 h8 v5 h-8 z M1203 327 h8 v5 h-8
+z" fill="white" stroke="#8394ad"/>
+<text x="901" y="376" class="small">LVGL 初始化、渲染心跳、FPS</text>
+<text x="901" y="398" class="small">同步 flush → BSP LCD 等待接口</text>
+<path class="edge" d="M1060 255 V300"/>
+<text x="1075" y="282" class="stereo">绑定能力的调用落点</text>
+<text x="45" y="453" class="title">被动显示组件 · 同级排列，由 HSM
+通过接口直接驱动</text>
+<path d="M640 255 V1260" fill="none" stroke="#64748b" stroke-width="1.6"
+stroke-dasharray="6 4"/>
+<text x="652" y="444" class="stereo">«use» create / set / destroy</text>
+<rect x="45" y="490" width="450" height="130" rx="5" fill="#fff"
+stroke="#a4b2c6"/>
+<text x="61" y="512" class="stereo">«component»</text>
+<text x="61" y="538" class="title">UiSurface</text>
+<path d="M467 505 h14 v20 h-14 z M463 509 h8 v5 h-8 z M463 517 h8 v5 h-8 z"
+fill="white" stroke="#8394ad"/>
+<text x="61" y="566" class="small">背景 + 内容根容器</text>
+<text x="61" y="588" class="small">showSplash / showPage · content /
+overlay</text>
+<path class="edge" d="M640 555 H495"/>
+<rect x="785" y="490" width="450" height="130" rx="5" fill="#fff"
+stroke="#a4b2c6"/>
+<text x="801" y="512" class="stereo">«component»</text>
+<text x="801" y="538" class="title">W_Topbar</text>
+<path d="M1207 505 h14 v20 h-14 z M1203 509 h8 v5 h-8 z M1203 517 h8 v5 h-8
+z" fill="white" stroke="#8394ad"/>
+<text x="801" y="566" class="small">公共标题、FPS、CPU、LED</text>
+<text x="801" y="588" class="small">setTitle / setFps / setCpu / setLed</text>
+<path class="edge" d="M640 555 H785"/>
+<circle cx="640" cy="555" r="3" fill="#64748b"/>
+<rect x="45" y="665" width="450" height="130" rx="5" fill="#fff"
+stroke="#a4b2c6"/>
+<text x="61" y="687" class="stereo">«component»</text>
+<text x="61" y="713" class="title">W_Gauge</text>
+<path d="M467 680 h14 v20 h-14 z M463 684 h8 v5 h-8 z M463 692 h8 v5 h-8 z"
+fill="white" stroke="#8394ad"/>
+<text x="61" y="741" class="small">CPU 半圆仪表</text>
+<text x="61" y="763" class="small">setValue(pct)</text>
+<path class="edge" d="M640 730 H495"/>
+<rect x="785" y="665" width="450" height="130" rx="5" fill="#fff"
+stroke="#a4b2c6"/>
+<text x="801" y="687" class="stereo">«component»</text>
+<text x="801" y="713" class="title">W_BarPanel</text>
+<path d="M1207 680 h14 v20 h-14 z M1203 684 h8 v5 h-8 z M1203 692 h8 v5 h-8
+z" fill="white" stroke="#8394ad"/>
+<text x="801" y="741" class="small">资源水位表</text>
+<text x="801" y="763" class="small">setWords / setPair</text>
+<path class="edge" d="M640 730 H785"/>
+<circle cx="640" cy="730" r="3" fill="#64748b"/>
+<rect x="45" y="840" width="450" height="130" rx="5" fill="#fff"
+stroke="#a4b2c6"/>
+<text x="61" y="862" class="stereo">«component»</text>
+<text x="61" y="888" class="title">W_Dial</text>
+<path d="M467 855 h14 v20 h-14 z M463 859 h8 v5 h-8 z M463 867 h8 v5 h-8 z"
+fill="white" stroke="#8394ad"/>
+<text x="61" y="916" class="small">Live 圆弧</text>
+<text x="61" y="938" class="small">setValue(pct)</text>
+<path class="edge" d="M640 905 H495"/>
+<rect x="785" y="840" width="450" height="130" rx="5" fill="#fff"
+stroke="#a4b2c6"/>
+<text x="801" y="862" class="stereo">«component»</text>
+<text x="801" y="888" class="title">W_Switch</text>
+<path d="M1207 855 h14 v20 h-14 z M1203 859 h8 v5 h-8 z M1203 867 h8 v5 h-8
+z" fill="white" stroke="#8394ad"/>
+<text x="801" y="916" class="small">LED 状态显示</text>
+<text x="801" y="938" class="small">set(on)</text>
+<path class="edge" d="M640 905 H785"/>
+<circle cx="640" cy="905" r="3" fill="#64748b"/>
+<rect x="45" y="1015" width="450" height="130" rx="5" fill="#fff"
+stroke="#a4b2c6"/>
+<text x="61" y="1037" class="stereo">«component»</text>
+<text x="61" y="1063" class="title">W_Nvm</text>
+<path d="M467 1030 h14 v20 h-14 z M463 1034 h8 v5 h-8 z M463 1042 h8 v5 h-8
+z" fill="white" stroke="#8394ad"/>
+<text x="61" y="1091" class="small">持久化数据的 RAM 快照显示</text>
+<text x="61" y="1113" class="small">set(value)</text>
+<path class="edge" d="M640 1080 H495"/>
+<rect x="785" y="1015" width="450" height="130" rx="5" fill="#fff"
+stroke="#a4b2c6"/>
+<text x="801" y="1037" class="stereo">«component»</text>
+<text x="801" y="1063" class="title">W_Ram</text>
+<path d="M1207 1030 h14 v20 h-14 z M1203 1034 h8 v5 h-8 z M1203 1042 h8 v5
+h-8 z" fill="white" stroke="#8394ad"/>
+<text x="801" y="1091" class="small">静态 RAM 使用情况显示</text>
+<text x="801" y="1113" class="small">set(usedBytes, totalBytes)</text>
+<path class="edge" d="M640 1080 H785"/>
+<circle cx="640" cy="1080" r="3" fill="#64748b"/>
+<rect x="45" y="1190" width="450" height="130" rx="5" fill="#fff"
+stroke="#a4b2c6"/>
+<text x="61" y="1212" class="stereo">«component»</text>
+<text x="61" y="1238" class="title">W_Dots</text>
+<path d="M467 1205 h14 v20 h-14 z M463 1209 h8 v5 h-8 z M463 1217 h8 v5 h-8
+z" fill="white" stroke="#8394ad"/>
+<text x="61" y="1266" class="small">页面指示点</text>
+<text x="61" y="1288" class="small">create(parent, active)</text>
+<path class="edge" d="M640 1255 H495"/>
+<circle cx="640" cy="1255" r="3" fill="#64748b"/>
+<rect x="785" y="1190" width="450" height="130" rx="5" fill="#f1edfb"
+stroke="#a4b2c6"/>
+<text x="801" y="1212" class="stereo">«library»</text>
+<text x="801" y="1238" class="title">LVGL 对象与绘制</text>
+<text x="801" y="1266" class="small">上述组件内部调用 LVGL
+管理对象和样式</text>
+<text x="801" y="1288" class="small">ui_disp 驱动 LVGL 渲染并输出至 LCD</text>
+<text x="45" y="1372" class="small">主干只表达共同的 HSM
+调用来源，不代表组件之间转发事件或串行调用。</text>
+<text x="45" y="1402" class="small">Assets 提供已校验像素；NVM 提供 RAM
+快照；TimeEvt 经 Ui_post 投递超时事件。</text>
+<text x="45" y="1445" class="stereo">图例：虚线开口箭头 =
+调用/使用依赖；圆点 = 共用线段的连接点；外框 = UI 聚合边界。</text>
+</svg>

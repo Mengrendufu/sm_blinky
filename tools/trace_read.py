@@ -39,8 +39,8 @@ ESC, MARK = 0x7D, 0x7E
 # 丢 5% 35% → 62%（已接近上限：5% 丢字节会碰到约一半的帧）；坏 5 个字节
 # 24% → 98%。
 HUNT, SEQ, RECID, LEN, PAYLOAD, CHK = 0, 1, 2, 3, 4, 5
-# 记录块一共 8 字节（recId + len + 载荷 + 校验），载荷最多 6。
-DEFAULT_MAX_PAYLOAD = 6
+# HDLC 长度为 8 位；App tracer 的 6 B 池限制不限制 bootloader 帧。
+DEFAULT_MAX_PAYLOAD = 255
 
 
 def decode(buf, max_payload=DEFAULT_MAX_PAYLOAD, stats=None):
@@ -117,7 +117,7 @@ def main():
                     help="打印到达时刻与间隔（刷屏有没有饿死 idle 泵）")
     ap.add_argument("--raw", default=None, help="把原始字节存到这个路径")
     ap.add_argument("--max-payload", type=int, default=DEFAULT_MAX_PAYLOAD,
-                    help="记录载荷上限（默认 6，见记录块的 8 字节上限）")
+                    help="记录载荷上限（默认 255；App tracer 池另有限制）")
     a = ap.parse_args()
 
     ser = serial.Serial()

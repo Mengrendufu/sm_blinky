@@ -22,7 +22,7 @@ if [[ ! -f "$ROOT/tools/flash.jlink" ]]; then
 fi
 
 if [[ "${1:-}" != "-nobuild" ]]; then
-    echo "[flash] build..."
+    echo "[flash] build both images..."
     (cd "$ROOT" && cmake --preset debug && cmake --build --preset build-debug)
 fi
 

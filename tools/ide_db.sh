@@ -5,11 +5,8 @@
 #
 # Two things stand between cmake --preset debug and such a database:
 #
-#   * CMake exports every target it knows. The bootloader is a second
-#     executable, so the files it shares with the application appear twice,
-#     with different flags, and an editor picks one of them arbitrarily. The
-#     database built here keeps the application target and the lvgl library it
-#     links, and drops the rest.
+#   * CMake exports all targets. Keep App, bootloader and LVGL; prefer App's
+#     flags for shared sources so each file has one deterministic entry.
 #
 #   * CMake leaves the compiler's implicit include directories out of the
 #     commands. clangd then parses with its own builtins and reports missing
@@ -30,12 +27,12 @@ test -f CMakePresets.json || { echo "no CMakePresets.json in $root" >&2; exit 1;
 
 cmake --preset debug
 
-python3 - build/debug/compile_commands.json sm_blinky.elf.dir lvgl.dir <<'PY'
+python3 - build/debug/compile_commands.json <<'PY'
 import json
 import subprocess
 import sys
 
-path, app_marker, lib_marker = sys.argv[1], sys.argv[2], sys.argv[3]
+path = sys.argv[1]
 
 probe = subprocess.run(["arm-none-eabi-gcc", "-E", "-v", "-"], input="",
                        capture_output=True, text=True)
@@ -54,9 +51,11 @@ entries = json.load(open(path, encoding="utf-8"))
 kept, dropped = {}, 0
 for entry in entries:
     command = entry.get("command") or " ".join(entry.get("arguments", []))
-    if app_marker in command:
+    if "sm_blinky.elf.dir" in command:
+        rank = 3
+    elif "bootloader.elf.dir" in command:
         rank = 2
-    elif lib_marker in command:
+    elif "lvgl.dir" in command:
         rank = 1
     else:
         dropped += 1        # another target: not this project's business

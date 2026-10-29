@@ -7,15 +7,16 @@ an AST2 directory, then transfers directory sector and payload as one package.
 Bootloader verifies stored images before committing the directory.
 """
 import argparse, os, struct, subprocess, sys, time, zlib
+import tempfile
 import serial  # pyserial
 
 from asset_pack import build_pack, VERSION
+from hdlc_link import AssetLink
 
 JLINK = r"C:\mengrendufu\software_ins\JLink\JLink.exe"
 JL_OPTS = "-device STM32F103ZE -if SWD -speed 4000 -autoconnect 1 -ExitOnError 1 -NoGui 1"
-CMD = "cmd.exe"
 
-# ---- 线协议（握手部分已与目标机联调验证，见 AGENTS.md 的镜像布局条）----
+# HDLC IDs F0/F1 carry requests/replies; legacy inner fields follow.
 #   request  PC -> BL:  AA | ver(1) | len(4 BE) | crc32(4 BE)        10 B
 #                        crc32 覆盖 ver+len
 #   reply    BL -> PC:  55 | base(4 BE) | block(2 BE) | crc32(4 BE)  11 B
@@ -71,50 +72,46 @@ def noinit_addr(elf):
 def jlink_flag_and_reset(addr, tpl):
     """② 生成命令文件并执行：置标志 → 复位。（JLink 退出时用 qc，目标继续跑）"""
     script = open(tpl, encoding="utf-8").read().replace("@ADDR@", addr)
-    path = os.path.join(os.environ.get("TEMP", r"C:\tmp_atk"), "enter-burn.jlink")
+    task_dir = tempfile.mkdtemp(prefix="sm-blinky-burn-")
+    path = os.path.join(task_dir, "enter-burn.jlink")
     open(path, "w", encoding="utf-8").write(script)
-    win = path   # already a Windows path when run from Windows
-    if " " in win:
-        sys.exit("[burn] 路径带空格，cmd.exe 传不过去")
+    print(f"[burn] J-Link command file: {path}")
     t0 = time.time()
-    subprocess.run([CMD, "/c", f"{JLINK} {JL_OPTS} -CommandFile {win}"], check=True)
+    subprocess.run([JLINK, *JL_OPTS.split(), "-CommandFile", path],
+                   check=True)
     print(f"[burn] J-Link 完成，用时 {time.time()-t0:.1f} s")
 
 
-def handshake(ser, img_len):
-    """Negotiate package length and verify the handshake reply CRC."""
+def handshake(link, img_len):
+    """Negotiate through HDLC replies; diagnostic frames are routed apart."""
     core = struct.pack(">BI", PROTO_VER, img_len)
-    req = bytes([REQ_MAGIC]) + core + struct.pack(">I", zlib.crc32(core) & 0xFFFFFFFF)
-    deadline = time.time() + HANDSHAKE_TIMEOUT_S
+    req = bytes([REQ_MAGIC]) + core + struct.pack(
+        ">I", zlib.crc32(core) & 0xFFFFFFFF)
+    deadline = time.monotonic() + HANDSHAKE_TIMEOUT_S
     sent = 0
-    while time.time() < deadline:
-        ser.reset_input_buffer()
-        ser.write(req)
+    while time.monotonic() < deadline:
+        link.send(req)
         sent += 1
-        t0 = time.time()
-        while time.time() - t0 < 0.2:
-            b = ser.read(1)
-            if b and b[0] == NAK_MAGIC:
-                sys.exit("[burn] 目标回 NAK：版本 / 长度 / 帧 CRC 有一个没过")
-            if not (b and b[0] == ACK_MAGIC):
-                continue
-            rest = ser.read(ACK_LEN - 1)
-            if len(rest) != ACK_LEN - 1:
-                sys.exit(f"[burn] ACK 只收到 {len(rest) + 1}/{ACK_LEN} 字节")
-            body = bytes([ACK_MAGIC]) + rest[0:6]
-            crc = struct.unpack(">I", rest[6:10])[0]
-            want = zlib.crc32(body) & 0xFFFFFFFF
-            if crc != want:
-                sys.exit(f"[burn] ACK 的 CRC 对不上：{crc:08X} vs {want:08X}")
-            base, block = struct.unpack(">IH", rest[0:6])
-            print(f"[burn] ACK（第 {sent} 次握手）：基址 0x{base:08X}、块 {block} B、帧 CRC 验过")
-            return base, block
-    sys.exit("[burn] 握手超时。检查：① 串口开完后 rts/dtr 是否都是 deassert（否则 RESET 被压住）"
-             " ② J-Link 那一步是否成功 ③ BOOT0 是否被 RTS 拉高进了 ROM bootloader（再复位一次）")
+        answer = link.receive(REQ_MAGIC, 0, min(
+            0.05, max(0, deadline - time.monotonic())))
+        if answer is None:
+            continue
+        if answer == bytes([NAK_MAGIC]):
+            sys.exit("[burn] handshake rejected: version/length/CRC")
+        if len(answer) != ACK_LEN or answer[0] != ACK_MAGIC:
+            sys.exit("[burn] invalid framed handshake reply")
+        crc = struct.unpack(">I", answer[7:11])[0]
+        if crc != zlib.crc32(answer[:7]) & 0xFFFFFFFF:
+            sys.exit("[burn] handshake reply CRC mismatch")
+        base, block = struct.unpack(">IH", answer[1:7])
+        if block != BLOCK:
+            sys.exit("[burn] target block size differs from this uploader")
+        print(f"[burn] ACK ({sent} tries): base 0x{base:08X}, block {block}")
+        return base, block
+    sys.exit("[burn] HDLC handshake timed out; check reset/BOOT0/UART")
 
 
-
-def send_blocks(ser, img, corrupt=None):
+def send_blocks(link, img, corrupt=None):
     """④ 分块停等 + NAK 重传。--corrupt N 会故意把第 N 块的载荷改一个字节，用来验重传。"""
     total = len(img)
     blocks = 0
@@ -122,7 +119,6 @@ def send_blocks(ser, img, corrupt=None):
     # Each block now costs a 4 KB sector erase (~130 ms) plus programming and a
     # read-back, so the wait for its answer has to be seconds, not the 50 ms
     # the handshake used.
-    ser.timeout = 3.0
     t0 = time.time()
     for idx, off in enumerate(range(0, total, BLOCK)):
         blk = bytearray(img[off:off + BLOCK])
@@ -135,10 +131,9 @@ def send_blocks(ser, img, corrupt=None):
             print(f"[burn] 故意弄坏第 {idx} 块的第一个字节（块头 CRC 仍是好数据的）")
         hdr = struct.pack(">BHHH", BLK_MAGIC, idx, len(blk), lo16)
         for attempt in range(1, MAX_BLOCK_RETRY + 1):
-            ser.reset_input_buffer()
-            ser.write(hdr + bytes(blk))
-            reply = ser.read(1)
-            if reply and reply[0] == ACK_MAGIC:
+            link.send(hdr, bytes(blk))
+            reply = link.receive(BLK_MAGIC, idx, BLOCK_ACK_TIMEOUT_S)
+            if reply == bytes([ACK_MAGIC]):
                 blocks += 1
                 break
             retries += 1
@@ -157,17 +152,22 @@ def send_blocks(ser, img, corrupt=None):
           f"（{total / 1024:.0f} KiB；115200 的理论下限约 {total * 10 / 115200:.1f} s）")
 
 
-def send_final(ser, img):
+def send_final(link, img):
     """Finish transport; target checks NOR images before directory commit."""
     crc = zlib.crc32(img) & 0xFFFFFFFF
     fin = bytes([FIN_MAGIC]) + struct.pack(">I", len(img)) + struct.pack(">I", crc)
-    ser.write(fin)
+    link.send(fin)
     # Final verification rereads all stored images before sending ACK.
-    ser.timeout = 10.0
-    r = ser.read(1)
-    if not (r and r[0] == ACK_MAGIC):
+    r = link.receive(FIN_MAGIC, 0, 10.0)
+    if r != bytes([ACK_MAGIC]):
         sys.exit(f"[burn] 最终校验没过（目标机回 {r.hex() if r else '无应答'}）")
     print(f"[burn] 最终校验通过：{len(img)} B，CRC32 {crc:08X}")
+
+
+def print_trace(sequence, kind, payload):
+    text = payload.decode("utf-8", errors="replace") if kind == 0xF2 else (
+        f"id={kind}: {payload.hex()}")
+    print(f"[trace] {sequence} {text.rstrip()}")
 
 
 def main():
@@ -179,7 +179,9 @@ def main():
     ap.add_argument("--elf", default="build/debug/sm_blinky.elf")
     ap.add_argument("--noinit", help="noinit base hex; skips arm-none-eabi-nm (WSL only)")
     ap.add_argument("--tpl", default=os.path.join(os.path.dirname(__file__), "enter-burn.jlink.tpl"))
-    ap.add_argument("--no-jlink", action="store_true", help="跳过 J-Link（标志已置好时用，便于调协议）")
+    ap.add_argument("--no-jlink", action="store_true",
+                    help="skip J-Link; reset into the 200 ms HELLO window "
+                         "within 5 s, or use an already-set upgrade flag")
     ap.add_argument("--handshake-only", action="store_true", help="握上手就停（联调用，不碰 flash）")
     ap.add_argument("--blocks-only", action="store_true",
                     help="完整烧写并提交后结束（兼容旧参数）")
@@ -199,12 +201,13 @@ def main():
     try:
         if not a.no_jlink:
             jlink_flag_and_reset(a.noinit if a.noinit else noinit_addr(a.elf), a.tpl)   # ②
-        handshake(ser, len(img))                         # ③
+        link = AssetLink(ser, trace=print_trace)
+        handshake(link, len(img))                         # ③
         if a.handshake_only:
             print("[burn] --handshake-only：到此为止（不碰 flash）")
             return
-        send_blocks(ser, img, a.corrupt_block)            # ④
-        send_final(ser, img)                             # ⑤
+        send_blocks(link, img, a.corrupt_block)            # ④
+        send_final(link, img)                             # ⑤
         if a.blocks_only:
             print("[burn] --blocks-only：完整资产包已烧写并提交")
             return
