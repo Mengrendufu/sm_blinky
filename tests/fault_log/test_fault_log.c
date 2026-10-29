@@ -147,8 +147,19 @@ int main(int argc, char **argv) {
     assert(BSP_faultRecordRead_(stash, &out) == BSP_FAULT_EMPTY);
     dumpWire(argv[1], "duplicate.bin");
     wireSize = 0U;
+    unsigned const previousUartCalls = uartCalls;
+    assert(mprotect((void *)(uintptr_t)PROJECT_LOG_BASE,
+                    PROJECT_LOG_BYTES, PROT_NONE) == 0);
     assert(!Bl_faultBoot(&uart));
+    assert(mprotect((void *)(uintptr_t)PROJECT_LOG_BASE,
+                    PROJECT_LOG_BYTES, PROT_READ | PROT_WRITE) == 0);
+    assert(wireSize == 0U && uartCalls == previousUartCalls);
     assert(programs == writes && erases == 0U);
+    assertLatest(&a, 1U);
+    dumpWire(argv[1], "empty.bin");
+    // Nonempty invalid RAM retains its existing diagnostic/replay behavior.
+    memset((void *)stash, 0xA5, sizeof(*stash));
+    assert(!Bl_faultBoot(&uart));
     dumpWire(argv[1], "replay.bin");
     // Same PC/status but a different register must produce a new record.
     assert(Bl_faultLogSave(&b) == BL_FAULT_SAVED);

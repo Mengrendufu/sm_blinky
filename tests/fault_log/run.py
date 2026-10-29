@@ -39,6 +39,9 @@ for name, result in (("saved", 1), ("duplicate", 2), ("replay", 0),
     frames = namespace["decode"]((work / f"{name}.bin").read_bytes(),
                                 stats=stats)
     assert stats["errors"] == 0, (name, stats)
+    if name == "replay":
+        assert frames[0][1] == 113
+        frames = frames[1:]
     assert [frame[1] for frame in frames] == [1, 2]
     assert all(len(frame[2]) == 64 for frame in frames)
     assert (frames[1][0] - frames[0][0]) & 255 == 1
@@ -52,6 +55,7 @@ for name, result in (("saved", 1), ("duplicate", 2), ("replay", 0),
     assert values[2:] == tuple(expected), (name, values)
 
 stats = {}
+assert (work / "empty.bin").read_bytes() == b""
 frames = namespace["decode"]((work / "invalid.bin").read_bytes(), stats=stats)
 assert stats["errors"] == 0 and [f[1] for f in frames] == [113]
 print("PASS: existing HDLC parser, all register words, escaping and statuses")

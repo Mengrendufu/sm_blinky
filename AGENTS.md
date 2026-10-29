@@ -32,6 +32,7 @@ cmake --preset debug && cmake --build --preset build-debug
 Fault 先保存 RAM；bootloader 初始化串口后比较完整现场，再追加到
 片内 Flash 尾部两个 2 KB 页，相同则跳过。持久化成功后才清 RAM。
 App 不再消费异常记录；日志输出由 bootloader 完成。
+空 no-init RAM 直接返回，不查询 Flash 或回放；非空路径保持原行为。
 有效新现场输出后停留，历史回放继续启动；保存成功清 RAM 后可手动
 复位恢复启动。保留 RecID 0=assertion、1/2=完整现场两帧。
 App Flash 长度为 492 KB，最后 4 KB 仅归诊断日志，不随镜像烧录。

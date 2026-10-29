@@ -36,6 +36,9 @@ bool Bl_faultBoot(UART_HandleTypeDef *uart) {
         (volatile BSP_FaultRecord *)(void *)&_sfault;
     BSP_FaultRecord record;
     BSP_FaultStatus const status = BSP_faultRecordRead_(stash, &record);
+    if (status == BSP_FAULT_EMPTY) {
+        return false;
+    }
     Bl_FaultLogResult result = BL_FAULT_REPLAY;
     uint32_t sequence = 0U;
 

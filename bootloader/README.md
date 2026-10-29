@@ -28,8 +28,10 @@ writes and page rotation; full-snapshot duplicates of the latest entry are
 skipped. UART output and normal restarts never erase the saved history.
 If this boot finds a valid no-init snapshot, it reports once and stays here,
 before upgrade-mode selection or App handover, even if saving or UART fails.
-This is the future OTA rollback trigger. History replay alone does not
-block handover. A successful save clears RAM, so another reset may boot.
+This is the future OTA rollback trigger. Empty retained RAM skips Flash
+lookup and fault output. Invalid nonempty RAM retains diagnostic/history
+replay without blocking handover. A successful save clears RAM, so another
+reset may boot silently with respect to retained fault records.
 See `../docs/fault-record.md` for failure handling and the wire format.
 
 Control commands/replies use HDLC; asset bytes remain raw and length-bound.
