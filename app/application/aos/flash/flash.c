@@ -163,11 +163,6 @@ static void Flash_sleepMs_(void *context, uint32_t delayMs) {
     vTaskDelay(pdMS_TO_TICKS(delayMs));
 }
 
-static void Flash_yield_(void *context) {
-    (void)context;
-    taskYIELD();
-}
-
 static uint32_t Flash_now_(void *context) {
     (void)context;
     return HAL_GetTick();
@@ -183,7 +178,6 @@ static BSP_flashWaitOperations const Flash_runWaitOperations_ = {
     .waitDone = &Flash_waitDone_,
     .notifyDone = &Flash_notifyDone_,
     .sleepMs = &Flash_sleepMs_,
-    .yield = &Flash_yield_,
     .now = &Flash_now_,
     .elapsedMs = &Flash_elapsedMs_,
 };

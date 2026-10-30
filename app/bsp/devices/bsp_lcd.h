@@ -47,14 +47,12 @@ extern BSP_lcdOperations const BSP_lcdDmaOperations;
 
 // Waiting operations owned by the display adapter. isCaller accepts only
 // the owner, never an ISR. waitDone consumes one completion, including an
-// early notifyDone. notifyDone supports inline and ISR calls. yield is a
-// scheduling point between bounded pixel transfers; it may be a no-op.
+// early notifyDone. notifyDone supports inline and ISR calls.
 // Tables and context must outlive their binding. Times are milliseconds.
 typedef struct {
     bool (*isCaller)(void *context);
     bool (*waitDone)(void *context, uint32_t timeoutMs);
     void (*notifyDone)(void *context);
-    void (*yield)(void *context);
 } BSP_lcdWaitOperations;
 
 struct BSP_Lcd {

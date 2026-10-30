@@ -468,7 +468,6 @@ void BSP_flashBind(BSP_Flash *me, BSP_flashOperations const *operations,
     SM_REQUIRE(waitOperations->waitDone != 0);
     SM_REQUIRE(waitOperations->notifyDone != 0);
     SM_REQUIRE(waitOperations->sleepMs != 0);
-    SM_REQUIRE(waitOperations->yield != 0);
     SM_REQUIRE(waitOperations->now != 0);
     SM_REQUIRE(waitOperations->elapsedMs != 0);
     if (me->waitOperations != (BSP_flashWaitOperations const *)0) {
@@ -555,9 +554,6 @@ bool BSP_flashRead(BSP_Flash *me, uint32_t address, void *dst, uint32_t len) {
         address += n;
         out += n;
         len -= n;
-        if (ok && (len > 0U)) {
-            me->waitOperations->yield(me->waitContext);
-        }
     }
     me->busy = false;
     return ok;
@@ -584,9 +580,6 @@ bool BSP_flashWrite(BSP_Flash *me, uint32_t address,
         address += n;
         in += n;
         len -= n;
-        if (ok && (len > 0U)) {
-            me->waitOperations->yield(me->waitContext);
-        }
     }
     me->busy = false;
     return ok;

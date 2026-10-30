@@ -756,7 +756,6 @@ void BSP_lcdBind(BSP_Lcd *me, BSP_lcdOperations const *operations,
     SM_REQUIRE(waitOperations->isCaller != 0);
     SM_REQUIRE(waitOperations->waitDone != 0);
     SM_REQUIRE(waitOperations->notifyDone != 0);
-    SM_REQUIRE(waitOperations->yield != 0);
     if (me->waitOperations != (BSP_lcdWaitOperations const *)0) {
         SM_REQUIRE(me->waitOperations->isCaller(me->waitContext));
     }
@@ -825,9 +824,6 @@ bool BSP_lcdWriteArea(BSP_Lcd *me, uint16_t xs, uint16_t ys, uint16_t xe,
         ok = BSP_lcdWaitTransfer_(me);
         pixels += n;
         left -= n;
-        if (ok && (left > 0U)) {
-            me->waitOperations->yield(me->waitContext);
-        }
     }
     me->busy = false;
     return ok;

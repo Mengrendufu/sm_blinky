@@ -257,10 +257,6 @@ static void Bl_flashSleepMs_(void *context, uint32_t delayMs) {
     HAL_Delay(delayMs);
 }
 
-static void Bl_flashYield_(void *context) {
-    (void)context;
-}
-
 static uint32_t Bl_flashNow_(void *context) {
     (void)context;
     return HAL_GetTick();
@@ -277,7 +273,6 @@ static void Bl_flashBindWait_(void) {
         .waitDone = &Bl_flashWaitDone_,
         .notifyDone = &Bl_flashNotifyDone_,
         .sleepMs = &Bl_flashSleepMs_,
-        .yield = &Bl_flashYield_,
         .now = &Bl_flashNow_,
         .elapsedMs = &Bl_flashElapsedMs_,
     };

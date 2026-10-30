@@ -246,17 +246,11 @@ static void Ui_lcdNotifyDone_(void *context) {
     }
 }
 
-static void Ui_lcdYield_(void *context) {
-    (void)context;
-    taskYIELD();
-}
-
 static void Ui_lcdBindWait_(void) {
     static BSP_lcdWaitOperations const operations = {
         .isCaller = &Ui_lcdIsCaller_,
         .waitDone = &Ui_lcdWaitDone_,
         .notifyDone = &Ui_lcdNotifyDone_,
-        .yield = &Ui_lcdYield_,
     };
 
     Ui_lcd_ = BSP_lcdDevice();

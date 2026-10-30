@@ -59,7 +59,7 @@ extern BSP_flashOperations const BSP_flashDmaOperations;
 // Waiting operations required by BSP, supplied and owned by the application.
 // waitDone consumes one completion, even if notifyDone ran before the wait.
 // notifyDone supports both inline and ISR calls. sleepMs is a busy delay or
-// a yielding delay; yield is a scheduling point between bounded transfers.
+// a yielding delay.
 // now/elapsedMs preserve the caller's existing time source and wrap rules.
 // No callback/table/context may expire while bound to the device.
 typedef struct {
@@ -67,7 +67,6 @@ typedef struct {
     bool (*waitDone)(void *context, uint32_t timeoutMs);
     void (*notifyDone)(void *context);
     void (*sleepMs)(void *context, uint32_t delayMs);
-    void (*yield)(void *context);
     uint32_t (*now)(void *context);
     uint32_t (*elapsedMs)(void *context, uint32_t started);
 } BSP_flashWaitOperations;
