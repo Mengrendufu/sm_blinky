@@ -48,9 +48,9 @@ void Flash_ctor(void) {
 // NVS belongs to this AO. Restore runs on its task after asset loading.
 static struct nvs_fs Flash_nvs_;
 #define FLASH_NVS_MOUNT_ATTEMPTS 2U
-#define FLASH_TRACE_NVS_MOUNT_ERROR 95U
-#define FLASH_TRACE_NVS_UNAVAILABLE 96U
-#define FLASH_TRACE_NVM_STORE_ERROR 98U
+#define FLASH_TRACE_NVS_MOUNT_ERROR 8U
+#define FLASH_TRACE_NVS_UNAVAILABLE 9U
+#define FLASH_TRACE_NVM_STORE_ERROR 11U
 
 // == DEBUG: failure records; signed error is encoded as four BE bytes. ==
 static void Flash_dbgNvsError_(uint8_t record, uint16_t detail, int error) {
@@ -66,10 +66,10 @@ static void Flash_dbgNvsError_(uint8_t record, uint16_t detail, int error) {
 }
 
 // Record 91 is retired. Each boot value now retains all 32 bits.
-#define FLASH_TRACE_NVS_MOUNT_MS 99U
-#define FLASH_TRACE_NVS_RESTORE_MS 100U
-#define FLASH_TRACE_NVS_RESTORE_RESULT 101U
-#define FLASH_TRACE_NVM_BOOT_COUNT 102U
+#define FLASH_TRACE_NVS_MOUNT_MS 12U
+#define FLASH_TRACE_NVS_RESTORE_MS 13U
+#define FLASH_TRACE_NVS_RESTORE_RESULT 14U
+#define FLASH_TRACE_NVM_BOOT_COUNT 15U
 
 static void Flash_dbgNvsValue_(uint8_t record, uint32_t value) {
     SM_TRACE_BEGIN(record, 4)

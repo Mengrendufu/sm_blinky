@@ -37,6 +37,9 @@ App 不再消费异常记录；日志输出由 bootloader 完成。
 复位恢复启动。保留 RecID 0=assertion、1/2=完整现场两帧。
 App Flash 长度为 492 KB，最后 4 KB 仅归诊断日志，不随镜像烧录。
 串口控制与应答使用 HDLC，资产载荷按块头长度原样接收，不转义。
+日志链路和 Bootloader 资产链路各自定义 ID。日志当前分配 0–21，
+0–2 为固定保留；共用 UART 时接收端按阶段选择协议，未来双 UART
+可按端口选择。
 bootloader/application/bl_main.c 保留平台入口、回调；bl_boot.c/.h
 组织阶段 HSM、传输 HSM 与交接动作，唯一外露入口为 Bl_Boot_run。
 顶层按阶段决定命令去向；无升级标志时 200 ms 轮询 HELLO，超时检查
@@ -321,9 +324,9 @@ python3 ~/.config/opencode/skills/sm/uml-sync/scripts/export_model_tree.py \
   AO 按线程句柄匹配；smin/mmin 各显历史最低剩余块数/总块数。
   CPU 保持实时窗口统计，FreeRTOS tick 为 1 ms，不是事件时基 10 ms。
 - 启动计时为三个打点、两段耗时：BSP 初始化、任务装配。
-  新 trace 94：四字节，两个大端 uint16 毫秒值；旧 trace 79 退休。
-  不含资产/NVS 或首帧；NVS trace 99/100/101/102 分别为挂载耗时、
-  恢复耗时、恢复结果、启动计数，均为 32 位；旧 trace 91 退休。
+  trace 7：四字节，两个大端 uint16 毫秒值。
+  不含资产/NVS 或首帧；NVS trace 12/13/14/15 分别为挂载耗时、
+  恢复耗时、恢复结果、启动计数，均为 32 位。
 - HSM/组件/事件协议使用 sm_assert；强 FreeRTOS 关联的任务、调度、
   通知契约使用 configASSERT。历史测量不充当当前镜像验证结果。
 

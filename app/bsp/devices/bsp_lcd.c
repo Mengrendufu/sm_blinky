@@ -71,16 +71,16 @@
 #define LCD_RETRY_SETTLE_MS  20U
 // Trace records: ==LCD==[RDID][<hi> <lo>]==[ST7789/??????]==
 //                ==LCD==[DISPON]==
-#define LCD_TRACE_RDID_OK   12U
-#define LCD_TRACE_RDID_BAD  13U
-#define LCD_TRACE_DISP_ON   20U
-#define LCD_TRACE_INIT_MS 103U
-#define LCD_TRACE_INIT_ATTEMPTS 104U
-#define LCD_TRACE_READY_FAILURES 105U
-#define LCD_TRACE_WRITE_FAILURES 106U
+#define LCD_TRACE_RDID_OK   3U
+#define LCD_TRACE_RDID_BAD  4U
+#define LCD_TRACE_DISP_ON   5U
+#define LCD_TRACE_INIT_MS 16U
+#define LCD_TRACE_INIT_ATTEMPTS 17U
+#define LCD_TRACE_READY_FAILURES 18U
+#define LCD_TRACE_WRITE_FAILURES 19U
 // Trace 107 (clear-check failures) retired; do not reuse.
-#define LCD_TRACE_INIT_VERIFIED 108U
-#define LCD_TRACE_COMM_FAILURES 109U
+#define LCD_TRACE_INIT_VERIFIED 20U
+#define LCD_TRACE_COMM_FAILURES 21U
 
 // The bring-up facts are kept here instead of pushed: the tracer comes up
 // with the first task, and a push before the scheduler enters a FreeRTOS

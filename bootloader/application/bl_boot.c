@@ -126,7 +126,6 @@ static uint8_t Bl_requestKind_;
 static uint16_t Bl_requestIndex_;
 
 //============================================================================
-static void Bl_say_(char const *text);
 static bool Bl_appSane_(void);
 static void Bl_handOver_(void) __attribute__((noreturn));
 static uint32_t Bl_crc32_(uint8_t const *data, uint32_t len);
@@ -141,19 +140,6 @@ static void Bl_ackFrame_(void);
 static void Bl_ack1_(void);
 static void Bl_nak_(void);
 
-//............................................................................
-static void Bl_say_(char const *text) {
-    size_t left = strlen(text);
-    while (left != 0U) {
-        uint8_t const n = left > UINT8_MAX ? UINT8_MAX : (uint8_t)left;
-        if (!Bl_linkSend(Bl_uart_, ASSET_LINK_TEXT,
-                         (uint8_t const *)text, n)) {
-            return;
-        }
-        text += n;
-        left -= n;
-    }
-}
 //............................................................................
 // CRC32, the same one zlib.crc32() computes (poly 0xEDB88320, init all ones,
 // final xor), so the PC side can use its standard library call. The update
@@ -616,8 +602,6 @@ static SM_RetState Bl_bootStopped_(SM_Hsm *me, Bl_TransferEvt const *e);
 static void Bl_bootHandshakeEntry_(SM_Hsm *me);
 static void Bl_bootAssetsEntry_(SM_Hsm *me);
 static void Bl_bootAppEntry_(SM_Hsm *me);
-static void Bl_bootFaultEntry_(SM_Hsm *me);
-static void Bl_bootInvalidEntry_(SM_Hsm *me);
 static SM_HsmState const Bl_bootHandshake = {
     SM_HSM_TOP, NULL, (SM_ActionHandler)Bl_bootHandshakeEntry_, NULL,
     (SM_StateHandler)Bl_bootHandshake_
@@ -629,12 +613,13 @@ static SM_HsmState const Bl_bootAssets = {
 static SM_HsmState const Bl_bootApp = {
     SM_HSM_TOP, NULL, (SM_ActionHandler)Bl_bootAppEntry_, NULL, NULL
 };
+// Future OTA rollback trigger for a valid no-init fault snapshot.
 static SM_HsmState const Bl_bootFault = {
-    SM_HSM_TOP, NULL, (SM_ActionHandler)Bl_bootFaultEntry_, NULL,
+    SM_HSM_TOP, NULL, NULL, NULL,
     (SM_StateHandler)Bl_bootStopped_
 };
 static SM_HsmState const Bl_bootInvalidApp = {
-    SM_HSM_TOP, NULL, (SM_ActionHandler)Bl_bootInvalidEntry_, NULL,
+    SM_HSM_TOP, NULL, NULL, NULL,
     (SM_StateHandler)Bl_bootStopped_
 };
 
@@ -716,7 +701,6 @@ static SM_RetState Bl_bootHandshake_(SM_Hsm *me, Bl_TransferEvt const *e) {
 static void Bl_bootAssetsEntry_(SM_Hsm *me) {
     (void)me;
     Bl_boot_.receiveTimeout = 20U;
-    Bl_say_("[bootloader] burn mode: HDLC commands, raw asset data\r\n");
     BSP_flashInit();
     Bl_flashBindWait_();
     HdlcParser_ctor(&Bl_transfer_.parser, &Bl_controlFrame_, NULL);
@@ -745,19 +729,7 @@ static SM_RetState Bl_bootAssets_(SM_Hsm *me, Bl_TransferEvt const *e) {
 
 static void Bl_bootAppEntry_(SM_Hsm *me) {
     (void)me;
-    Bl_say_("[bootloader] handing over to the app\r\n");
     Bl_handOver_();
-}
-
-static void Bl_bootFaultEntry_(SM_Hsm *me) {
-    (void)me;
-    Bl_say_("[bootloader] retained fault: staying put\r\n");
-    // Future OTA rollback trigger for a valid no-init fault snapshot.
-}
-
-static void Bl_bootInvalidEntry_(SM_Hsm *me) {
-    (void)me;
-    Bl_say_("[bootloader] app vector table looks wrong: staying put\r\n");
 }
 
 static SM_RetState Bl_bootStopped_(SM_Hsm *me, Bl_TransferEvt const *e) {
@@ -777,7 +749,6 @@ static void Bl_bootDispatch_(Bl_TransferEvt const *e) {
 
 void Bl_Boot_run(UART_HandleTypeDef *uart) {
     Bl_uart_ = uart;
-    Bl_say_("\r\n[bootloader] up\r\n");
     SM_Hsm_init_(&Bl_boot_.hsm, (SM_InitHandler)Bl_bootInitial_);
     for (;;) {
         Bl_TransferEvt e = {.sig = BL_BYTE_SIG};

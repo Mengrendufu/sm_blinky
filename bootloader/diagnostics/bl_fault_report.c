@@ -54,10 +54,6 @@ bool Bl_faultBoot(UART_HandleTypeDef *uart) {
     else {
         if (status == BSP_FAULT_INVALID) {
             BSP_faultRecordClear_(stash);
-            uint8_t const unused = 0U;
-            if (uart != NULL) {
-                (void)Bl_linkSend(uart, 113U, &unused, 0U);
-            }
         }
         if (!Bl_faultLogLatest(&record, &sequence)) {
             return false;

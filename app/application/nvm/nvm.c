@@ -77,7 +77,7 @@ uint32_t Nvm_bootCount(void) {
 }
 
 // == DEBUG: per-item restore failure; protocol 97: UINT16 ID, INT32 error. ==
-#define NVM_TRACE_RESTORE_ERROR 97U
+#define NVM_TRACE_RESTORE_ERROR 10U
 static void Nvm_dbgRestoreError_(Nvm_Id id, int error) {
     uint32_t const bits = (uint32_t)(int32_t)error;
     SM_TRACE_BEGIN(NVM_TRACE_RESTORE_ERROR, 6)

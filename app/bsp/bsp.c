@@ -58,7 +58,7 @@ void BSP_Tracer_init(void) {
 // after task setup. Assets/NVS load later on the Flash AO and are excluded.
 // Record 79 (three intervals, including old asset loading) is retired.
 #define BSP_DBG_BOOT_MARKS 3U
-#define BSP_TRACE_BOOT_TIMING 94U
+#define BSP_TRACE_BOOT_TIMING 7U
 
 static uint32_t BSP_dbgBootMs_[BSP_DBG_BOOT_MARKS];
 static uint8_t BSP_dbgBootMarkIdx_;

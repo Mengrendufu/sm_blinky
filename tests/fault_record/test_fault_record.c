@@ -10,7 +10,7 @@ static struct {
     uint32_t guard;
 } retained;
 static uint32_t BSP_dbgBootMs_[3];
-#define BSP_TRACE_BOOT_TIMING 94U
+#define BSP_TRACE_BOOT_TIMING 7U
 static unsigned traces, position;
 #define SM_TRACE_BEGIN(id, len) do { \
     assert((id) == BSP_TRACE_BOOT_TIMING && (len) == 4U); position = 0U;
