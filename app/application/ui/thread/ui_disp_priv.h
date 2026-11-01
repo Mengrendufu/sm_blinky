@@ -21,10 +21,6 @@
 // Called once on the UI thread; all lv_* calls stay on that same thread.
 void Ui_dispInit(void);
 
-// Request a whole-screen redraw and track its final flush. The HSM owns
-// page objects/backgrounds and decides when backlight becomes visible.
-void Ui_dispRequestFrame(void);
-
 // UI-thread operation; visibility timing belongs to HSM state actions.
 void Ui_dispBacklight(bool on);
 

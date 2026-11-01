@@ -707,8 +707,13 @@ static void BSP_lcdWritePixelsDma_(void *device, uint16_t const *pixels,
 
     // HAL start does not change width bits. PINC walks CPAR (the source);
     // CMAR stays on LCD_DAT_ADDR so FSMC RS never flips into command mode.
+    // TC leaves EN set. Width fields are writable only while disabled;
+    // HAL_DMA_Start_IT disables too late for this configuration change.
+    __HAL_DMA_DISABLE(&lcdDma_);
     MODIFY_REG(lcdDma_.Instance->CCR, DMA_CCR_PSIZE | DMA_CCR_MSIZE,
                size | (size << 2U));
+    SM_REQUIRE((lcdDma_.Instance->CCR & (DMA_CCR_PSIZE | DMA_CCR_MSIZE))
+               == (size | (size << 2U)));
     // Publish borrowed pixel stores before the channel starts reading them.
     __DSB();
     if (HAL_DMA_Start_IT(&lcdDma_, (uint32_t)(uintptr_t)pixels,

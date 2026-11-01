@@ -14,6 +14,7 @@ void SST_EvtPool_init(void *sto, PoolCtr poolSize, PoolCtr blockSize);
 typedef struct {
     unsigned min;
     unsigned total;
+    unsigned blockSize;
 } SST_EvtPoolLevel;
 
 // Registered poolId starts at 1, matching SST_Evt.poolId. Read atomically;

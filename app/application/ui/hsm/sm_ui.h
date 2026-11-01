@@ -45,12 +45,10 @@
 #define UI_DIAL_TICKS   3U
 
 // Required display capabilities, called synchronously on the UI thread.
-// requestFrame submits a repaint request; it does not wait for rendering.
 // readFps returns the adapter's cached completed-refresh rate.
 // Bind before initialization; the immutable table/context outlive the HSM.
 typedef struct {
     void *context;
-    void (*requestFrame)(void *context);
     void (*setBacklight)(void *context, bool on);
     uint32_t (*readFps)(void *context);
 } Sm_Ui_DisplayOperations;

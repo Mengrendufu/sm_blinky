@@ -73,7 +73,8 @@ SST_EvtPoolLevel SST_EvtPool_level(unsigned poolId)
     DBC_REQUIRE(400, poolId > 0U && poolId <= l_evtPoolsNum);
     StaticPool const * const pool = &l_evtPools[poolId - 1U];
     SST_EvtPoolLevel const level = {
-        .min = (unsigned)pool->nMin, .total = (unsigned)pool->nTot
+        .min = (unsigned)pool->nMin, .total = (unsigned)pool->nTot,
+        .blockSize = (unsigned)pool->blockSize
     };
     SST_PORT_CRIT_EXIT();
     return level;

@@ -25,6 +25,8 @@ void W_Ram_create(struct W_Ram *r, struct _lv_obj_t *parent) {
 
     r->lineB = WidgetIO_label(parent, "-", 0x9AA3ACU);
     lv_obj_align((lv_obj_t *)r->lineB, LV_ALIGN_TOP_MID, 0, 254);
+    lv_obj_add_flag((lv_obj_t *)r->lineA, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag((lv_obj_t *)r->lineB, LV_OBJ_FLAG_HIDDEN);
 }
 //............................................................................
 void W_Ram_set(struct W_Ram *r, uint32_t usedBytes, uint32_t totalBytes) {

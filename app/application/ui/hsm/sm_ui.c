@@ -16,14 +16,8 @@
 
 SM_DEFINE_MODULE("sm_ui")
 
-static char const * const Sm_Ui_resourceNames_[UI_METRIC_ROWS] = {
-    "ui", "Flsh", "Blky", "tmr", "idle", "nmin", "imin", "smin", "mmin"
-};
-static char const * const Sm_Ui_resourceUnits_[UI_METRIC_ROWS] = {
-    "w", "w", "w", "w", "w", "-", "-", "-", "-"
-};
-_Static_assert(UI_METRIC_ROWS == W_BARPANEL_ROWS,
-               "resource snapshot and panel rows disagree");
+static char const * const Sm_Ui_resourceNames_[] = {"free", "used"};
+static char const * const Sm_Ui_resourceUnits_[] = {"w", "w"};
 
 static void Sm_Ui_refreshResources_(Sm_Ui *self);
 static void Sm_Ui_stepDial_(Sm_Ui *self);
@@ -103,8 +97,7 @@ SM_HsmState SM_HSM_ROM Sm_Ui_active = {
     (SM_StateHandler)&Sm_Ui_active_         // handler
 };
 
-// State-Sys: page 1, the system's own numbers - the CPU as a half gauge and
-// one bar per thread and per pool. Its entry owns every widget on it.
+// Sys owns the Blinky stack, small-pool water level and boot counter.
 SM_HsmState SM_HSM_ROM Sm_Ui_sys = {
     (SM_StatePtr)&Sm_Ui_active,       // super
     (SM_InitHandler)0,                // init_
@@ -113,7 +106,7 @@ SM_HsmState SM_HSM_ROM Sm_Ui_sys = {
     (SM_StateHandler)&Sm_Ui_sys_      // handler
 };
 
-// State-Live: arc sweep, LED-driven switch, NVM count and static RAM size.
+// Live owns the arc sweep and LED-driven switch.
 SM_HsmState SM_HSM_ROM Sm_Ui_live = {
     (SM_StatePtr)&Sm_Ui_active,       // super
     (SM_InitHandler)0,                // init_
@@ -126,7 +119,6 @@ void Sm_Ui_bindDisplay(Sm_Ui * const me,
                        Sm_Ui_DisplayOperations const *operations) {
     SM_REQUIRE(me != NULL);
     SM_REQUIRE(operations != NULL);
-    SM_REQUIRE(operations->requestFrame != NULL);
     SM_REQUIRE(operations->setBacklight != NULL);
     SM_REQUIRE(operations->readFps != NULL);
     me->display = operations;
@@ -240,7 +232,6 @@ static void Sm_Ui_splashing_entry_(SM_Hsm * const me) SM_HSM_RETT {
     self->display->setBacklight(self->display->context, true);
     bool const shown = UiSurface_showSplash(&self->surface, Asset_splash());
     Ui_dbgSplashOk_ = shown ? 1U : 0U;
-    self->display->requestFrame(self->display->context);
     TimeEvt_arm(&self->stateTimeout, shown ? UI_SPLASH_TICKS : 1U, 0U);
 }
 
@@ -295,6 +286,7 @@ static void Sm_Ui_active_entry_(SM_Hsm *me) {
     W_Topbar_create(&self->top, UiSurface_overlay(&self->surface), "");
     W_Topbar_setLed(&self->top, self->ledOn);
     W_Topbar_setCpu(&self->top, self->metrics.snapshot.cpuPct);
+    W_Topbar_setCount(&self->top, Nvm_blinky());
     W_Topbar_setFps(&self->top,
         self->display->readFps(self->display->context));
     TimeEvt_arm(&self->headerTimeout, UI_HEADER_TICKS, UI_HEADER_TICKS);
@@ -320,6 +312,7 @@ static SM_RetState Sm_Ui_active_(void * const me,
         case UI_HEADER_TIMEOUT_SIG:
             UiMetrics_sample(&self->metrics);
             W_Topbar_setCpu(&self->top, self->metrics.snapshot.cpuPct);
+            W_Topbar_setCount(&self->top, Nvm_blinky());
             W_Topbar_setFps(&self->top,
                 self->display->readFps(self->display->context));
             Sm_Ui_post_(UI_REFRESH_SIG);
@@ -328,12 +321,14 @@ static SM_RetState Sm_Ui_active_(void * const me,
             self->ledOn = true;
             ++self->ledEdges;
             W_Topbar_setLed(&self->top, true);
+            W_Topbar_setCount(&self->top, Nvm_blinky());
             Sm_Ui_post_(UI_REFRESH_SIG);
             return _SM_HANDLED();
         case UI_LED_OFF_SIG:
             self->ledOn = false;
             ++self->ledEdges;
             W_Topbar_setLed(&self->top, false);
+            W_Topbar_setCount(&self->top, Nvm_blinky());
             Sm_Ui_post_(UI_REFRESH_SIG);
             return _SM_HANDLED();
         default:
@@ -345,15 +340,16 @@ static void Sm_Ui_sys_entry_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
 
     UiSurface_showPage(&self->surface, Asset_slot(Asset_get(), 0U));
-    W_Topbar_setTitle(&self->top, "sys");
+    W_Topbar_setTitle(&self->top, "SysMonitor");
     struct _lv_obj_t *parent = UiSurface_content(&self->surface);
     W_Gauge_create(&self->gauge, parent);
     W_BarPanel_create(&self->panel, parent, Sm_Ui_resourceNames_,
                       Sm_Ui_resourceUnits_);
     W_Dots_create(&self->dots, parent, 0U);
+    W_Nvm_create(&self->nvm, parent, 145, 34);
+    W_Nvm_set(&self->nvm, Nvm_bootCount());
     self->sysShown = false;
     Sm_Ui_refreshResources_(self);
-    self->display->requestFrame(self->display->context);
     TimeEvt_arm(&self->stateTimeout, UI_SYS_TICKS, 0U);
 }
 
@@ -361,6 +357,7 @@ static void Sm_Ui_sys_exit_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
     (void)TimeEvt_disarm(&self->stateTimeout);
     W_Dots_destroy(&self->dots);
+    W_Nvm_destroy(&self->nvm);
     W_BarPanel_destroy(&self->panel);
     W_Gauge_destroy(&self->gauge);
 }
@@ -385,20 +382,13 @@ static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
 
     UiSurface_showPage(&self->surface, Asset_slot(Asset_get(), 1U));
-    W_Topbar_setTitle(&self->top, "live");
+    W_Topbar_setTitle(&self->top, "LiveShow");
     struct _lv_obj_t *parent = UiSurface_content(&self->surface);
-    W_Dial_create(&self->dial, parent, 92, 40, 96);
-    W_Switch_create(&self->sw, parent, 12, 74);
-    W_Nvm_create(&self->nvm, parent, 12, 181);
-    W_Ram_create(&self->ram, parent);
-    W_Dots_create(&self->dots, parent, 1U);
+    W_Dial_create(&self->dial, parent, 20, 93, 60);
+    W_Switch_create(&self->sw, parent, 100, 93);
     self->dialValue = 0U;
     self->dialRising = true;
-    W_Ram_set(&self->ram, self->metrics.snapshot.ramUsed,
-               self->metrics.snapshot.ramTotal);
     W_Switch_set(&self->sw, self->ledOn);
-    W_Nvm_set(&self->nvm, Nvm_blinky());
-    self->display->requestFrame(self->display->context);
     TimeEvt_arm(&self->stateTimeout, UI_LIVE_TICKS, 0U);
     TimeEvt_arm(&self->dialTimeout, UI_DIAL_TICKS, UI_DIAL_TICKS);
 }
@@ -407,9 +397,6 @@ static void Sm_Ui_live_exit_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
     (void)TimeEvt_disarm(&self->dialTimeout);
     (void)TimeEvt_disarm(&self->stateTimeout);
-    W_Dots_destroy(&self->dots);
-    W_Ram_destroy(&self->ram);
-    W_Nvm_destroy(&self->nvm);
     W_Switch_destroy(&self->sw);
     W_Dial_destroy(&self->dial);
 }
@@ -427,7 +414,6 @@ static SM_RetState Sm_Ui_live_(void * const me,
             return _SM_HANDLED();
         case UI_REFRESH_SIG:
             W_Switch_set(&self->sw, self->ledOn);
-            W_Nvm_set(&self->nvm, Nvm_blinky());
             return _SM_HANDLED();
         default:
             return _SM_SUPER();
@@ -437,24 +423,24 @@ static SM_RetState Sm_Ui_live_(void * const me,
 // State actions coordinate passive components; no separate page object.
 static void Sm_Ui_refreshResources_(Sm_Ui *self) {
     UiMetricsSnapshot const *snapshot = &self->metrics.snapshot;
+    W_BarPanel_setCount(&self->panel, Nvm_blinky());
     if (self->sysShown && self->sysRevision == snapshot->revision) {
         return;
     }
-    W_Gauge_setValue(&self->gauge, snapshot->cpuPct);
-    for (unsigned row = 0U; row < UI_METRIC_ROWS; ++row) {
-        UiResourceLevel const *level = &snapshot->rows[row];
-        if (!level->available) {
-            continue;
-        }
-        unsigned const pct = level->total == 0U ? 0U
-            : (unsigned)((level->free * 100U) / level->total);
-        unsigned const bounded = pct > 100U ? 100U : pct;
-        if (row < UI_METRIC_TASK_ROWS) {
-            W_BarPanel_setWords(&self->panel, row, bounded, level->free);
-        } else {
-            W_BarPanel_setPair(&self->panel, row, bounded, level->free,
-                               level->total);
-        }
+    UiResourceLevel const *small = &snapshot->rows[7];
+    unsigned const smallPct = small->total == 0U ? 0U
+        : (unsigned)((small->free * 100U) / small->total);
+    W_Gauge_setValue(&self->gauge, smallPct > 100U ? 100U : smallPct);
+    W_Gauge_setMaximum(&self->gauge, small->total);
+    W_Gauge_setBlockBytes(&self->gauge, snapshot->smallBlockBytes);
+    UiResourceLevel const *blinky = &snapshot->rows[2];
+    if (blinky->available && blinky->total != 0U) {
+        unsigned const free = blinky->free;
+        unsigned const used = blinky->total - free;
+        W_BarPanel_setWords(&self->panel, 0U,
+                            free * 100U / blinky->total, free);
+        W_BarPanel_setWords(&self->panel, 1U,
+                            used * 100U / blinky->total, used);
     }
     self->sysRevision = snapshot->revision;
     self->sysShown = true;

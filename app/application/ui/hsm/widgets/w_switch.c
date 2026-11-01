@@ -20,10 +20,20 @@ void W_Switch_create(struct W_Switch *w, struct _lv_obj_t *parent,
                      int32_t x, int32_t y) {
     lv_obj_t *sw = lv_switch_create((lv_obj_t *)parent);
 
-    lv_obj_set_size(sw, 56, 28);
+    lv_obj_remove_style_all(sw);
+    lv_obj_set_style_radius(sw, 8, LV_PART_MAIN);
+    lv_obj_set_style_radius(sw, 8, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(sw, 6, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(sw, -2, LV_PART_KNOB);
+    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(sw, LV_OPA_TRANSP, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER,
+                            LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_KNOB);
+    lv_obj_set_size(sw, 34, 16);
     lv_obj_set_pos(sw, (lv_coord_t)x, (lv_coord_t)y);
-    lv_obj_set_style_bg_color(sw, lv_color_hex(0x1E2A32U), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(sw, lv_color_hex(0x00C3BCU),
+    lv_obj_set_style_bg_color(sw, lv_color_hex(0x334155U), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sw, lv_color_hex(0x004EF6U),
                               LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(sw, lv_color_hex(0xFFFFFFU), LV_PART_KNOB);
     w->sw = (struct _lv_obj_t *)sw;

@@ -16,6 +16,7 @@ struct _lv_obj_t;
 // Passive arc display. The HSM supplies each percentage value.
 struct W_Dial {
     struct _lv_obj_t *arc;
+    struct _lv_obj_t *heading;
     unsigned value;
 };
 

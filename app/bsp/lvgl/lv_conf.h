@@ -98,6 +98,10 @@
 #define LV_USE_FLEX       0
 #define LV_USE_GRID       0
 
+// One built-in font for every UI label.
+#define LV_FONT_MONTSERRAT_14 1
+#define LV_FONT_DEFAULT &lv_font_montserrat_14
+
 // Machinery for applications bigger than this one.
 #define LV_USE_OBSERVER         0
 #define LV_USE_OBJ_ID           0

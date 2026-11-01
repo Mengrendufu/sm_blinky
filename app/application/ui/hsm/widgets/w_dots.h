@@ -12,10 +12,9 @@
 
 struct _lv_obj_t;
 
-// Which page is up, in two dots at the bottom: the active one is bigger and
-// teal, the language the e-bike demo's bullets use for the same job.
+// Indicators under the two Sys cards.
 struct W_Dots {
-    struct _lv_obj_t *dot[2];
+    struct _lv_obj_t *dot[6];
 };
 
 void W_Dots_init(struct W_Dots *me);

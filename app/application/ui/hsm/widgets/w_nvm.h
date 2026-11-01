@@ -18,6 +18,7 @@ struct _lv_obj_t;
 // this component never accesses persistent storage.
 struct W_Nvm {
     struct _lv_obj_t *label;
+    struct _lv_obj_t *caption;
     uint32_t shown;
     bool valid;
 };

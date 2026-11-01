@@ -27,6 +27,7 @@ typedef struct {
     uint32_t cpuPct;
     uint32_t ramUsed;
     uint32_t ramTotal;
+    uint32_t smallBlockBytes;
     UiResourceLevel rows[UI_METRIC_ROWS];
 } UiMetricsSnapshot;
 

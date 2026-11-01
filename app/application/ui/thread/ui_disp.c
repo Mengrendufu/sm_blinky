@@ -82,10 +82,6 @@ static uint32_t Ui_fps_;
 
 static uint16_t Ui_strip_[UI_STRIP_PX] LV_ATTRIBUTE_MEM_ALIGN;
 
-// The HSM requests a whole-screen repaint. Clear the request only after
-// its last synchronous flush; backlight policy belongs to the HSM.
-static bool Ui_framePending_;
-
 //============================================================================
 static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
                       uint8_t *px);
@@ -129,12 +125,6 @@ uint32_t Ui_dispFrameMax(void) {
     return Ui_frameMax_;
 }
 //............................................................................
-// Track a requested whole-screen refresh through its final synchronous
-// flush. The HSM owns page objects and backlight timing.
-void Ui_dispRequestFrame(void) {
-    Ui_framePending_ = true;
-}
-//............................................................................
 // The HSM chooses when the panel becomes visible; BSP enforces the owner.
 void Ui_dispBacklight(bool on) {
     BSP_lcdBacklight(Ui_lcd_, on);
@@ -158,14 +148,6 @@ TickType_t Ui_dispHeartbeat(void) {
     // like any other, and the page that owns the glass is the only page whose
     // tree exists (each entry action rebuilds from a clean screen). There is
     // nothing to hold back.
-
-    // A page's first frame is a whole screen, so ask for the whole screen
-    // once, out loud, instead of trusting the invalidations the entry action
-    // happened to leave behind. Nothing is proven about it: see the flag's
-    // own note above.
-    if (Ui_framePending_) {
-        lv_obj_invalidate(lv_screen_active());
-    }
 
     uint32_t const next = lv_timer_handler();
     uint32_t const dt = Ui_us_() - t0;   // what one heartbeat really cost
@@ -212,7 +194,6 @@ static void Ui_flush_(lv_display_t *disp, const lv_area_t *area,
 
     if (lv_display_flush_is_last(disp)) {
         ++Ui_frames_;
-        Ui_framePending_ = false;
     }
 
     lv_display_flush_ready(disp);

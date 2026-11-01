@@ -20,6 +20,8 @@ struct _lv_obj_t;
 #define W_BARPANEL_ROWS 9U
 
 struct W_BarPanel {
+    struct _lv_obj_t *heading;
+    struct _lv_obj_t *count;
     char const *unit[W_BARPANEL_ROWS];   // how the raw number is spelled
     struct _lv_obj_t *name[W_BARPANEL_ROWS];
     struct _lv_obj_t *bar[W_BARPANEL_ROWS];
@@ -32,6 +34,7 @@ void W_BarPanel_destroy(struct W_BarPanel *me);
 void W_BarPanel_create(struct W_BarPanel *p, struct _lv_obj_t *parent,
                        char const *const *names,
                        char const *const *units);
+void W_BarPanel_setCount(struct W_BarPanel *p, uint32_t count);
 void W_BarPanel_setWords(struct W_BarPanel *p, unsigned row, unsigned pct,
                          unsigned words);
 void W_BarPanel_setPair(struct W_BarPanel *p, unsigned row, unsigned pct,

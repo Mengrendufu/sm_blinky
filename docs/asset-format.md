@@ -3,6 +3,15 @@
 整包烧写，逐图校验；不支持单图更新。当前仍为最多三个固定大小槽位，
 每槽 153,600 B（240 × 320 × RGB565），ID 依次为 Sys、Live、Splash。
 
+Figma 页面静态背景源文件位于 `bg/figma/`。使用 ffmpeg 和 Python
+生成对应的整屏 RGB565 数据，再与现有 Splash 依次拼接：
+
+```sh
+python3 tools/figma_backgrounds.py
+cat bg/figma/sys-page.rgb565 bg/figma/live-page.rgb565 \
+    bg/bg-logo.rgb565 > /tmp/images.rgb565
+```
+
 ## 文件与 NOR 布局
 
 脚本输入为按槽位拼接的 RGB565 裸数据；`burn-asset.py --image`

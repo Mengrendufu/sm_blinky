@@ -83,6 +83,9 @@ void UiMetrics_sample(UiMetrics *me) {
     // Registered in ascending size order: small pool 1, medium pool 2.
     for (unsigned i = 0U; i < 2U; ++i) {
         SST_EvtPoolLevel const level = SST_EvtPool_level(i + 1U);
+        if (i == 0U) {
+            me->snapshot.smallBlockBytes = level.blockSize;
+        }
         me->snapshot.rows[7U + i] = (UiResourceLevel){
             .free = level.min, .total = level.total, .available = true
         };

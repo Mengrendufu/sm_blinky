@@ -92,11 +92,6 @@ static void Ui_drain_(void) {
 //............................................................................
 // The thread supplies the HSM's required display capabilities. These adapters
 // keep the concrete display API out of the state machine.
-static void Ui_requestFrame_(void *context) {
-    (void)context;
-    Ui_dispRequestFrame();
-}
-
 static void Ui_setBacklight_(void *context, bool on) {
     (void)context;
     Ui_dispBacklight(on);
@@ -110,7 +105,6 @@ static uint32_t Ui_readFps_(void *context) {
 static void Ui_bindDisplay_(void) {
     static Sm_Ui_DisplayOperations const operations = {
         .context = NULL,
-        .requestFrame = Ui_requestFrame_,
         .setBacklight = Ui_setBacklight_,
         .readFps = Ui_readFps_
     };

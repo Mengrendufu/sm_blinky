@@ -33,6 +33,8 @@ static void UiSurface_describe_(lv_image_dsc_t * const dsc,
 void UiSurface_init(UiSurface *me) {
     lv_display_t * const display = lv_display_get_default();
     *me = (UiSurface){0};
+    lv_obj_remove_flag(lv_screen_active(), LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(lv_screen_active(), LV_SCROLLBAR_MODE_OFF);
     me->root = lv_obj_create(lv_screen_active());
     lv_obj_set_size(me->root,
         lv_display_get_horizontal_resolution(display),
@@ -43,6 +45,7 @@ void UiSurface_init(UiSurface *me) {
     lv_obj_set_style_pad_all(me->root, 0, 0);
     lv_obj_set_style_shadow_width(me->root, 0, 0);
     lv_obj_remove_flag(me->root, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(me->root, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_bg_color(me->root, lv_color_hex(0x000000U), 0);
     lv_obj_set_style_bg_opa(me->root, LV_OPA_COVER, 0);
 }

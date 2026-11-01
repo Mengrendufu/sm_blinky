@@ -38,7 +38,7 @@ void SM_Trace_push(SM_Tracer * const me,unsigned char *frame) {
 static SST_Task flashTask,blinkyTask;
 SST_Task *const AO_Flash=&flashTask;
 SST_Task *const AO_Blinky=&blinkyTask;
-static unsigned hostTick,requests,backlight,scenario;
+static unsigned hostTick,backlight,scenario;
 static unsigned idleCount,totalCount;
 static Asset assets;
 static uint16_t pixels[3][240*320];
@@ -88,9 +88,6 @@ void const *Asset_slot(Asset const *a,uint32_t slot){
 }
 void const *Asset_splash(void){return scenario==3 ? NULL : pixels[2];}
 void Ui_dispInit(void){}
-void Ui_dispRequestFrame(void){
-    ++requests;lv_obj_invalidate(lv_screen_active());
-}
 void Ui_dispBacklight(bool on){assert(on);++backlight;}
 uint32_t Ui_dispFps(void){return 30;}
 TickType_t Ui_dispHeartbeat(void){return 1;}
@@ -111,11 +108,74 @@ static void flush(lv_display_t *d,lv_area_t const *a,uint8_t *map){
     lv_display_flush_ready(d);
 }
 static void render(void){(void)lv_timer_handler();}
+// Compare actual LVGL global coordinates against the exported design.
+static void geometry(char const *name, lv_obj_t *obj){
+    if(scenario)return;
+    lv_obj_update_layout(obj);
+    lv_area_t area;lv_obj_get_coords(obj,&area);
+    int baseline=-1;
+    if(lv_obj_check_type(obj,&lv_label_class)){
+        lv_area_t content;lv_obj_get_content_coords(obj,&content);
+        lv_font_t const *font=lv_obj_get_style_text_font(obj,0);
+        baseline=content.y1+font->line_height-font->base_line;
+    }
+    printf("GEOMETRY %s %d %d %d %d %d\n",name,
+           (int)area.x1,(int)area.y1,(int)lv_obj_get_width(obj),
+           (int)lv_obj_get_height(obj),baseline);
+}
+static void uniformFont(lv_obj_t *obj){
+    if(lv_obj_check_type(obj,&lv_label_class)){
+        assert(lv_obj_get_style_text_font(obj,0)==LV_FONT_DEFAULT);
+    }
+    for(unsigned i=0;i<lv_obj_get_child_count(obj);++i){
+        uniformFont(lv_obj_get_child(obj,i));
+    }
+}
+static void sysGeometry(void){
+    geometry("sys.title",Ui_sm_.top.title);
+    geometry("sys.led",Ui_sm_.top.led);
+    geometry("sys.count",Ui_sm_.top.count);
+    geometry("sys.fps",Ui_sm_.top.fps);
+    geometry("sys.fpsUnit",Ui_sm_.top.fpsUnit);
+    geometry("sys.cpu",Ui_sm_.top.cpu);
+    geometry("sys.cpuUnit",Ui_sm_.top.cpuUnit);
+    geometry("sys.heading",Ui_sm_.panel.heading);
+    geometry("sys.cardCount",Ui_sm_.panel.count);
+    geometry("sys.name0",Ui_sm_.panel.name[0]);
+    geometry("sys.value0",Ui_sm_.panel.val[0]);
+    geometry("sys.bar0",Ui_sm_.panel.bar[0]);
+    geometry("sys.name1",Ui_sm_.panel.name[1]);
+    geometry("sys.value1",Ui_sm_.panel.val[1]);
+    geometry("sys.bar1",Ui_sm_.panel.bar[1]);
+    geometry("sys.small",Ui_sm_.gauge.unit);
+    geometry("sys.bytes",Ui_sm_.gauge.bytes);
+    geometry("sys.byteUnit",Ui_sm_.gauge.byteUnit);
+    geometry("sys.arc",Ui_sm_.gauge.arc);
+    geometry("sys.min",Ui_sm_.gauge.min);
+    geometry("sys.max",Ui_sm_.gauge.max);
+    geometry("sys.percentValue",Ui_sm_.gauge.num);
+    geometry("sys.percentUnit",Ui_sm_.gauge.percent);
+    geometry("sys.bootCaption",Ui_sm_.nvm.caption);
+    geometry("sys.bootCount",Ui_sm_.nvm.label);
+    for(unsigned i=0;i<6;++i){
+        char name[24];snprintf(name,sizeof name,"sys.dot%u",i);
+        geometry(name,Ui_sm_.dots.dot[i]);
+    }
+}
 static void capture(char const *path){
     if(scenario)return;
     FILE *file=fopen(path,"wb");assert(file);
     assert(fwrite(framebuffer,1,sizeof framebuffer,file)==sizeof framebuffer);
     fclose(file);
+}
+// Natural dirty regions must reconstruct the same image as a full repaint.
+static void verifyRepaint(lv_display_t *display){
+    static uint16_t before[240*320];
+    lv_refr_now(display);
+    memcpy(before,framebuffer,sizeof before);
+    lv_obj_invalidate(lv_screen_active());
+    lv_refr_now(display);
+    assert(!memcmp(before,framebuffer,sizeof before));
 }
 static void send(unsigned sig){
     SST_Evt *event=SST_NEW(SST_Evt);event->sig=sig;
@@ -133,7 +193,8 @@ int main(int argc,char **argv){
     flashTask.thread=(void *)2;blinkyTask.thread=(void *)3;
     SM_Tracer_inst.nTot=16;SM_Tracer_inst.nMin=10;
     assets=(Asset){.present=scenario!=4,.len=460800,.slots=3};
-    char const *files[]={"bg-a.rgb565","bg-b.rgb565","bg-logo.rgb565"};
+    char const *files[]={"figma/sys-page.rgb565", "figma/live-page.rgb565",
+                         "bg-logo.rgb565"};
     for(unsigned i=0;i<3;++i){
         char path[512];
         snprintf(path,sizeof path,UI_TEST_ROOT "/bg/%s",files[i]);
@@ -183,10 +244,35 @@ int main(int argc,char **argv){
         Ui_drain_();assert(Ui_sm_.stateTimeout.remaining==500);
     }else{send(BRING_UP_ASSETS_LOADED_SIG);pulse(150);}
     render();
+    verifyRepaint(display);
     capture("sys.rgb565");
-    assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sys && requests>=2);
-    assert(!strcmp(lv_label_get_text(Ui_sm_.top.title),"sys"));
+    sysGeometry();
+    uniformFont(lv_screen_active());
+    if(!scenario){
+        lv_font_t const *a=lv_obj_get_style_text_font(Ui_sm_.top.title,0);
+        lv_font_t const *b=lv_obj_get_style_text_font(Ui_sm_.panel.heading,0);
+        lv_point_t titleSize,headingSize;
+        lv_text_get_size(&titleSize,"SysMonitor",a,0,0,1000,0);
+        lv_text_get_size(&headingSize,"Blinky",b,0,0,1000,0);
+        assert(titleSize.x<=lv_obj_get_content_width(Ui_sm_.top.title));
+        assert(headingSize.x<=lv_obj_get_content_width(Ui_sm_.panel.heading));
+    }
+
+    assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sys);
+    assert(!strcmp(lv_label_get_text(Ui_sm_.top.title),"SysMonitor"));
     assert(Ui_sm_.metrics.snapshot.cpuPct==40);
+    // A valid label must paint glyphs, not only retain its text string.
+    // With compressed fonts disabled, a compressed subset paints nothing.
+    if(scenario!=4){
+        unsigned white=0;
+        for(unsigned y=4;y<20;++y){
+            for(unsigned x=80;x<100;++x){
+                if(framebuffer[y*240+x]==0xFFFFU)++white;
+            }
+        }
+        assert(white>5);
+    }
+    assert(!strcmp(lv_label_get_text(Ui_sm_.top.count),"50"));
     for(unsigned i=0;i<5;++i){
         assert(Ui_sm_.metrics.snapshot.rows[i].available);
         assert(Ui_sm_.metrics.snapshot.rows[i].free==100+i);
@@ -198,16 +284,22 @@ int main(int argc,char **argv){
         assert(Ui_sm_.metrics.snapshot.rows[7+i].free==level.min);
         assert(Ui_sm_.metrics.snapshot.rows[7+i].total==level.total);
     }
-    assert(!strcmp(lv_label_get_text(Ui_sm_.panel.name[7]),"smin"));
-    assert(!strcmp(lv_label_get_text(Ui_sm_.panel.name[8]),"mmin"));
+    assert(!strcmp(lv_label_get_text(Ui_sm_.panel.heading),"Blinky"));
+    assert(!strcmp(lv_label_get_text(Ui_sm_.panel.val[0]),"102 w"));
+    assert(!strcmp(lv_label_get_text(Ui_sm_.panel.val[1]),"154 w"));
+    assert(Ui_sm_.nvm.shown==Nvm_bootCount());
+    assert(Ui_sm_.metrics.snapshot.smallBlockBytes
+           ==SST_EvtPool_level(1).blockSize);
+    assert(lv_arc_get_bg_angle_start(Ui_sm_.gauge.arc)==210);
+    assert(lv_arc_get_bg_angle_end(Ui_sm_.gauge.arc)==330);
+    assert(!Ui_sm_.panel.name[7] && !Ui_sm_.panel.name[8]);
     lv_obj_update_layout(Ui_sm_.surface.root);
-    assert(lv_obj_get_y(Ui_sm_.panel.name[8])==286);
     assert(Ui_sm_.metrics.snapshot.ramUsed==0xE000);
     assert(Ui_sm_.metrics.snapshot.ramTotal==0xFFE0);
     Nvm_addBlinky(4); // Business progresses while Sys is visible.
     lv_obj_t *header=Ui_sm_.top.title;
-    assert(lv_obj_get_child_count(lv_screen_active())==5);
-    assert(lv_obj_get_child_count(Ui_sm_.surface.root)==41);
+    assert(lv_obj_get_child_count(lv_screen_active())==8);
+    assert(lv_obj_get_child_count(Ui_sm_.surface.root)==26);
     assert(Ui_sm_.headerTimeout.interval==50);
     unsigned sampled=samples;
     for(unsigned i=0;i<100;++i)send(UI_REFRESH_SIG);
@@ -219,40 +311,50 @@ int main(int argc,char **argv){
     pulse(449);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sys);
     pulse(1);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_live);
     render();
+    verifyRepaint(display);
     capture("live-empty.rgb565");
+    uniformFont(lv_screen_active());
+    geometry("live.title",Ui_sm_.top.title);
+    geometry("live.heading",Ui_sm_.dial.heading);
+    geometry("live.arc",Ui_sm_.dial.arc);
+    geometry("live.switch",Ui_sm_.sw.sw);
     assert(Ui_sm_.top.title==header && Ui_sm_.gauge.arc==NULL);
-    assert(!strcmp(lv_label_get_text(header),"live"));
-    assert(lv_obj_get_child_count(Ui_sm_.surface.root)==7);
+    assert(!strcmp(lv_label_get_text(header),"LiveShow"));
+    assert(lv_obj_get_child_count(Ui_sm_.surface.root)==3);
     assert(Ui_sm_.dialTimeout.interval==3);
     assert(Ui_sm_.dial.value==0);
-    assert(Nvm_blinky()==54 && Ui_sm_.nvm.shown==54);
+    assert(lv_arc_get_bg_angle_start(Ui_sm_.dial.arc)==180);
+    assert(lv_arc_get_bg_angle_end(Ui_sm_.dial.arc)==90);
+    assert(Nvm_blinky()==54 && !Ui_sm_.nvm.label);
     Nvm_addBlinky(1); // Blinky updates before notifying the UI.
     send(UI_LED_ON_SIG);Ui_drain_();
     assert(Ui_sm_.ledOn && Ui_sm_.ledEdges==5);
     assert(lv_obj_has_state(Ui_sm_.sw.sw,LV_STATE_CHECKED));
-    assert(Nvm_blinky()==55 && Ui_sm_.nvm.shown==55);
+    assert(Nvm_blinky()==55 && !Ui_sm_.nvm.label);
+    assert(!strcmp(lv_label_get_text(Ui_sm_.top.count),"55"));
     Nvm_addBlinky(1);
     send(UI_LED_OFF_SIG);Ui_drain_();
     assert(!Ui_sm_.ledOn && Ui_sm_.ledEdges==6);
     assert(!lv_obj_has_state(Ui_sm_.sw.sw,LV_STATE_CHECKED));
-    assert(Nvm_blinky()==56 && Ui_sm_.nvm.shown==56);
+    assert(Nvm_blinky()==56 && !Ui_sm_.nvm.label);
     pulse(150);assert(Ui_sm_.dial.value==100);
+    verifyRepaint(display);
     capture("live-full.rgb565");
     pulse(150);assert(Ui_sm_.dial.value==0);
-    assert(Nvm_blinky()==56 && Ui_sm_.nvm.shown==56);
+    assert(Nvm_blinky()==56 && !Ui_sm_.nvm.label);
     unsigned before=samples;send(UI_HEADER_TIMEOUT_SIG);
     assert(samples==before+1 && Ui_sm_.top.title==header);
     pulse(699);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_live);
     pulse(1);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sys);
     assert(!Ui_sm_.dial.arc && !Ui_sm_.dialTimeout.remaining);
-    assert(!Ui_sm_.sw.sw && !Ui_sm_.nvm.label);
+    assert(!Ui_sm_.sw.sw && Ui_sm_.nvm.label);
     assert(!Ui_sm_.ram.lineA && !Ui_sm_.ram.lineB);
     send(UI_DIAL_TIMEOUT_SIG); // Committed old callback cannot touch dead UI.
     assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sys);
     for(unsigned i=0;i<3;++i){pulse(500);pulse(1000);}
     assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sys && Ui_sm_.top.title==header);
-    assert(lv_obj_get_child_count(lv_screen_active())==5);
-    assert(lv_obj_get_child_count(Ui_sm_.surface.root)==41);
+    assert(lv_obj_get_child_count(lv_screen_active())==8);
+    assert(lv_obj_get_child_count(Ui_sm_.surface.root)==26);
     lv_mem_monitor_t memory;lv_mem_monitor(&memory);
     printf("PASS scenario %u: real LVGL trees, header lifetime, metrics, "
            "LED bubbling, NVM, timers, arc sweep; LVGL used=%zu peak=%zu\n",
