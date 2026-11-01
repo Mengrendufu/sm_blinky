@@ -30,6 +30,14 @@ EXTS = ('.c', '.h')
 SOURCE_PATHS = ('app', 'bootloader', 'project_common', 'tests', 'tools',
                 'application', 'bsp', 'ports')
 RECORD = re.compile(r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@')
+# qsm state-handler declarations and definition signatures may stay on
+# one line. Function bodies and ordinary functions keep the width limit.
+STATE_HANDLER_SIGNATURE = re.compile(
+    r'^\s*(?:static\s+)?SM_RetState\s+\w+\('
+    r'\s*SM_Hsm\s*\*\s*(?:const\s+)?\w+\s*,'
+    r'[^;{}]*\)\s*(?:SM_HSM_RETT\s*)?[;{]\s*(?://.*)?$'
+)
+
 
 
 def display_width(text):
@@ -106,7 +114,10 @@ def check(root, label, numbers):
     for number in wanted:
         if number > len(lines):
             continue
-        width = display_width(lines[number - 1].rstrip(' \t'))
+        line = lines[number - 1].rstrip(' \t')
+        if STATE_HANDLER_SIGNATURE.fullmatch(line):
+            continue
+        width = display_width(line)
         if width > LIMIT:
             print('%s:%d: %d columns' % (label, number, width))
             over += 1

@@ -35,84 +35,106 @@ static SST_Evt const Sm_Ui_dialTimeoutEvt = {
 // == DEBUG: whether the HSM installed a verified Splash image. ==
 volatile uint8_t Ui_dbgSplashOk_;
 
-static SM_RetState Sm_Ui_standby_(void *me, void const *e);
-static void Sm_Ui_readySplash_entry_(SM_Hsm *me);
-static SM_RetState Sm_Ui_readySplash_(void *me, void const *e);
-static SM_RetState Sm_Ui_earlyReadyShow_(void *me, void const *e);
-static SM_RetState Sm_Ui_readyShow_(void *me, void const *e);
-
+//============================================================================
+// Forward declares and static state descriptors
+// TOP-INIT
 static SM_StatePtr Sm_Ui_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT;
-static void Sm_Ui_splashing_entry_(SM_Hsm * const me) SM_HSM_RETT;
-static void Sm_Ui_splashing_exit_(SM_Hsm * const me) SM_HSM_RETT;
-static SM_RetState Sm_Ui_splashing_(void * const me,
-                                 void const * const e) SM_HSM_RETT;
-static void Sm_Ui_active_entry_(SM_Hsm *me);
-static void Sm_Ui_active_exit_(SM_Hsm *me);
-static SM_StatePtr Sm_Ui_active_initial_(SM_Hsm * const me) SM_HSM_RETT;
-static SM_RetState Sm_Ui_active_(void * const me,
-                                 void const * const e) SM_HSM_RETT;
-static void Sm_Ui_sys_entry_(SM_Hsm * const me) SM_HSM_RETT;
-static void Sm_Ui_sys_exit_(SM_Hsm * const me) SM_HSM_RETT;
-static SM_RetState Sm_Ui_sys_(void * const me,
-                              void const * const e) SM_HSM_RETT;
-static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT;
-static void Sm_Ui_live_exit_(SM_Hsm * const me) SM_HSM_RETT;
-static SM_RetState Sm_Ui_live_(void * const me,
-                               void const * const e) SM_HSM_RETT;
 
-
+// standby
 // Standby records the two readiness milestones before a GO is received.
+static SM_RetState Sm_Ui_standby_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT;
 SM_HsmState SM_HSM_ROM Sm_Ui_standby = {
-    SM_HSM_TOP, 0, 0, 0, &Sm_Ui_standby_
-};
-SM_HsmState SM_HSM_ROM Sm_Ui_readySplash = {
-    &Sm_Ui_standby, 0, (SM_ActionHandler)&Sm_Ui_readySplash_entry_, 0,
-    &Sm_Ui_readySplash_
-};
-SM_HsmState SM_HSM_ROM Sm_Ui_earlyReadyShow = {
-    &Sm_Ui_readySplash, 0, 0, 0, &Sm_Ui_earlyReadyShow_
+    (SM_StatePtr)SM_HSM_TOP,         // super
+    (SM_InitHandler)NULL,            // init_
+    (SM_ActionHandler)NULL,          // entry_
+    (SM_ActionHandler)NULL,          // exit_
+    (SM_StateHandler)&Sm_Ui_standby_ // handler
 };
 
+// readySplash
+static void Sm_Ui_readySplash_entry_(SM_Hsm * const me) SM_HSM_RETT;
+static SM_RetState Sm_Ui_readySplash_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT;
+SM_HsmState SM_HSM_ROM Sm_Ui_readySplash = {
+    (SM_StatePtr)&Sm_Ui_standby,                 // super
+    (SM_InitHandler)NULL,                        // init_
+    (SM_ActionHandler)&Sm_Ui_readySplash_entry_, // entry_
+    (SM_ActionHandler)NULL,                      // exit_
+    (SM_StateHandler)&Sm_Ui_readySplash_         // handler
+};
+
+// earlyReadyShow
+static SM_RetState Sm_Ui_earlyReadyShow_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT;
+SM_HsmState SM_HSM_ROM Sm_Ui_earlyReadyShow = {
+    (SM_StatePtr)&Sm_Ui_readySplash,        // super
+    (SM_InitHandler)NULL,                   // init_
+    (SM_ActionHandler)NULL,                 // entry_
+    (SM_ActionHandler)NULL,                 // exit_
+    (SM_StateHandler)&Sm_Ui_earlyReadyShow_ // handler
+};
+
+// splashing
 // State-Splashing: show the boot image and wait for its display period.
 // Its one-shot timer stays armed across transitions into readyShow.
+static void Sm_Ui_splashing_entry_(SM_Hsm * const me) SM_HSM_RETT;
+static void Sm_Ui_splashing_exit_(SM_Hsm * const me) SM_HSM_RETT;
+static SM_RetState Sm_Ui_splashing_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT;
 SM_HsmState SM_HSM_ROM Sm_Ui_splashing = {
-    SM_HSM_TOP,           // super
-    (SM_InitHandler)0,                // init_
-    (SM_ActionHandler)&Sm_Ui_splashing_entry_,  // entry_
-    (SM_ActionHandler)&Sm_Ui_splashing_exit_,   // exit_
-    (SM_StateHandler)&Sm_Ui_splashing_   // handler
+    (SM_StatePtr)SM_HSM_TOP,                   // super
+    (SM_InitHandler)NULL,                      // init_
+    (SM_ActionHandler)&Sm_Ui_splashing_entry_, // entry_
+    (SM_ActionHandler)&Sm_Ui_splashing_exit_,  // exit_
+    (SM_StateHandler)&Sm_Ui_splashing_         // handler
 };
 
+// readyShow
 // One of the two one-shot conditions has arrived; await the other.
+static SM_RetState Sm_Ui_readyShow_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT;
 SM_HsmState SM_HSM_ROM Sm_Ui_readyShow = {
-    &Sm_Ui_splashing, 0, 0, 0, &Sm_Ui_readyShow_
+    (SM_StatePtr)&Sm_Ui_splashing,     // super
+    (SM_InitHandler)NULL,              // init_
+    (SM_ActionHandler)NULL,            // entry_
+    (SM_ActionHandler)NULL,            // exit_
+    (SM_StateHandler)&Sm_Ui_readyShow_ // handler
 };
 
+// active
 // State-Active: shared header and LED model; pages own their transitions.
+static void Sm_Ui_active_entry_(SM_Hsm * const me) SM_HSM_RETT;
+static void Sm_Ui_active_exit_(SM_Hsm * const me) SM_HSM_RETT;
+static SM_StatePtr Sm_Ui_active_initial_(SM_Hsm * const me) SM_HSM_RETT;
+static SM_RetState Sm_Ui_active_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT;
 SM_HsmState SM_HSM_ROM Sm_Ui_active = {
-    SM_HSM_TOP,                 // super
+    (SM_StatePtr)SM_HSM_TOP,                // super
     (SM_InitHandler)&Sm_Ui_active_initial_, // init_
     (SM_ActionHandler)&Sm_Ui_active_entry_, // entry_
     (SM_ActionHandler)&Sm_Ui_active_exit_,  // exit_
     (SM_StateHandler)&Sm_Ui_active_         // handler
 };
 
+// sys
 // Sys owns the Blinky stack, small-pool water level and boot counter.
+static void Sm_Ui_sys_entry_(SM_Hsm * const me) SM_HSM_RETT;
+static void Sm_Ui_sys_exit_(SM_Hsm * const me) SM_HSM_RETT;
+static SM_RetState Sm_Ui_sys_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT;
 SM_HsmState SM_HSM_ROM Sm_Ui_sys = {
-    (SM_StatePtr)&Sm_Ui_active,       // super
-    (SM_InitHandler)0,                // init_
-    (SM_ActionHandler)&Sm_Ui_sys_entry_,     // entry_
-    (SM_ActionHandler)&Sm_Ui_sys_exit_,      // exit_
-    (SM_StateHandler)&Sm_Ui_sys_      // handler
+    (SM_StatePtr)&Sm_Ui_active,          // super
+    (SM_InitHandler)NULL,                // init_
+    (SM_ActionHandler)&Sm_Ui_sys_entry_, // entry_
+    (SM_ActionHandler)&Sm_Ui_sys_exit_,  // exit_
+    (SM_StateHandler)&Sm_Ui_sys_         // handler
 };
 
+// live
 // Live owns the arc sweep and LED-driven switch.
+static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT;
+static void Sm_Ui_live_exit_(SM_Hsm * const me) SM_HSM_RETT;
+static SM_RetState Sm_Ui_live_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT;
 SM_HsmState SM_HSM_ROM Sm_Ui_live = {
-    (SM_StatePtr)&Sm_Ui_active,       // super
-    (SM_InitHandler)0,                // init_
-    (SM_ActionHandler)&Sm_Ui_live_entry_,    // entry_
-    (SM_ActionHandler)&Sm_Ui_live_exit_,     // exit_
-    (SM_StateHandler)&Sm_Ui_live_     // handler
+    (SM_StatePtr)&Sm_Ui_active,           // super
+    (SM_InitHandler)NULL,                 // init_
+    (SM_ActionHandler)&Sm_Ui_live_entry_, // entry_
+    (SM_ActionHandler)&Sm_Ui_live_exit_,  // exit_
+    (SM_StateHandler)&Sm_Ui_live_         // handler
 };
 
 void Sm_Ui_bindDisplay(Sm_Ui * const me,
@@ -167,8 +189,8 @@ static SM_StatePtr Sm_Ui_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT {
 }
 //............................................................................
 // State-Standby: UI remains responsive while Flash owns initialization.
-static SM_RetState Sm_Ui_standby_(void *me, void const *e) {
-    Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
+static SM_RetState Sm_Ui_standby_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
+    Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
     SST_Evt const * const evt = e;
 
     switch (evt->sig) {
@@ -193,7 +215,7 @@ static void Sm_Ui_post_(SST_Signal sig) {
     Ui_post(evt);
 }
 
-static void Sm_Ui_readySplash_entry_(SM_Hsm *me) {
+static void Sm_Ui_readySplash_entry_(SM_Hsm * const me) SM_HSM_RETT {
     (void)me;
 
     // Automatic startup policy. A future key source can supply this same
@@ -201,7 +223,7 @@ static void Sm_Ui_readySplash_entry_(SM_Hsm *me) {
     Sm_Ui_post_(UI_GO_SPLASHING_SIG);
 }
 
-static SM_RetState Sm_Ui_readySplash_(void *me, void const *e) {
+static SM_RetState Sm_Ui_readySplash_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
     SST_Evt const * const evt = e;
 
     switch (evt->sig) {
@@ -214,7 +236,7 @@ static SM_RetState Sm_Ui_readySplash_(void *me, void const *e) {
     }
 }
 
-static SM_RetState Sm_Ui_earlyReadyShow_(void *me, void const *e) {
+static SM_RetState Sm_Ui_earlyReadyShow_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
     SST_Evt const * const evt = e;
 
     switch (evt->sig) {
@@ -240,9 +262,8 @@ static void Sm_Ui_splashing_exit_(SM_Hsm * const me) SM_HSM_RETT {
     (void)TimeEvt_disarm(&self->stateTimeout);
 }
 
-static SM_RetState Sm_Ui_splashing_(void * const me,
-                                    void const * const e) SM_HSM_RETT {
-    Sm_Ui * const self = container_of((SM_Hsm *)me, Sm_Ui, sm_hsm_);
+static SM_RetState Sm_Ui_splashing_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
+    Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
     SST_Evt const * const evt = e;
 
     switch (evt->sig) {
@@ -263,7 +284,7 @@ static SM_RetState Sm_Ui_splashing_(void * const me,
     }
 }
 
-static SM_RetState Sm_Ui_readyShow_(void *me, void const *e) {
+static SM_RetState Sm_Ui_readyShow_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
     (void)me;
     SST_Evt const * const evt = e;
 
@@ -279,7 +300,7 @@ static SM_RetState Sm_Ui_readyShow_(void *me, void const *e) {
 //............................................................................
 // Active owns the common header's lifetime and refresh event. Page states
 // never invoke header-refresh helpers or inspect another page's state.
-static void Sm_Ui_active_entry_(SM_Hsm *me) {
+static void Sm_Ui_active_entry_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
 
     UiMetrics_sample(&self->metrics);
@@ -292,7 +313,7 @@ static void Sm_Ui_active_entry_(SM_Hsm *me) {
     TimeEvt_arm(&self->headerTimeout, UI_HEADER_TICKS, UI_HEADER_TICKS);
 }
 
-static void Sm_Ui_active_exit_(SM_Hsm *me) {
+static void Sm_Ui_active_exit_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
     (void)TimeEvt_disarm(&self->headerTimeout);
     W_Topbar_destroy(&self->top);
@@ -303,8 +324,7 @@ static SM_StatePtr Sm_Ui_active_initial_(SM_Hsm * const me) SM_HSM_RETT {
     return _SM_INIT(&Sm_Ui_sys);
 }
 
-static SM_RetState Sm_Ui_active_(void * const me,
-                                 void const * const e) SM_HSM_RETT {
+static SM_RetState Sm_Ui_active_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
     SST_Evt const * const evt = e;
 
@@ -362,8 +382,7 @@ static void Sm_Ui_sys_exit_(SM_Hsm * const me) SM_HSM_RETT {
     W_Gauge_destroy(&self->gauge);
 }
 
-static SM_RetState Sm_Ui_sys_(void * const me,
-                              void const * const e) SM_HSM_RETT {
+static SM_RetState Sm_Ui_sys_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
     SST_Evt const * const evt = e;
 
@@ -401,8 +420,7 @@ static void Sm_Ui_live_exit_(SM_Hsm * const me) SM_HSM_RETT {
     W_Dial_destroy(&self->dial);
 }
 
-static SM_RetState Sm_Ui_live_(void * const me,
-                               void const * const e) SM_HSM_RETT {
+static SM_RetState Sm_Ui_live_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
     SST_Evt const * const evt = e;
 
