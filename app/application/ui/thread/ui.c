@@ -27,7 +27,7 @@
 // stack was overrun by roughly 400 - that was the frozen board. LVGL's own
 // requirements page asks for "> 2 kB (> 8 kB recommended)" for this thread,
 // and the measured 914 words is inside the minimum but nowhere near the
-// recommendation. Check the Sys page stack watermark after UI changes.
+// recommendation. Recheck stack watermarks when rebuilding UI widgets.
 #define UI_PRIORITY     23U  // under the Blinky AO (24): the heartbeat wins
 
 static StaticTask_t Ui_tcb_;
@@ -97,16 +97,10 @@ static void Ui_setBacklight_(void *context, bool on) {
     Ui_dispBacklight(on);
 }
 
-static uint32_t Ui_readFps_(void *context) {
-    (void)context;
-    return Ui_dispFps();
-}
-
 static void Ui_bindDisplay_(void) {
     static Sm_Ui_DisplayOperations const operations = {
         .context = NULL,
-        .setBacklight = Ui_setBacklight_,
-        .readFps = Ui_readFps_
+        .setBacklight = Ui_setBacklight_
     };
 
     Sm_Ui_bindDisplay(&Ui_sm_, &operations);

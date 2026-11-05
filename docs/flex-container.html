@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FlexContainer_create 字段图解</title>
+<style>
+:root{
+  --paper:#f7f1e3; --grid:#e7ddc6; --ink:#22302e;
+  --teal:#0f766e; --coral:#d9543f; --ochre:#c9862b;
+  --panel:#fffdf6; --line:#b8ab8d; --dim:#5f6659;
+}
+*{box-sizing:border-box}
+html{background:var(--paper)}
+body{
+  margin:0; padding:24px 16px 64px; color:var(--ink);
+  font:15px/1.7 Georgia,"Noto Serif CJK SC","Songti SC",serif;
+  background-image:
+    linear-gradient(var(--grid) 1px,transparent 1px),
+    linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:26px 26px;
+}
+main{max-width:980px;margin:0 auto}
+h1{font-size:1.9rem;margin:.2em 0 .1em;letter-spacing:.02em}
+h2{
+  font-size:1.15rem;margin:1.8em 0 .5em;
+  border-bottom:2px solid var(--ink);padding-bottom:.15em;
+}
+h3{font-size:1rem;margin:1.2em 0 .3em;color:var(--teal)}
+p{margin:.5em 0}
+code,kbd{
+  font:0.92em/1.4 ui-monospace,"Cascadia Mono",Consolas,monospace;
+  background:#efe7d0;padding:.05em .3em;border-radius:3px;
+}
+pre{
+  font:0.86rem/1.55 ui-monospace,Consolas,monospace;
+  background:#23291f;color:#e8e2cc;padding:12px 14px;
+  border-radius:6px;overflow-x:auto;margin:.6em 0;
+}
+.guide{color:var(--dim);font-style:italic;margin-top:.2em}
+.panel{
+  background:var(--panel);border:1.5px solid var(--line);
+  border-radius:8px;padding:14px 16px;margin:.8em 0;
+  box-shadow:2px 3px 0 rgba(60,50,20,.12);
+}
+.lab{display:flex;flex-wrap:wrap;gap:16px}
+.stage{
+  flex:1 1 560px;min-width:0;overflow-x:auto;
+  border:1px dashed var(--line);border-radius:6px;
+  background:#fbf6ea;padding:8px;
+}
+.controls{flex:1 1 300px;min-width:260px}
+fieldset{
+  border:1px solid var(--line);border-radius:6px;
+  margin:0 0 12px;padding:8px 10px;
+}
+legend{padding:0 6px;font-size:.85rem;color:var(--dim)}
+.ctl{display:flex;align-items:center;gap:8px;margin:6px 0}
+.ctl label{flex:0 0 9.5em;font-size:.88rem}
+.ctl input[type=range]{flex:1;accent-color:var(--teal)}
+.ctl output{
+  flex:0 0 3em;text-align:right;
+  font-family:ui-monospace,Consolas,monospace;font-size:.85rem;
+}
+.ctl select{
+  font:inherit;padding:2px 6px;max-width:14em;
+}
+input:focus-visible,select:focus-visible,button:focus-visible{
+  outline:3px solid var(--coral);outline-offset:2px;
+}
+.presets{display:flex;flex-wrap:wrap;gap:8px;margin:.4em 0}
+button{
+  font:inherit;cursor:pointer;border-radius:5px;
+  border:1.5px solid var(--ink);background:#f3ead2;
+  padding:4px 12px;box-shadow:1.5px 2px 0 rgba(60,50,20,.25);
+}
+button:active{transform:translate(1px,1px);box-shadow:none}
+.note{
+  font-size:.9rem;color:var(--dim);
+  border-left:3px solid var(--ochre);padding-left:10px;
+}
+table{border-collapse:collapse;width:100%;font-size:.9rem}
+th,td{
+  border:1px solid var(--line);padding:5px 8px;
+  text-align:left;vertical-align:top;
+}
+th{background:#efe4c8}
+.tw{overflow-x:auto}
+.tag{
+  display:inline-block;font-size:.72rem;letter-spacing:.05em;
+  border-radius:4px;padding:.05em .5em;vertical-align:.15em;
+  font-family:ui-monospace,Consolas,monospace;
+}
+.tag-fact{background:#d7e9e5;color:#0d5c55}
+.tag-ill{background:#f6dfd4;color:#a53a1f}
+.warn{
+  display:none;margin:.5em 0;padding:.5em .8em;border-radius:6px;
+  border:1.5px solid var(--coral);background:#f8e2da;color:#8c2c17;
+}
+.legend{font-size:.82rem;color:var(--dim);margin:.3em 0 0}
+.legend .sw{
+  display:inline-block;width:1em;height:.8em;
+  vertical-align:-.1em;margin:0 .3em 0 1em;opacity:.6;
+}
+.legend .sw.dash{background:transparent;border:1px dashed}
+svg text{user-select:none}
+@media (max-width:640px){
+  body{padding:16px 10px 48px}
+  h1{font-size:1.5rem}
+  .ctl label{flex-basis:8em}
+}
+@media (prefers-reduced-motion:reduce){
+  *{transition:none!important;animation:none!important}
+}
+</style>
+</head>
+<body>
+<main>
+<h1>FlexContainer_create 字段图解</h1>
+<p class="guide">阅读顺序:先玩中间的参数实验室,
+再看「主轴 / 交叉轴 / 轨道」概念、源码映射表,
+最后对照当前 Topbar 的实际配置。</p>
+
+<p><span class="tag tag-fact">事实</span>
+本页事实部分只描述
+<a href="../app/application/ui/hsm/widgets/helpers/ui_flex.h">ui_flex.h</a>
+/
+<a href="../app/application/ui/hsm/widgets/helpers/ui_flex.c">ui_flex.c</a>
+里现在的真实行为。
+<span class="tag tag-ill">示意</span>
+几何模拟是教学推演,不是 LVGL 渲染器,见文末口径说明。</p>
+
+<h2>1. 参数实验室</h2>
+<div class="lab">
+  <div class="stage" id="stage" aria-label="布局示意图">
+    <svg id="fig" role="img" aria-label="flex 布局模拟结果"></svg>
+    <div class="warn" id="warn" role="alert"></div>
+    <p class="legend">图例:
+      <i class="sw" style="background:#c9862b"></i>边 pad
+      <i class="sw dash" style="border-color:#0f766e"></i>
+        内容盒 / 轨道
+      <i class="sw" style="background:#d9543f"></i>子项间隔
+      —— 图较宽时可横向滚动。</p>
+  </div>
+  <div class="controls">
+    <fieldset>
+      <legend>容器尺寸</legend>
+      <div class="ctl">
+        <label for="w">width</label>
+        <input id="w" type="range" min="320" max="720" step="8"
+               value="560"><output id="wo">560</output>
+      </div>
+      <div class="ctl">
+        <label for="h">height</label>
+        <input id="h" type="range" min="160" max="480" step="4"
+               value="300"><output id="ho">300</output>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>四边内边距(收缩内容盒)</legend>
+      <div class="ctl">
+        <label for="pt">padTop</label>
+        <input id="pt" type="range" min="0" max="48"
+               value="24"><output id="pto">24</output>
+      </div>
+      <div class="ctl">
+        <label for="pb">padBottom</label>
+        <input id="pb" type="range" min="0" max="48"
+               value="24"><output id="pbo">24</output>
+      </div>
+      <div class="ctl">
+        <label for="pl">padLeft</label>
+        <input id="pl" type="range" min="0" max="48"
+               value="24"><output id="plo">24</output>
+      </div>
+      <div class="ctl">
+        <label for="pr">padRight</label>
+        <input id="pr" type="range" min="0" max="48"
+               value="24"><output id="pro">24</output>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>间隙</legend>
+      <div class="ctl">
+        <label for="pr2">padRow 竖直间隔</label>
+        <input id="pr2" type="range" min="0" max="48"
+               value="12"><output id="pr2o">12</output>
+      </div>
+      <div class="ctl">
+        <label for="pc">padColumn 水平间隔</label>
+        <input id="pc" type="range" min="0" max="48"
+               value="12"><output id="pco">12</output>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>流向与对齐</legend>
+      <div class="ctl">
+        <label for="flow">flow</label>
+        <select id="flow">
+          <option value="ROW">ROW 行</option>
+          <option value="ROW_WRAP">ROW_WRAP 行换行</option>
+          <option value="COLUMN">COLUMN 列</option>
+          <option value="COLUMN_WRAP">COLUMN_WRAP 列换行
+          </option>
+        </select>
+      </div>
+      <div class="ctl">
+        <label for="main">mainPlace 主轴</label>
+        <select id="main">
+          <option>START</option><option>CENTER</option>
+          <option>END</option><option>SPACE_BETWEEN</option>
+        </select>
+      </div>
+      <div class="ctl">
+        <label for="cross">crossPlace 轨道内</label>
+        <select id="cross">
+          <option>START</option><option selected>CENTER</option>
+          <option>END</option>
+        </select>
+      </div>
+      <div class="ctl">
+        <label for="track">trackPlace 轨道整体</label>
+        <select id="track">
+          <option>START</option><option>CENTER</option>
+          <option>END</option><option>SPACE_BETWEEN</option>
+        </select>
+      </div>
+    </fieldset>
+    <div class="presets" role="group" aria-label="预设">
+      <button data-p="1">1 单行起点</button>
+      <button data-p="2">2 轨道居中</button>
+      <button data-p="3">3 控件顶对齐</button>
+      <button data-p="4">4 多行分布</button>
+      <button data-p="5">5 纵向</button>
+      <button data-p="0">复位</button>
+    </div>
+    <p class="note" id="presetNote"></p>
+  </div>
+</div>
+
+<h3>生成的 C 调用(可直接抄)</h3>
+<pre id="code" aria-label="对应的 C 代码"></pre>
+
+<h2>2. 主轴 / 交叉轴 / 轨道</h2>
+<div class="panel">
+<p>子项沿<strong>主轴</strong>排列;启用 *_WRAP 后,
+排不下才换出新的<strong>轨道</strong>(track);
+轨道沿<strong>交叉轴</strong>堆叠。
+ROW 时:主轴水平、交叉轴竖直、一条轨道就是一行;
+COLUMN 时完全对调:主轴竖直、交叉轴水平、一轨一列。</p>
+<p><strong>容易记错的一点:</strong>
+<code>crossPlace</code> 只负责子项在<strong>自己那条轨道内</strong>
+的对齐(ROW 轨道高 = 该轨最高子项;
+COLUMN 则是轨道宽 = 最宽子项,都不是整个内容区);
+<code>trackPlace</code> 才负责整条轨道在容器交叉轴上的位置——
+哪怕只有一条轨道,trackPlace 也能把它推到中间或底部。
+想上下居中一整排,改 trackPlace,不是 crossPlace。</p>
+<p><strong>间隙映射:</strong><code>padColumn</code> 是水平间隔,
+<code>padRow</code> 是竖直间隔。ROW 时子项间 = padColumn、
+轨道间 = padRow;COLUMN 时子项间 = padRow、轨道间 =
+padColumn。四个边 pad 只收缩<strong>内容盒</strong>,
+外框尺寸不变。图上珊瑚色表示<strong>最终子项间隔</strong>;
+SPACE_BETWEEN 时标签拆成 配置间距 + 额外分配,
+轨道间隔同理标出。</p>
+</div>
+
+<h2>3. 字段 → LVGL 源码映射</h2>
+<div class="tw"><table>
+<thead><tr><th>UiFlexConfig 字段</th>
+<th>ui_flex.c 里的实际调用</th><th>效果</th></tr></thead>
+<tbody>
+<tr><td><code>width / height</code></td>
+<td><code>lv_obj_set_size</code></td>
+<td>外框尺寸,可传 LV_SIZE_CONTENT / percent</td></tr>
+<tr><td><code>flow</code></td>
+<td><code>lv_obj_set_flex_flow</code></td>
+<td>ROW / COLUMN / *_WRAP</td></tr>
+<tr><td><code>mainPlace / crossPlace / trackPlace</code></td>
+<td><code>lv_obj_set_flex_align</code> 的三个参数</td>
+<td>主轴 / 轨道内 / 轨道级对齐</td></tr>
+<tr><td><code>padTop/Bottom/Left/Right</code></td>
+<td><code>lv_obj_set_style_pad_*</code>(selector 0)</td>
+<td>四边内边距</td></tr>
+<tr><td><code>padRow / padColumn</code></td>
+<td><code>lv_obj_set_style_pad_row/column</code></td>
+<td>竖直间距 / 水平间距;角色随 flow 切换</td></tr>
+</tbody>
+</table></div>
+<p class="note">固定动作(无配置项):
+<code>lv_obj_remove_style_all</code> 去样式,
+<code>lv_obj_remove_flag</code> 去掉 SCROLLABLE|CLICKABLE
+保持被动。LVGL 排布逻辑见
+<a href="../3rd_party/lvgl/src/layouts/flex/lv_flex.c">
+lv_flex.c</a>(仅参考链接,页面运行不依赖它)。</p>
+
+<h2>4. 当前 Topbar 的实际配置</h2>
+<div class="panel">
+<p>Topbar 用本助手建 3 个容器,都是 ROW,
+crossPlace=CENTER,trackPlace=START。四边 pad 是<b>对象
+内边距</b>,与 padRow/Column 的子项间距不是一回事,
+也不是对象位置偏移:</p>
+<ul>
+<li>外框 236×20,mainPlace=SPACE_BETWEEN,
+四边 pad 各 2,padRow=padColumn=0 —— 左右两组被推到
+两端,2 px 边距在容器内部;</li>
+<li>左组 104×20,mainPlace=START,padLeft=2、其余三边 0,
+padColumn=4,装 10×10 LED + blinkyCount 标签(宽 90);</li>
+<li>右组 105×20,mainPlace=START,四边 pad 全 0,
+padColumn=4,装 fps 标签(宽 61)+ cpu 标签(宽 40)。</li>
+</ul>
+</div>
+
+<h2>5. 事实与示意口径</h2>
+<div class="panel">
+<p><span class="tag tag-fact">事实</span>
+助手只创建一个普通、透明、去样式、被动的子对象;
+它按配置设定尺寸、flow、三种对齐与六个 pad;
+它<b>不</b>定位对象、<b>不</b>创建屏幕,
+parent 与 config 非空是硬性要求(SM_REQUIRE),
+config 只在调用期借用、不保留;
+不额外创建像素缓冲,LVGL 对象与样式仍需分配内存;
+未写的字段由调用方用指定初始化补零。</p>
+<p><span class="tag tag-ill">示意</span>
+上图是<strong>教学几何推演</strong>:正像素固定尺寸、
+从左到右、无边框/外边距/grow/reverse/scroll/字体排版;
+不是浏览器 CSS flex,也不是 LVGL 渲染器,
+不支持的对齐模式已排除;不保证与 LVGL 逐像素一致
+(舍入也可能不同),更不是 MCU 上的实测或周期数据,
+与 Figma 无关。溢出时只画虚线警示,不模拟 LVGL 的
+裁剪细节。</p>
+</div>
+<script>
+"use strict";
+// 固定四个示意子项(非真实组件)
+const ITEMS=[
+ {n:"A",w:72,h:32},{n:"B",w:60,h:64},
+ {n:"C",w:88,h:40},{n:"D",w:64,h:48}];
+const $=id=>document.getElementById(id);
+function place(extra,mode,count){
+  const free=Math.max(0,extra);
+  if(mode==="CENTER")return{off:free/2,gap:0};
+  if(mode==="END")return{off:free,gap:0};
+  if(mode==="SPACE_BETWEEN")
+    return{off:0,gap:count>1?free/(count-1):0};
+  return{off:0,gap:0};// START
+}
+
+// 返回 {tracks,overflow};track={main0,cross0,main,cross,items[]}
+// item={n,x,y,w,h} 均为容器内坐标
+function layout(c){
+  const isRow=c.flow.indexOf("ROW")===0;
+  const wrap=c.flow.indexOf("WRAP")>0;
+  const contentW=c.width-c.padLeft-c.padRight;
+  const contentH=c.height-c.padTop-c.padBottom;
+  const mainCap=isRow?contentW:contentH;
+  const crossCap=isRow?contentH:contentW;
+  const itemGap=isRow?c.padColumn:c.padRow;
+  const trackGap=isRow?c.padRow:c.padColumn;
+  const im=it=>isRow?it.w:it.h;
+  const ic=it=>isRow?it.h:it.w;
+  const tracks=[];let t={items:[],occ:0,cross:0};
+  for(const it of ITEMS){
+    const m=im(it);
+    if(wrap&&t.items.length&&t.occ+itemGap+m>mainCap){
+      tracks.push(t);t={items:[],occ:0,cross:0};
+    }
+    t.items.push(it);
+    t.occ+=(t.items.length>1?itemGap:0)+m;
+    t.cross=Math.max(t.cross,ic(it));
+  }
+  tracks.push(t);
+  const totalCross=tracks.reduce((s,x)=>s+x.cross,0)
+    +trackGap*(tracks.length-1);
+  const tp=place(crossCap-totalCross,c.track,tracks.length);
+  let overflow=crossCap-totalCross<0;
+  let cross0=tp.off;
+  for(const tr of tracks){
+    tr.cross0=cross0;
+    const mp=place(mainCap-tr.occ,c.main,tr.items.length);
+    if(mainCap-tr.occ<0)overflow=true;
+    let main0=mp.off;
+    for(const it of tr.items){
+      const item={n:it.n,w:it.w,h:it.h};
+      const co=c.cross==="CENTER"?(tr.cross-ic(it))/2
+        :c.cross==="END"?tr.cross-ic(it):0;
+      if(isRow){
+        item.x=c.padLeft+main0;
+        item.y=c.padTop+tr.cross0+co;
+      }else{
+        item.x=c.padLeft+tr.cross0+co;
+        item.y=c.padTop+main0;
+      }
+      tr.main=mainCap;tr.dimCross=tr.cross;
+      tr.items[tr.items.indexOf(it)]=item;
+      main0+=im(it)+itemGap+mp.gap;
+    }
+    tr.itemGap=itemGap+mp.gap;
+    tr.cfgGap=itemGap;
+    cross0+=tr.cross+trackGap+tp.gap;
+    tr.extraTrackGap=tp.gap;tr.trackGap=trackGap;
+  }
+  return{tracks,overflow,isRow,mainCap,crossCap,
+         contentW,contentH,itemGap,trackGap};
+}
+
+const NS="http://www.w3.org/2000/svg";
+function el(tag,attrs){
+  const e=document.createElementNS(NS,tag);
+  for(const k in attrs)e.setAttribute(k,attrs[k]);
+  return e;
+}
+function txt(svg,x,y,s,fill,anchor,size){
+  const e=el("text",{x,y,"text-anchor":anchor||"middle",
+    "font-size":size||11,fill:fill||"#22302e",
+    "font-family":"Georgia,'Noto Serif CJK SC',serif"});
+  e.textContent=s;svg.appendChild(e);
+}
+function arrow(svg,x1,y1,x2,y2,color,axis){
+  const g=el("g",{"data-axis":axis});
+  g.appendChild(el("line",{x1,y1,x2,y2,stroke:color,
+    "stroke-width":1.6}));
+  const a=Math.atan2(y2-y1,x2-x1);
+  const p=[[x2,y2],
+    [x2-7*Math.cos(a-.42),y2-7*Math.sin(a-.42)],
+    [x2-7*Math.cos(a+.42),y2-7*Math.sin(a+.42)]];
+  g.appendChild(el("polygon",
+    {points:p.map(q=>q.join(",")).join(" "),fill:color}));
+  svg.appendChild(g);
+  return g;
+}
+
+function render(){
+  const c=read();
+  const L=layout(c);
+  const M=64,W=c.width+2*M,H=c.height+2*M;
+  const svg=$("fig");
+  svg.innerHTML="";
+  svg.setAttribute("viewBox","0 0 "+W+" "+H);
+  svg.setAttribute("width",Math.min(W,900));
+  svg.setAttribute("height",Math.min(W,900)*H/W);
+  svg.style.minWidth=Math.min(W,520)+"px";
+  // 外框
+  svg.appendChild(el("rect",{x:M,y:M,width:c.width,
+    height:c.height,fill:"#fdfaf1",stroke:"#22302e",
+    "stroke-width":2}));
+  // 四边 pad 带(赭色)
+  svg.appendChild(el("rect",{x:M,y:M,width:c.width,
+    height:c.padTop,fill:"#c9862b",opacity:.28}));
+  svg.appendChild(el("rect",{x:M,y:M+c.height-c.padBottom,
+    width:c.width,height:c.padBottom,fill:"#c9862b",
+    opacity:.28}));
+  svg.appendChild(el("rect",{x:M,y:M,width:c.padLeft,
+    height:c.height,fill:"#c9862b",opacity:.28}));
+  svg.appendChild(el("rect",{x:M+c.width-c.padRight,y:M,
+    width:c.padRight,height:c.height,fill:"#c9862b",
+    opacity:.28}));
+  // 内容盒(虚线)
+  svg.appendChild(el("rect",{x:M+c.padLeft,y:M+c.padTop,
+    width:L.contentW,height:L.contentH,fill:"none",
+    stroke:"#0f766e","stroke-width":1.4,
+    "stroke-dasharray":"6 4"}));
+  // 轨道与子项
+  const fill=["#0f766e","#d9543f","#c9862b","#476a8a"];
+  L.tracks.forEach((tr,i)=>{
+    const rx=L.isRow?M+c.padLeft:M+c.padLeft+tr.cross0;
+    const ry=L.isRow?M+c.padTop+tr.cross0:M+c.padTop;
+    const rw=L.isRow?L.contentW:tr.cross;
+    const rh=L.isRow?tr.cross:L.contentH;
+    svg.appendChild(el("rect",{x:rx,y:ry,width:rw,
+      height:rh,fill:"#0f766e",opacity:.08,
+      stroke:"#0f766e","stroke-width":1.2,
+      "stroke-dasharray":"3 3"}));
+    txt(svg,L.isRow?rx+4:rx+rw/2,
+        L.isRow?ry-4:ry-6,
+        "轨道"+(i+1),"#0f766e","start",10);
+    tr.items.forEach((it,j)=>{
+      svg.appendChild(el("rect",{x:M+it.x,y:M+it.y,
+        width:it.w,height:it.h,fill:fill[j%4],
+        opacity:.82,rx:3}));
+      txt(svg,M+it.x+it.w/2,M+it.y+it.h/2+4,
+          it.n+" "+it.w+"×"+it.h,"#fff","middle",10);
+      // 子项间隔(珊瑚色 = 最终间隔,标签拆配置+分配)
+      if(j<tr.items.length-1){
+        const g=tr.itemGap;
+        const extra=Math.round(g-tr.cfgGap);
+        const lbl=extra>0
+          ?tr.cfgGap+" + "+extra+" 分配":""+tr.cfgGap;
+        if(L.isRow){
+          svg.appendChild(el("rect",{x:M+it.x+it.w,
+            y:M+it.y+it.h/2-3,width:g,height:6,
+            fill:"#d9543f",opacity:.55}));
+          txt(svg,M+it.x+it.w+g/2,M+it.y-4,
+              lbl,"#a53a1f","middle",9);
+        }else{
+          svg.appendChild(el("rect",{x:M+it.x+it.w/2-3,
+            y:M+it.y+it.h,width:6,height:g,
+            fill:"#d9543f",opacity:.55}));
+          txt(svg,M+it.x+it.w+8,M+it.y+it.h+g/2+3,
+              lbl,"#a53a1f","start",9);
+        }
+      }
+    });
+    // 轨道间间隔标记
+    if(i<L.tracks.length-1){
+      const g=tr.trackGap+tr.extraTrackGap;
+      const extra=tr.extraTrackGap>0
+        ?"("+tr.trackGap+"+"+(g-tr.trackGap).toFixed(0)
+          +"分布)":"("+tr.trackGap+")";
+      if(L.isRow){
+        const y=M+c.padTop+tr.cross0+tr.cross;
+        svg.appendChild(el("rect",{x:M+c.padLeft+6,y,
+          width:6,height:g,fill:"#c9862b",opacity:.55}));
+        txt(svg,M+c.padLeft+18,y+g/2+3,
+            "轨道间隔 "+extra,"#8a5a10","start",9);
+      }else{
+        const x=M+c.padLeft+tr.cross0+tr.cross;
+        svg.appendChild(el("rect",{x,y:M+c.padTop+6,
+          width:g,height:6,fill:"#c9862b",opacity:.55}));
+        txt(svg,x+g/2,M+c.padTop+16,
+            "轨道间隔 "+extra,"#8a5a10","middle",9);
+      }
+    }
+  });
+  // 溢出警示(虚线红框,不模拟裁剪)
+  if(L.overflow){
+    svg.appendChild(el("rect",{x:M-3,y:M-3,
+      width:c.width+6,height:c.height+6,fill:"none",
+      stroke:"#d9543f","stroke-width":2,
+      "stroke-dasharray":"8 4"}));
+  }
+  // 轴箭头:水平=主轴(ROW)/交叉轴(COLUMN),竖直反之
+  arrow(svg,M+c.padLeft,M-18,M+c.padLeft+60,M-18,
+        "#22302e",L.isRow?"main":"cross");
+  txt(svg,M+c.padLeft+66,M-14,L.isRow?"主轴":"交叉轴",
+      "#22302e","start",11);
+  arrow(svg,M-18,M+c.padTop,M-18,M+c.padTop+60,
+        "#22302e",L.isRow?"cross":"main");
+  txt(svg,M-22,M+c.padTop+66,L.isRow?"交叉轴":"主轴",
+      "#22302e","end",11);
+  // pad 数值角标
+  txt(svg,M+c.padLeft/2,M+c.height/2,"L"+c.padLeft,
+      "#8a5a10","middle",9);
+  txt(svg,M+c.width-c.padRight/2,M+c.height/2,
+      "R"+c.padRight,"#8a5a10","middle",9);
+  txt(svg,M+c.width/2,M+c.padTop-4,"T"+c.padTop,
+      "#8a5a10","middle",9);
+  txt(svg,M+c.width/2,M+c.height-c.padBottom+12,
+      "B"+c.padBottom,"#8a5a10","middle",9);
+  txt(svg,M+c.width/2,M+c.height+30,
+      "width "+c.width+" × height "+c.height,
+      "#5f6659","middle",11);
+  // 供验证脚本读取
+  window.__items=L.tracks.flatMap(t=>t.items);
+  window.__tracks=L.tracks.map(t=>({cross0:t.cross0,
+    cross:t.cross}));
+  const w=$("warn");
+  w.style.display=L.overflow?"block":"none";
+  w.textContent="注意:子项超出容量(示意仅画警示框,"+
+    "不模拟 LVGL 裁剪)";
+  $("code").textContent=codeFor(c);
+}
+
+function read(){
+  return{
+    width:+$("w").value,height:+$("h").value,
+    flow:$("flow").value,main:$("main").value,
+    cross:$("cross").value,track:$("track").value,
+    padTop:+$("pt").value,padBottom:+$("pb").value,
+    padLeft:+$("pl").value,padRight:+$("pr").value,
+    padRow:+$("pr2").value,padColumn:+$("pc").value};
+}
+
+function codeFor(c){
+  const al=m=>"LV_FLEX_ALIGN_"+m;
+  return"lv_obj_t *box = FlexContainer_create(parent,\n"
+    +"    &(UiFlexConfig){\n"
+    +"        .width = "+c.width+", .height = "+c.height
+    +",\n        .flow = LV_FLEX_FLOW_"+c.flow+",\n"
+    +"        .mainPlace = "+al(c.main)+",\n"
+    +"        .crossPlace = "+al(c.cross)+",\n"
+    +"        .trackPlace = "+al(c.track)+",\n"
+    +"        .padTop = "+c.padTop
+    +", .padBottom = "+c.padBottom+",\n"
+    +"        .padLeft = "+c.padLeft
+    +"        , .padRight = "+c.padRight+",\n"
+    +"        .padRow = "+c.padRow
+    +", .padColumn = "+c.padColumn+"});";
+}
+
+const PRESET={
+ 1:{note:"预设1:单轨起点。内容顶部一条轨道,子项在轨内居中。",
+   set:{flow:"ROW",main:"START",cross:"CENTER",track:"START",
+        w:560,h:300}},
+ 2:{note:"预设2:整条轨道在交叉轴居中——由 trackPlace 完成。",
+   set:{flow:"ROW",main:"START",cross:"CENTER",
+        track:"CENTER",w:560,h:300}},
+ 3:{note:"预设3:子项改贴轨道顶部,轨道本身仍居中。",
+   set:{flow:"ROW",main:"START",cross:"START",
+        track:"CENTER",w:560,h:300}},
+ 4:{note:"预设4:窄容器换行,两条轨道 SPACE_BETWEEN 拉开。",
+   set:{flow:"ROW_WRAP",main:"START",cross:"CENTER",
+        track:"SPACE_BETWEEN",w:320,h:300}},
+ 5:{note:"预设5:COLUMN 时主轴竖直,一轨一列。",
+   set:{flow:"COLUMN",main:"START",cross:"CENTER",
+        track:"START",w:560,h:300}},
+ 0:{note:"复位:回到全部初始参数。"}
+};
+const INIT={w:560,h:300,pt:24,pb:24,pl:24,pr:24,pr2:12,pc:12,
+            flow:"ROW",main:"START",cross:"CENTER",track:"START"};
+function apply(p){
+  const s=Object.assign({},INIT,PRESET[p].set);
+  $("w").value=s.w;$("h").value=s.h;
+  ["pt","pb","pl","pr","pr2","pc"].forEach(k=>{
+    $(k).value=s[k];});
+  $("flow").value=s.flow;$("main").value=s.main;
+  $("cross").value=s.cross;$("track").value=s.track;
+  $("presetNote").textContent=PRESET[p].note;
+  sync();render();
+}
+function sync(){
+  ["w","h","pt","pb","pl","pr","pr2","pc"].forEach(k=>{
+    $(k+"o").textContent=$(k).value;});
+}
+document.querySelectorAll("input,select").forEach(e=>{
+  e.addEventListener("input",()=>{sync();render();
+    $("presetNote").textContent="";});
+});
+document.querySelectorAll("button[data-p]").forEach(b=>{
+  b.addEventListener("click",()=>apply(b.dataset.p));
+});
+apply(1);
+</script>
+</main>
+</body>
+</html>

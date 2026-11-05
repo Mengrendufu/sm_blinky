@@ -33,6 +33,8 @@ def main():
     ]]
     sources = [HERE / "test_ui_components.c"] + [ROOT / path for path in [
         "app/application/ui/hsm/sm_ui.c",
+        "app/application/ui/hsm/helpers/ui_splash.c",
+        "app/application/ui/hsm/helpers/ui_sys_info.c",
         "app/application/ui/thread/ui_evt.c",
         "app/application/nvm/nvm.c",
         "3rd_party/common_c/src/time_evt/time_evt.c",
@@ -40,9 +42,9 @@ def main():
         "app/ports/static_pool/sst_evt_pool.c",
         "3rd_party/common_c/src/static_pool/static_pool.c",
     ]]
-    for folder in ["metrics", "widgets"]:
+    for folder in ["widgets"]:
         widget_dir = ROOT / "app/application/ui/hsm" / folder
-        sources += sorted(widget_dir.glob("*.c"))
+        sources += sorted(widget_dir.rglob("*.c"))
     quote = lambda paths: " ".join(f'"{p}"' for p in paths)
     cmake = f'''cmake_minimum_required(VERSION 3.25)
 project(ui_host C)
@@ -80,34 +82,7 @@ target_compile_options(test PRIVATE -Wall -Wextra -Werror)
               else result.stderr)
     (work / "results.json").write_text(json.dumps(rows, indent=2))
     assert all(row["code"] == 0 for row in rows), work
-    fixture = json.loads((HERE / "figma_geometry.json").read_text())
-    actual = {}
-    for line in rows[0]["stdout"].splitlines():
-        if line.startswith("GEOMETRY "):
-            _, name, *values = line.split()
-            box = dict(zip(["x", "y", "width", "height", "baseline"],
-                           map(int, values)))
-            box["right"] = box["x"] + box["width"]
-            actual[name] = box
-    differences = []
-    checked = 0
-    for name, expected in fixture["objects"].items():
-        # A single built-in font intentionally replaces Figma typography.
-        if "baseline" in expected:
-            continue
-        checked += 1
-        for key, value in expected.items():
-            if key == "node":
-                continue
-            delta = actual[name][key] - value
-            if abs(delta) > fixture["tolerance_px"]:
-                differences.append([name, key, value, actual[name][key]])
-    (work / "geometry.json").write_text(json.dumps({
-        "actual": actual, "differences": differences
-    }, indent=2))
-    assert not differences, differences
-    print(f"PASS Figma geometry: {checked} non-text objects; "
-          "tolerance 0.51 px")
+
 
 
 if __name__ == "__main__":

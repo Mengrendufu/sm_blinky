@@ -1,63 +1,260 @@
-# UI HSM 直驱显示组件
+# UI 重构准备状态
 
-[UML 图表](uml/ui/ui-components.html)展示组件依赖和 LVGL 对象树。
+当前只保留唯一持久可见的 UiRoot 内容根容器，Splash 复用其背景。
+原 Sys/Live 的业务控件、背景挂载、资源采样、Header/Dial 时间事件
+及相关数据展示调用已移除。资产格式、Flash 加载和 NVM 模块未改动。
+原背景源图保存在 bg/figma；slot0/1 已由 SysInfo/LiveShow 挂载。
 
-UI 线程负责收件、派发、事件回收和 LVGL heartbeat/flush。
-Sm_Ui 持有被动显示组件，按状态和事件决定如何操作它们。
-没有 Sys/Live 页面对象，也没有中间的页面转发接口。
+UI 线程继续负责收件、派发、事件回收和 LVGL heartbeat/flush。
+Sm_Ui 保留启动就绪事件流转，以及 SysInfo 5 s、LiveShow 10 s 的
+切页骨架。splashing 入口把 Splash 像素挂成根容器背景、出口还原
+为黑。Active 入口在根容器下挂被动 Topbar，整个 demo 常驻，
+SysInfo / LiveShow 共用同一个实例。两页入口各自把
+slot0 / slot1 挂成根容器整屏背景，出口清掉，缺槽回退黑色。
 
-## 所有权与依赖
+当前链路：
 
 ```text
-UI 线程 → Sm_Ui HSM → 被动显示组件 → LVGL
-                  → UiMetrics（资源采样）
-                  → NVM（读取 RAM 快照）
+UI 线程 → Sm_Ui HSM → UiSplash → UiRoot → LVGL
+                  → UiTopbar（Active entry 创建一次，常驻）
+                  → UiSysInfo → UiRoot（背景+页标题+ThreadMonitor）
+                  → stateTimeout（启动停留和页面切换）
 ```
 
-Sm_Ui 中平铺 Surface、Topbar、Gauge、BarPanel、Dots、Dial、Switch、
-Nvm 标签和 Ram 标签实例。对象实例采用静态存储，LVGL 控件按状态
-进入/退出创建和销毁；这些是两个不同的生命周期。
+目录分两类助手：hsm/helpers 放 HSM 持有的无状态页面操作
+（ui_splash.c/.h 让根容器借用验证过的 RGB565 像素；
+ui_sys_info.c/.h 做 SysInfo 页的背景借用和页标题
+build/hide（PageTitle 挂在根容器下，Active 配置的
+COLUMN flex 让它落在 Topbar 下方、行距 10）；
+不动 Topbar 或兄弟节点；LiveShow 的
+页面助手留待其实现落地时再建）。共享 Topbar 由
+Active entry 直接创建一次、整个 demo 常驻——没有
+生产环境的 Active exit，不做 exit 清理；组件
+UiTopbar_destroy 仅保留给测试 teardown。
+像素描述符由 UiRoot 持有；
+hsm/widgets/helpers 放组件创建/配置助手（ui_flex、ui_label）。
+widgets 下保留 ui_root/ui_root.c/.h、topbar/topbar.c/.h，
+widgets/styles/ui_style.c/.h 放共享 const 样式。HSM 仍持有全部
+状态与对象所有权；SysInfo 页面助手已存在（背景操作），
+LiveShow 的实现落地时再建，不留空占位。
 
-组件封装自身 LVGL 对象、样式、显示缓存及更新方法。组件不订阅事件、
-不创建定时器、不决定页面跳转、不读取业务存储。HSM 调用组件 API，
-不直接拼装 LVGL 样式。BarPanel 是资源条显示能力，不是页面协调层。
+hsm/widgets/helpers/ui_flex.c/.h 是共享的 flex 布局创建助手：
+FlexContainer_create(parent, &UiFlexConfig) 建一个去样式、透明、被动的
+普通子对象，按配置设尺寸、flow、三向对齐与六个 pad
+（padTop/Bottom/Left/Right 是内边距，padRow/Column 是轨道/
+项目间距），尺寸原样转发（含 LV_SIZE_CONTENT/percent）。
+config 只在调用期借用、不保留，自动变量或复合字面量均可；
+返回对象归 LVGL/父级所有，用 lv_obj_delete 或随父级销毁。
+Topbar 的三个 flex 容器（外框与左右分组）均改用它。
 
-Surface 也放在 widgets 下，负责内容容器和背景图片描述符。
-它不清理其他组件；每个组件的 destroy 只删除自己创建的 LVGL 对象，
-然后清空自身句柄，不调用 lv_obj_clean 清空借来的父容器。
+hsm/widgets/helpers/ui_bar.c/.h 薄封装原生 lv_bar：
+Bar_create(parent, &BarConfig) 只创建一个对象，无子对象或标签；
+配置 width/height、minValue/maxValue 和初值 value。
+要求 minValue < maxValue，初值在范围内；尺寸原样转发，
+支持 percent。配置只在调用期借用，初值使用 LV_ANIM_OFF，
+保留原生 NORMAL 模式与 AUTO 方向；位置由父布局或调用方决定。
+helper 清除默认样式且不挂业务外观，调用方分别挂载：
 
-## 状态管理生命周期
+```c
+lv_obj_add_style(bar, &UiStyle_barTrack, LV_PART_MAIN);
+lv_obj_add_style(bar, &UiStyle_barIndicator, LV_PART_INDICATOR);
+```
 
-| 状态 | 创建与操作 | 退出 |
-|---|---|---|
-| TOP 初始化 | 初始化组件实例、指标采集，创建 Surface | — |
-| Splash | 设置背景、背光，arm 展示期限 | disarm 展示期限 |
-| Active | 创建 Topbar，采样，arm 公共刷新 | disarm、销毁 Topbar |
-| Sys | 创建 Gauge、BarPanel、Dots，显示资源快照 | disarm、逐个销毁 |
-| Live | 创建 Dial、Switch、Nvm、Ram、Dots | disarm、逐个销毁 |
+两份 const 样式仅管外观：圆头、白色，轨道 30% 不透明、
+填充完全不透明；这是当前实现默认选择，不声称匹配 Figma 取色。
+之后直接调用 lv_bar_set_value/range，遵循 LVGL 的数值运算边界。
+仅在 UI 线程操作；对象归父级所有，可直接销毁或随父级销毁。
+线程卡片已复用它；helper 不包含数值/单位文字、采样或自动动画。
 
-Topbar 跨 Sys/Live 切换保留；两个状态互斥使用同一个 Dots 实例。
-组件只在所属状态有效期间操作。已投递但晚到的圆弧超时在 Sys
-不被消费，因此不会访问已经销毁的 Dial。
+hsm/widgets/helpers/ui_arc.c/.h 同层薄封装原生 lv_arc：
+Arc_create(parent, &ArcConfig) 只创建轨道和指示条所在的单个对象，
+无 knob、无文字或额外容器。配置尺寸、startAngle/endAngle、
+minValue/maxValue 和初值 value；角度为顺时针 0..360 度，
+起点大于终点允许跨零。范围须递增，初值须在范围内。
+配置仅调用期借用；默认 NORMAL 模式、零旋转，关闭点击和滚动，
+不挂外观，不负责位置。调用方按 MAIN / INDICATOR 挂载共享
+UiStyle_arcTrack / UiStyle_arcIndicator：线宽 6、圆头、
+白色轨道和 #BEE086 指示条。后续直接用 lv_arc_set_value/range/
+bg_angles，不再另包更新接口；仅 UI 线程操作，父级拥有生命周期。
+资源卡通过 Arc_create 组合圆弧，百分比标签留在卡片圆弧区。
 
-Sys/Live 分别消费自己的页面超时，期限仍为 5 s/10 s。
-HSM 每 30 ms 消费圆弧超时，更新自身进度和方向，再调用
-W_Dial_setValue。Dial 只显示传入百分比，不决定往返动画策略。
+hsm/widgets/helpers/ui_label.c/.h 是同形态的标签创建助手：
+Label_create(parent, &LabelConfig) 建一个去样式的真
+lv_label，只管布局与内容：尺寸、longMode，最后
+lv_label_set_text_static 借用调用方缓冲（不复制；改完
+缓冲须再调一次通知 LVGL）。config 只在调用期借用；
+text 必须比 label 活得久。textAlign 是标签框内的水平
+对齐：AUTO（0 默认）/LEFT/CENTER/RIGHT，只管文本，
+不影响控件垂直方向或控件位置/对齐。
+LV_LABEL_LONG_MODE_DOTS
+被 SM_REQUIRE 拒绝——本版 LVGL 对静态文本不渲染 dots。
+另有 ignoreLayout 指针字段：NULL（默认）完全不写控件
+位置或控件对齐，Flex/Grid 父级照常决定；非 NULL 时挂
+LV_OBJ_FLAG_IGNORE_LAYOUT 并 lv_obj_align TOP_LEFT 到
+LabelIgnoreLayout 的 x/y（相对父级内容区左上，
+边框与内边距以内；有符号/百分比原样转发）。
+外观不归助手管：hsm/widgets/styles/ui_style.c 里的 const
+lv_style_t（UiStyle_topbarText = Montserrat 14 白色文字属性组）
+由组件创建后 lv_obj_add_style 挂到对象上，
+程序期常驻、无需清理；Topbar 的三个标签
+（blinkyCount/fps/cpu）都挂它。LED 圆角/颜色仍在
+Topbar 内部，不进共享样式。
 
-Active 每 500 ms 采样并更新公共顶部，再投递 UI_REFRESH_SIG。
-Sys 在此事件中直接更新 Gauge/BarPanel，HSM 按快照 revision 去重。
-Live 直接更新 Switch；公共顶部读取 Nvm_blinky 设置计数标签。
-LED 事件及业务快照的原有归属不变，页面不修改 NVM 数据。
+Topbar 是被动组件，已由 Active entry 挂载但尚无数据采样：
+7 个 LVGL 对象
+（236x20 flex 行容器 + 左右两个透明分组 + LED + 三个静态文本
+标签）；位置由父布局/调用方决定，2 px 四边间距是外框内部
+Flex pad（padRow/Column 均为 0），不靠 HSM 加 (2,2) 偏移。
+接口 UiTopbar_create/destroy/
+setLed/setCount/setFps/setCpu；fps 域 0..999，cpu 0..100，
+count 全 uint32。Figma 原件混用 Inter，实现统一用编译内的
+Montserrat 14，标签宽度按域上限值（"4294967295"/"999FPS"/"100%"）
+留足；文本经 lv_label_set_text_static 借用实例内缓冲，
+实例不得在存活期移动或复制。
 
-## 适配与资源
+widgets/page_title/page_title.c/.h 是被动页标题组件，
+widgets/boot_count/boot_count.c/.h 是独立的计数分组组件
+（均仅由 SysInfo 页经 ui_sys_info helper 挂载；Sm_Ui 分别
+持有实例，SysInfo entry 建、exit 销）：PageTitle 是 2 个
+LVGL 对象——236x17 普通容器（非 flex）+ 左侧 81x17 标题
+标签（Montserrat 14，编译字体实测 81 px 宽，Figma 标注
+79，组边界不变，借用调用方字符串、CLIP）；BootCount 是
+3 个 LVGL 对象——106x12 flex 分组
+（SPACE_EVENLY/CENTER，列距 1）装固定 "BOOTS" 标签和
+68x12 计数标签（Montserrat 10，借用实例内 countText）。
+helper 把 BootCount 挂进 PageTitle 容器并右对齐，组合
+渲染与旧单体一致（共 5 个对象）。接口
+UiPageTitle_create/destroy/setTitle 与
+UiBootCount_create/destroy/setCount；setCount 把 uint32
+格式成带千分位逗号的十进制
+（上限 "4,294,967,295"；Figma 示例 2^32 是占位值）。
+外观来自共享 const 样式 UiStyle_pageTitleText /
+UiStyle_bootCountText。已挂载 SysInfo；BOOTS 当前为 0，
+NVM 数据绑定尚未接入。
 
-DisplayOperations 仍由 UI 线程实现并绑定，提供背光和 FPS。
-时间事件仍由 HSM 直接持有并 arm/disarm；普通 UI 线程没有 SST_Task。
-所有组件调用均发生在 UI 线程，符合 LV_OS_NONE 的单线程约束。
+widgets/thread_monitor/ 包含 thread_monitor.c/.h 和
+thread_card.c/.h。UiThreadCard_create/destroy 管一个
+232x83 被动卡片容器，父容器由调用方传入，外部定位由调用方负责。
+卡片内有 232x17 普通标题容器，复用 Label_create 创建两个标签：
+左侧线程名 174x17、右侧优先级文字 58x17，分别内部 LEFT_MID /
+RIGHT_MID 对齐，文字也分别左/右对齐；长文字 CLIP，不相互覆盖。
+字体和颜色来自 UiStyle_threadCardText（Montserrat 14、白色），
+不放到 helper；此处宽度分配是实现选择，不是新增 Figma 测量。
+默认文字为空，UiThreadCard_setHeader 借用两份调用方字符串，
+不解析优先级、不采样；字符串须保持有效，原地修改后须再次调用。
+卡片自身采用 COLUMN Flex、行距 10：标题行 y=0、高 17，
+两条资源行分别 y=27/60、高 23。每行是普通容器，
+内部 value 标签 174x17 左上对齐、unit 标签 58x17 右上对齐，
+底部 Bar_create 创建 232x6 原生条，挂载 track/indicator 样式。
+所有标签复用 Label_create；两条资源行不另建公共组件。
+UiThreadCard_setResource 按 STACK/INBOX 行更新借用的 value/unit
+文字及 0..100 进度；只更新指定行，不采样、不解析文字或计算占比，
+进度使用 LV_ANIM_OFF。默认文字空、进度为 0，轨道可见。
+UiThreadMonitor 持有两份 UiThreadCard，创建时挂到 232x83 的
+裁剪 viewport 下，初始 x 分别为 0、232；外框为 236x105，
+viewport 相对外框偏移 (2,6)。viewport 的兄弟节点是独立 UiDots
+组件（widgets/dots/dots.c/.h），Monitor 仅持有 UiDots dots，
+不保存圆点数组或自己创建各圆点。UiDots_create/destroy
+负责整组生命周期；公开实例只有 container，各圆点是内部细节。
+UiDots_create 接收非零 uint8_t count，组宽为 count * 12 - 6，
+高度为 6，首点高亮。ThreadMonitor 传入 3，组件为 30x6，
+三颗 6x6 圆点，x 偏移 0/12/24、间距 6，
+外框 COLUMN flex 横向居中使组落在相对 (103,99)。
+第一颗挂 UiStyle_dotActive（#6FE97B）于共享
+UiStyle_dot（#334155、CIRCLE、COVER）之上，外观不变。
+暂无翻页或动画语义。销毁时先销两张卡和 Dots，再销外框。
+实例须零初始化、仅在 UI 线程操作，destroy 可重复调用。
+每卡 12 个 LVGL 对象，Monitor 共 30 个；已由 SysInfo
+helper 挂载，Sm_Ui 持有实例，进入时创建、退出时销毁，
+不影响常驻 Topbar。当前卡显示 Thread / --，两条资源值为 --，
+单位 B / slots、进度为 0，仅为未接数据的占位，不是板端采样。
+没有圆弧、采样或动画。
 
-资源采样仍保留九项水位：五个任务栈、tracer、UI 收件箱、小池、中池。
-Figma 布局显示 Blinky 栈空闲/已用两行，小池水位显示在短弧仪表中；
-其他条目的数据接口保留。CPU 保持实时窗口口径。
+定位依据为最新 .fig 的 ThreadStackHighWater（125:64）：
+页面内外框 (2,58.570732)、236x105，整数像素取 (2,59)；
+viewport 相对外框 (2,6)，故页面坐标为 (4,65)、232x83。
+现有 Topbar/PageTitle 尺寸与 Figma 上游容器不同，自然 Flex
+位置是 (0,57)；SysInfo 给 Monitor 设置左/上 margin 各 2，
+继续参与 Flex，不使用 IGNORE_LAYOUT 或绝对坐标补丁，
+不改共享 Root、Topbar 和 PageTitle 的既有位置。
+
+[原 UML](uml/ui/ui-components.html)是清空前的历史快照。
+
+运行 `python3 tests/ui_components/run.py` 进行 ASan/UBSan 宿主验证，
+覆盖启动事件先后顺序、延迟自投递、缺 Splash、Splash 像素、空白页、
+反复切页、局部/整屏重绘一致性和事件池回收。
+清空版本尚未执行固件编译或上板验证。
+
+## 下方资源卡片槽（已挂载 SysInfo）
+
+widgets/resource_monitor/resource_monitor.c/.h 提供
+UiResourceMonitor_create/destroy；持有裁剪 viewport、
+两份 UiResourceCard、独立 indicatorContainer 和 UiDots，
+不暴露各圆点指针。UiResourceCard 位于同目录 resource_card.c/.h。
+
+外框 236x144，取自 Figma 下方 Frame 9（127:104）的外框尺寸
+236x144.42926025390625。按 Figma event_pool_size 分区：
+viewport 为 236x118、相对外框 (0,26)，关闭滚动和溢出可见。
+两张 236x118 卡片只创建一次，初始坐标由局部 const lv_point_t
+数组传入，分别为 (0,0)、(236,0)。每卡内部为纵向 Flex，
+顶部留白 1、分区间距 4，包含标题区 236x27、
+圆弧区 102x35 和范围区 236x17。
+标题区包裹资源名与容量组；圆弧区包裹原生 lv_arc 和百分比；
+范围区包裹 E 与总量。文字复用 Label_create 和共享 styles。
+圆弧完整对象为 100x100，背景角度 207..333、线宽 6，
+白色轨道、绿色 #BEE086 指示条，无 knob；仅圆弧区允许溢出，
+外层卡片与 viewport 仍裁剪。初始值 0，未知文字为 -- / --%。
+
+indicatorContainer 为 viewport 的兄弟节点，
+236x46、相对外框 (0,97)，按设计稿与下方范围区叠放。
+四点 UiDots 为其子节点，42x6、相对 (97,16)，
+不会跟卡片移动；Figma 原稿三点按已确认四项资源扩成四点并居中。
+每卡 12 个 LVGL 对象，Monitor 共 32 个。
+四项资源数据不等于四套卡片控件。
+
+实例须零初始化，父对象须存活，UI 线程独占，destroy 可重复调用。
+已由 SysInfo helper 挂载（Sm_Ui 持有，entry 建、exit 销，
+在 ThreadMonitor 之后创建、仅左外边距 2）：挂载后外框
+(2,174) 236x144，viewport (2,200) 236x118，卡片 x 2/238
+y 200，圆弧 (70,238)，四点组 (99,287) 42x6。
+未接采样或轮播动画；默认文字不表示真实资源读数。
+原 ThreadMonitor 的三点、布局和页面显示保持不变。
+
+## SysInfo 资源健康范围备忘（已确认）
+
+本节记录后续实现范围，不表示采样或显示已经接入。
+目标是一页覆盖系统资源健康，线程明细通过卡片轮播查看。
+先确认信息归属，不在此确定新控件或采样接口。
+
+- 上方线程卡片槽：各线程的栈水位、事件队列余量和优先级，
+  包括 Timer daemon 等内核线程。无对应队列时显示不适用，
+  不将其伪装成零余量；Timer daemon 的命令队列不是 AO 邮箱。
+- 下方公共资源卡片槽：小事件池、中事件池、Tracer 水位、
+  LVGL 内存池，共四项。槽位风格沿用线程卡片槽，
+  项目数不等于预建卡片数；分页指示应对应四项，
+  不能直接照搬当前固定三点的 Dots。
+- CPU 负载和 UI 刷新率沿用 Topbar，不在资源卡片中重复展示。
+- 本期不纳入 FreeRTOS heap：当前使用全静态分配，
+  不为不存在的动态堆展示空闲量。
+- 故障、复位原因和存储异常摘要暂不考虑，不扩大本期范围。
+- 中断栈 MSP 可列为后续补充，不阻塞第一版；
+  线程栈水位不代表中断栈水位。本备忘不引入主栈涂色、
+  探针或早期启动动作。
+
+数据口径约束：
+
+- 当前剩余和历史最低剩余必须明确区分。
+  栈高水位表示历史最低剩余；事件池接口的 min 也不是当前值。
+- 小池和中池分别观察，不将不同块大小的容量合成一个比例。
+- LVGL 内存池独立于应用事件池，不能用事件池余量替代。
+  LVGL 的具体字段及各指标更新周期留待采样设计确定。
+- 数据未知、不适用或过期时不能用正常的零值或旧值掩盖。
+- 采样、换算与数据适配放在被动控件外。
+
+待后续决定：轮播一圈与当前 SysInfo 停留时长如何协调；
+本次备忘不修改页面时长，也不接入采样或动画。
+
+以下为先前的排障结论和测量，保留作参考，不代表当前控件清单。
 
 ## 状态栏局部刷新（2026-11-01）
 
@@ -111,62 +308,3 @@ requestFrame、Ui_framePending_ 及强制整屏重绘链路。
 用户对屏幕读数的观察，不是相同采样窗口的仪器对照。
 J-Link 约 16 s 采样观察到 Live→Sys→Live，tick 连续增长、三张资产
 有效；Live 稳态完成刷新率约 30～31 FPS。
-
-## 验证
-
-运行 `python3 tests/ui_components/run.py`，使用真实 LVGL/HSM/TimeEvt
-和收件箱进行 ASan/UBSan 宿主机验证。覆盖启动事件顺序、缺图、积压、
-顶部跨页面保留、反复切页、圆弧往返及晚到超时、LED 与 NVM 显示。
-退出检查验证各组件句柄清空，并确认同父容器的其他对象不被删除。
-
-宿主测试使用 64 KB LVGL 池以容纳 64 位指针，不能代表 MCU 内存预算。
-固件仍使用原有 24 KB LVGL 池。2026-10-29 正常固件编译烧录后，
-板端确认进入 Live、资产有效和 NVM 恢复；用户确认画面、自动切页
-和圆弧正常。此结果不代替最坏路径的栈或 LVGL 内存峰值测量。
-
-## Figma 样式校准（2026-11-01）
-
-依据本地 sm_blinky.fig 的 default（24:98）及 liveShow（81:493）。
-布局与配色参考设计；字体按当前决定统一为 LVGL 内置字体。
-数值读取运行时快照，不填入设计示例值。
-
-| 部件 | 落地形态 |
-|---|---|
-| 公共顶部 | 分开的 FPS/CPU 数值与单位、无光晕 LED、真实业务计数 |
-| 字体 | 全局统一 LVGL 内置 Montserrat 14 |
-| Sys Blinky | 真实计数、Blinky 栈最低空闲及对应峰值已用，单位 word |
-| Sys Small | 实际块字节数、总块数、历史最低空闲百分比 |
-| Sys BOOTS | Nvm_bootCount 快照，由 Sys 持有标签生命周期 |
-| Live | 270° 圆弧、6 px 圆头、34×16 蓝色开关及 12 px 白色滑块 |
-| 背景 | Sys 卡片补 1 px 内边框；原图 FILL 裁剪、圆角及遮罩静态合成 |
-
-Sys 仪表是 210°..330° 的 120° 短弧。两种弧在 Figma 中都是
-INSIDE 描边，LVGL 使用原始 98/60 px 外框，移除主题内边距。
-未使用对象缩放、页面截图或手动扩展脏区。
-Live 不再创建设计中不存在的隐藏 RAM/NVM/分页点；数据采样和
-相应组件接口保留。Surface 明确关闭滚动条。
-
-背景源图与重建说明见 ../bg/figma/README.md。
-
-### 字体与几何复核
-
-当前全局字体由 app/bsp/lvgl/lv_conf.h 的 LV_FONT_DEFAULT 指定，
-统一使用 LVGL 内置 Montserrat 14。组件不再覆盖字体。
-已移除额外的字体 C 文件、声明、字形数据、字距校准数据及脚本。
-
-原来为 10/12 px 字体设置的文字框，按统一字体放宽高度；较长标题
-按内容确定宽度，CPU/FPS 数字框保留三位数空间，避免换行与裁字。
-背景、圆弧、进度条、开关及数据接口保持原有分工。
-
-`tests/ui_components/figma_geometry.json` 保留设计原始测量数据。
-当前自动对照只检查非文字控件的外框；不再要求文字字宽和基线
-匹配 Figma 的多套字体。测试另外递归确认所有 label 均使用
-LV_FONT_DEFAULT，并检查标题与卡片标题容纳完整文字。
-局部刷新与同状态整屏重绘的一致性验证继续保留。
-
-本地 .fig 的参考图仍可查看：
-[Sys](ui/figma/sys-reference.png)、[Live](ui/figma/live-reference.png)。
-这些图片用于设计参考，不作为页面背景资产。
-
-统一字体后仅执行宿主验证；此前的固件烧录和板端采样结果不代表
-此版本已经上板验证。

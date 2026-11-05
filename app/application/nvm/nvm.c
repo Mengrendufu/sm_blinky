@@ -16,9 +16,11 @@
 
 // Actual item types are independent; structures and arrays are valid here.
 typedef uint32_t Nvm_BootData;
-typedef uint32_t Nvm_BlinkyData;
 static Nvm_BootData Nvm_boot_;
+
+typedef uint32_t Nvm_BlinkyData;
 static Nvm_BlinkyData Nvm_blinky_;
+
 // Application deltas stay separate until the persisted snapshot is loaded.
 static uint32_t Nvm_earlyEdges_;
 static bool Nvm_loaded_;

@@ -90,3 +90,9 @@ python3 tests/test_asset_loop.py
 宿主 ASan/UBSan 通过。2026-10-29 板端确认现有 AST2 三张资产加载
 校验通过；本轮只验证 HELLO，不重新烧写资产。当前完整传输链路由
 宿主模型覆盖，不据此宣称完成新版板端全包烧写、吞吐或掉电测试。
+
+## UI 重构准备
+
+当前 UI 展示 Splash、SysInfo 与 LiveShow：SysInfo/LiveShow 入口
+分别把 slot 0 / slot 1 挂成根容器整屏背景、出口清掉，
+缺槽回退黑色。AST2 的三槽格式、资产传输及校验流程暂不变更。

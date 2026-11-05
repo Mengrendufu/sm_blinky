@@ -22,11 +22,7 @@ enum {
     UI_LED_OFF_SIG,
     UI_GO_SPLASHING_SIG,
     // Shared by mutually exclusive Splash/Sys/Live deadline owners.
-    UI_STATE_TIMEOUT_SIG,
-    // Posted after Active updates shared data; pages render that data.
-    UI_REFRESH_SIG,
-    UI_HEADER_TIMEOUT_SIG,
-    UI_DIAL_TIMEOUT_SIG
+    UI_STATE_TIMEOUT_SIG
 };
 
 #endif // SM_UI_EVT_H_

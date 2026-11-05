@@ -51,17 +51,22 @@ set(SRC_ALL
     ${APP_ROOT}/application/ui/thread/ui.c
     ${APP_ROOT}/application/ui/thread/ui_evt.c
     ${APP_ROOT}/application/ui/thread/ui_disp.c
-    ${APP_ROOT}/application/ui/hsm/widgets/widget_io_priv.c
-    ${APP_ROOT}/application/ui/hsm/widgets/w_topbar.c
-    ${APP_ROOT}/application/ui/hsm/widgets/w_dots.c
-    ${APP_ROOT}/application/ui/hsm/widgets/w_gauge.c
-    ${APP_ROOT}/application/ui/hsm/widgets/w_barpanel.c
-    ${APP_ROOT}/application/ui/hsm/widgets/w_switch.c
-    ${APP_ROOT}/application/ui/hsm/widgets/w_dial.c
-    ${APP_ROOT}/application/ui/hsm/widgets/w_nvm.c
-    ${APP_ROOT}/application/ui/hsm/widgets/w_ram.c
-    ${APP_ROOT}/application/ui/hsm/widgets/ui_surface.c
-    ${APP_ROOT}/application/ui/hsm/metrics/ui_metrics.c
+    ${APP_ROOT}/application/ui/hsm/widgets/ui_root/ui_root.c
+    ${APP_ROOT}/application/ui/hsm/widgets/topbar/topbar.c
+    ${APP_ROOT}/application/ui/hsm/widgets/page_title/page_title.c
+    ${APP_ROOT}/application/ui/hsm/widgets/boot_count/boot_count.c
+    ${APP_ROOT}/application/ui/hsm/widgets/thread_monitor/thread_monitor.c
+    ${APP_ROOT}/application/ui/hsm/widgets/thread_monitor/thread_card.c
+    ${APP_ROOT}/application/ui/hsm/widgets/dots/dots.c
+    ${APP_ROOT}/application/ui/hsm/widgets/resource_monitor/resource_monitor.c
+    ${APP_ROOT}/application/ui/hsm/widgets/resource_monitor/resource_card.c
+    ${APP_ROOT}/application/ui/hsm/helpers/ui_splash.c
+    ${APP_ROOT}/application/ui/hsm/helpers/ui_sys_info.c
+    ${APP_ROOT}/application/ui/hsm/widgets/helpers/ui_flex.c
+    ${APP_ROOT}/application/ui/hsm/widgets/helpers/ui_label.c
+    ${APP_ROOT}/application/ui/hsm/widgets/helpers/ui_bar.c
+    ${APP_ROOT}/application/ui/hsm/widgets/helpers/ui_arc.c
+    ${APP_ROOT}/application/ui/hsm/widgets/styles/ui_style.c
     ${APP_ROOT}/application/ui/hsm/sm_ui.c
     ${APP_ROOT}/application/nvm/nvm.c
     ${APP_ROOT}/application/aos/flash

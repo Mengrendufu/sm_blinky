@@ -13,16 +13,12 @@
 #include "sm_hsm.h"
 #include "time_evt.h"
 #include "sm_ui_evt.h"
-#include "widgets/ui_surface.h"
-#include "widgets/w_gauge.h"
-#include "widgets/w_barpanel.h"
-#include "widgets/w_dial.h"
-#include "widgets/w_switch.h"
-#include "widgets/w_nvm.h"
-#include "widgets/w_ram.h"
-#include "widgets/w_dots.h"
-#include "widgets/w_topbar.h"
-#include "metrics/ui_metrics.h"
+#include "widgets/ui_root/ui_root.h"
+#include "widgets/topbar/topbar.h"
+#include "widgets/page_title/page_title.h"
+#include "widgets/boot_count/boot_count.h"
+#include "widgets/thread_monitor/thread_monitor.h"
+#include "widgets/resource_monitor/resource_monitor.h"
 
 //============================================================================
 //=== UI state machine
@@ -34,23 +30,20 @@
 // TOP enters standby. readySplash accepts GO after splash preparation;
 // earlyReadyShow remembers content assets completing before GO. Splash and
 // readyShow join the two one-shot events: hold elapsed and assets complete.
-// Active starts at Sys; each page arms a one-shot page-switch event.
-// Standby, Splash and Active all preserve the shared LED state/count.
+// Active starts at SysInfo; each page arms a one-shot page-switch event.
+// Topbar plus the per-page content (SysInfo mounts a PageTitle
+// with its BootCount group and ThreadMonitor) are the mounted content.
 
 // TimeEvt ticks follow the application's fixed 100 Hz timebase.
 #define UI_SPLASH_TICKS 150U
-#define UI_SYS_TICKS    500U
-#define UI_LIVE_TICKS   1000U
-#define UI_HEADER_TICKS 50U
-#define UI_DIAL_TICKS   3U
+#define UI_SYS_INFO_TICKS    500U
+#define UI_LIVE_SHOW_TICKS   1000U
 
 // Required display capabilities, called synchronously on the UI thread.
-// readFps returns the adapter's cached completed-refresh rate.
 // Bind before initialization; the immutable table/context outlive the HSM.
 typedef struct {
     void *context;
     void (*setBacklight)(void *context, bool on);
-    uint32_t (*readFps)(void *context);
 } Sm_Ui_DisplayOperations;
 
 typedef struct {
@@ -58,26 +51,24 @@ typedef struct {
     Sm_Ui_DisplayOperations const *display;
     // Registered before scheduling; states directly arm/disarm their nodes.
     TimeEvt stateTimeout;
-    TimeEvt headerTimeout;
-    TimeEvt dialTimeout;
-    bool ledOn;
-    uint32_t ledEdges;
 
-    // Passive display components, directly owned by this HSM.
-    UiSurface surface;
-    struct W_Topbar top;
-    struct W_Gauge gauge;
-    struct W_BarPanel panel;
-    struct W_Dots dots;
-    struct W_Dial dial;
-    struct W_Switch sw;
-    struct W_Nvm nvm;
-    struct W_Ram ram;
-    UiMetrics metrics;
-    bool sysShown;
-    uint32_t sysRevision;
-    unsigned dialValue;
-    bool dialRising;
+    // The one persistent content container; Splash borrows its
+    // background, no second object. Active puts it in COLUMN flex so
+    // page content stacks under the shared Topbar.
+    UiRoot root;
+    // Passive Topbar, alive for the whole Active superstate; Sys and
+    // Live share it, no per-page create/delete. No data sampling yet.
+    UiTopbar topbar;
+    // SysInfo-only page title; created on SysInfo entry, destroyed
+    // on exit -- NOT shared across pages.
+    UiPageTitle pageTitle;
+    // SysInfo-only boot-count group, composed under pageTitle by
+    // the page helper; count stays 0 (no NVM binding yet).
+    UiBootCount bootCount;
+    // SysInfo-owned two-card monitor; no resource sampling or animation.
+    UiThreadMonitor threadMonitor;
+    // SysInfo-owned lower skeleton monitor; no contents yet.
+    UiResourceMonitor resourceMonitor;
 } Sm_Ui;
 
 void Sm_Ui_bindDisplay(Sm_Ui * const me,

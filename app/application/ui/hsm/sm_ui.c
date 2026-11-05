@@ -10,26 +10,15 @@
 #include "sm_port.h"
 #include "sm_assert.h"
 #include "sm_ui.h"
+#include "helpers/ui_splash.h"
+#include "helpers/ui_sys_info.h"
 #include "ui_evt.h"
 #include "asset.h"
-#include "nvm.h"
 
 SM_DEFINE_MODULE("sm_ui")
 
-static char const * const Sm_Ui_resourceNames_[] = {"free", "used"};
-static char const * const Sm_Ui_resourceUnits_[] = {"w", "w"};
-
-static void Sm_Ui_refreshResources_(Sm_Ui *self);
-static void Sm_Ui_stepDial_(Sm_Ui *self);
-
 static SST_Evt const Sm_Ui_stateTimeoutEvt = {
     .sig = UI_STATE_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
-};
-static SST_Evt const Sm_Ui_headerTimeoutEvt = {
-    .sig = UI_HEADER_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
-};
-static SST_Evt const Sm_Ui_dialTimeoutEvt = {
-    .sig = UI_DIAL_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
 };
 
 // == DEBUG: whether the HSM installed a verified Splash image. ==
@@ -98,43 +87,43 @@ SM_HsmState SM_HSM_ROM Sm_Ui_readyShow = {
 };
 
 // active
-// State-Active: shared header and LED model; pages own their transitions.
+// Active mounts the passive Topbar on the black root; child states
+// own their page content and share that one bar.
 static void Sm_Ui_active_entry_(SM_Hsm * const me) SM_HSM_RETT;
-static void Sm_Ui_active_exit_(SM_Hsm * const me) SM_HSM_RETT;
 static SM_StatePtr Sm_Ui_active_initial_(SM_Hsm * const me) SM_HSM_RETT;
 static SM_RetState Sm_Ui_active_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT;
 SM_HsmState SM_HSM_ROM Sm_Ui_active = {
     (SM_StatePtr)SM_HSM_TOP,                // super
     (SM_InitHandler)&Sm_Ui_active_initial_, // init_
     (SM_ActionHandler)&Sm_Ui_active_entry_, // entry_
-    (SM_ActionHandler)&Sm_Ui_active_exit_,  // exit_
+    (SM_ActionHandler)NULL,                 // exit_
     (SM_StateHandler)&Sm_Ui_active_         // handler
 };
 
-// sys
-// Sys owns the Blinky stack, small-pool water level and boot counter.
-static void Sm_Ui_sys_entry_(SM_Hsm * const me) SM_HSM_RETT;
-static void Sm_Ui_sys_exit_(SM_Hsm * const me) SM_HSM_RETT;
-static SM_RetState Sm_Ui_sys_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT;
-SM_HsmState SM_HSM_ROM Sm_Ui_sys = {
+// sysInfo
+// SysInfo mounts the slot-0 page background; keep the page deadline.
+static void Sm_Ui_sysInfo_entry_(SM_Hsm * const me) SM_HSM_RETT;
+static void Sm_Ui_sysInfo_exit_(SM_Hsm * const me) SM_HSM_RETT;
+static SM_RetState Sm_Ui_sysInfo_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT;
+SM_HsmState SM_HSM_ROM Sm_Ui_sysInfo = {
     (SM_StatePtr)&Sm_Ui_active,          // super
     (SM_InitHandler)NULL,                // init_
-    (SM_ActionHandler)&Sm_Ui_sys_entry_, // entry_
-    (SM_ActionHandler)&Sm_Ui_sys_exit_,  // exit_
-    (SM_StateHandler)&Sm_Ui_sys_         // handler
+    (SM_ActionHandler)&Sm_Ui_sysInfo_entry_, // entry_
+    (SM_ActionHandler)&Sm_Ui_sysInfo_exit_,  // exit_
+    (SM_StateHandler)&Sm_Ui_sysInfo_         // handler
 };
 
-// live
-// Live owns the arc sweep and LED-driven switch.
-static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT;
-static void Sm_Ui_live_exit_(SM_Hsm * const me) SM_HSM_RETT;
-static SM_RetState Sm_Ui_live_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT;
-SM_HsmState SM_HSM_ROM Sm_Ui_live = {
+// liveShow
+// LiveShow mounts the slot-1 page background; keep the page deadline.
+static void Sm_Ui_liveShow_entry_(SM_Hsm * const me) SM_HSM_RETT;
+static void Sm_Ui_liveShow_exit_(SM_Hsm * const me) SM_HSM_RETT;
+static SM_RetState Sm_Ui_liveShow_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT;
+SM_HsmState SM_HSM_ROM Sm_Ui_liveShow = {
     (SM_StatePtr)&Sm_Ui_active,           // super
     (SM_InitHandler)NULL,                 // init_
-    (SM_ActionHandler)&Sm_Ui_live_entry_, // entry_
-    (SM_ActionHandler)&Sm_Ui_live_exit_,  // exit_
-    (SM_StateHandler)&Sm_Ui_live_         // handler
+    (SM_ActionHandler)&Sm_Ui_liveShow_entry_, // entry_
+    (SM_ActionHandler)&Sm_Ui_liveShow_exit_,  // exit_
+    (SM_StateHandler)&Sm_Ui_liveShow_         // handler
 };
 
 void Sm_Ui_bindDisplay(Sm_Ui * const me,
@@ -142,7 +131,6 @@ void Sm_Ui_bindDisplay(Sm_Ui * const me,
     SM_REQUIRE(me != NULL);
     SM_REQUIRE(operations != NULL);
     SM_REQUIRE(operations->setBacklight != NULL);
-    SM_REQUIRE(operations->readFps != NULL);
     me->display = operations;
 }
 //............................................................................
@@ -156,9 +144,11 @@ void Sm_Ui_ctor(Sm_Ui * const me) {
         .context = NULL, .post = Sm_Ui_deliverTimeout_
     };
     SM_REQUIRE(me != NULL);
+    me->topbar = (UiTopbar){0};
+    me->pageTitle = (UiPageTitle){0};
+    me->bootCount = (UiBootCount){0};
+    me->resourceMonitor = (UiResourceMonitor){0};
     TimeEvt_ctor(&me->stateTimeout, &Sm_Ui_stateTimeoutEvt, &delivery);
-    TimeEvt_ctor(&me->headerTimeout, &Sm_Ui_headerTimeoutEvt, &delivery);
-    TimeEvt_ctor(&me->dialTimeout, &Sm_Ui_dialTimeoutEvt, &delivery);
 }
 //............................................................................
 void Sm_Ui_init(Sm_Ui * const me) {
@@ -173,37 +163,18 @@ static SM_StatePtr Sm_Ui_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
 
     SM_REQUIRE(self->display != NULL);
-    self->ledOn = false;
-    self->ledEdges = 0U;
-    UiMetrics_init(&self->metrics);
-    UiSurface_init(&self->surface);
-    W_Topbar_init(&self->top);
-    W_Gauge_init(&self->gauge);
-    W_BarPanel_init(&self->panel);
-    W_Dots_init(&self->dots);
-    W_Dial_init(&self->dial);
-    W_Switch_init(&self->sw);
-    W_Nvm_init(&self->nvm);
-    W_Ram_init(&self->ram);
+    UiRoot_init(&self->root);
     return _SM_INIT(&Sm_Ui_standby);
 }
 //............................................................................
 // State-Standby: UI remains responsive while Flash owns initialization.
 static SM_RetState Sm_Ui_standby_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
-    Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
+    (void)me;
     SST_Evt const * const evt = e;
 
     switch (evt->sig) {
         case BRING_UP_READY_SIG:
             return _SM_TRAN(&Sm_Ui_readySplash);
-        case UI_LED_ON_SIG:
-            self->ledOn = true;
-            ++self->ledEdges;
-            return _SM_HANDLED();
-        case UI_LED_OFF_SIG:
-            self->ledOn = false;
-            ++self->ledEdges;
-            return _SM_HANDLED();
         default:
             return _SM_SUPER();
     }
@@ -252,7 +223,7 @@ static void Sm_Ui_splashing_entry_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
 
     self->display->setBacklight(self->display->context, true);
-    bool const shown = UiSurface_showSplash(&self->surface, Asset_splash());
+    bool const shown = UiSplash_show(&self->root, Asset_splash());
     Ui_dbgSplashOk_ = shown ? 1U : 0U;
     TimeEvt_arm(&self->stateTimeout, shown ? UI_SPLASH_TICKS : 1U, 0U);
 }
@@ -260,10 +231,11 @@ static void Sm_Ui_splashing_entry_(SM_Hsm * const me) SM_HSM_RETT {
 static void Sm_Ui_splashing_exit_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
     (void)TimeEvt_disarm(&self->stateTimeout);
+    UiSplash_hide(&self->root);
 }
 
 static SM_RetState Sm_Ui_splashing_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
-    Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
+    (void)me;
     SST_Evt const * const evt = e;
 
     switch (evt->sig) {
@@ -271,14 +243,6 @@ static SM_RetState Sm_Ui_splashing_(SM_Hsm * const me, SST_Evt const * const e) 
             return _SM_TRAN(&Sm_Ui_readyShow);
         case BRING_UP_ASSETS_LOADED_SIG:
             return _SM_TRAN(&Sm_Ui_readyShow);
-        case UI_LED_ON_SIG:
-            self->ledOn = true;
-            ++self->ledEdges;
-            return _SM_HANDLED();
-        case UI_LED_OFF_SIG:
-            self->ledOn = false;
-            ++self->ledEdges;
-            return _SM_HANDLED();
         default:
             return _SM_SUPER();
     }
@@ -298,184 +262,79 @@ static SM_RetState Sm_Ui_readyShow_(SM_Hsm * const me, SST_Evt const * const e) 
     }
 }
 //............................................................................
-// Active owns the common header's lifetime and refresh event. Page states
-// never invoke header-refresh helpers or inspect another page's state.
+// The shared Topbar is created once here and stays up for the whole
+// demo; there is no production exit path out of Active, so no exit
+// action destroys it. The component destroy API remains for tests.
 static void Sm_Ui_active_entry_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
-
-    UiMetrics_sample(&self->metrics);
-    W_Topbar_create(&self->top, UiSurface_overlay(&self->surface), "");
-    W_Topbar_setLed(&self->top, self->ledOn);
-    W_Topbar_setCpu(&self->top, self->metrics.snapshot.cpuPct);
-    W_Topbar_setCount(&self->top, Nvm_blinky());
-    W_Topbar_setFps(&self->top,
-        self->display->readFps(self->display->context));
-    TimeEvt_arm(&self->headerTimeout, UI_HEADER_TICKS, UI_HEADER_TICKS);
+    lv_obj_set_flex_flow(self->root.container, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(self->root.container,
+                          LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_row(self->root.container, 10,
+                             LV_PART_MAIN);
+    UiTopbar_create(&self->topbar, self->root.container);
 }
 
-static void Sm_Ui_active_exit_(SM_Hsm * const me) SM_HSM_RETT {
-    Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
-    (void)TimeEvt_disarm(&self->headerTimeout);
-    W_Topbar_destroy(&self->top);
+static SM_RetState Sm_Ui_active_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
+    (void)me;
+    (void)e;
+    return _SM_SUPER();
 }
 
 static SM_StatePtr Sm_Ui_active_initial_(SM_Hsm * const me) SM_HSM_RETT {
     (void)me;
-    return _SM_INIT(&Sm_Ui_sys);
+    return _SM_INIT(&Sm_Ui_sysInfo);
 }
 
-static SM_RetState Sm_Ui_active_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
+static void Sm_Ui_sysInfo_entry_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
-    SST_Evt const * const evt = e;
-
-    switch (evt->sig) {
-        case UI_HEADER_TIMEOUT_SIG:
-            UiMetrics_sample(&self->metrics);
-            W_Topbar_setCpu(&self->top, self->metrics.snapshot.cpuPct);
-            W_Topbar_setCount(&self->top, Nvm_blinky());
-            W_Topbar_setFps(&self->top,
-                self->display->readFps(self->display->context));
-            Sm_Ui_post_(UI_REFRESH_SIG);
-            return _SM_HANDLED();
-        case UI_LED_ON_SIG:
-            self->ledOn = true;
-            ++self->ledEdges;
-            W_Topbar_setLed(&self->top, true);
-            W_Topbar_setCount(&self->top, Nvm_blinky());
-            Sm_Ui_post_(UI_REFRESH_SIG);
-            return _SM_HANDLED();
-        case UI_LED_OFF_SIG:
-            self->ledOn = false;
-            ++self->ledEdges;
-            W_Topbar_setLed(&self->top, false);
-            W_Topbar_setCount(&self->top, Nvm_blinky());
-            Sm_Ui_post_(UI_REFRESH_SIG);
-            return _SM_HANDLED();
-        default:
-            return _SM_SUPER();
-    }
+    // Page-owned background; a missing slot leaves the root black.
+    UiSysInfo_build(&self->root, &self->pageTitle,
+                    &self->bootCount, &self->threadMonitor,
+                    &self->resourceMonitor,
+                    Asset_slot(Asset_get(), 0U));
+    TimeEvt_arm(&self->stateTimeout, UI_SYS_INFO_TICKS, 0U);
 }
 
-static void Sm_Ui_sys_entry_(SM_Hsm * const me) SM_HSM_RETT {
-    Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
-
-    UiSurface_showPage(&self->surface, Asset_slot(Asset_get(), 0U));
-    W_Topbar_setTitle(&self->top, "SysMonitor");
-    struct _lv_obj_t *parent = UiSurface_content(&self->surface);
-    W_Gauge_create(&self->gauge, parent);
-    W_BarPanel_create(&self->panel, parent, Sm_Ui_resourceNames_,
-                      Sm_Ui_resourceUnits_);
-    W_Dots_create(&self->dots, parent, 0U);
-    W_Nvm_create(&self->nvm, parent, 145, 34);
-    W_Nvm_set(&self->nvm, Nvm_bootCount());
-    self->sysShown = false;
-    Sm_Ui_refreshResources_(self);
-    TimeEvt_arm(&self->stateTimeout, UI_SYS_TICKS, 0U);
-}
-
-static void Sm_Ui_sys_exit_(SM_Hsm * const me) SM_HSM_RETT {
+static void Sm_Ui_sysInfo_exit_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
     (void)TimeEvt_disarm(&self->stateTimeout);
-    W_Dots_destroy(&self->dots);
-    W_Nvm_destroy(&self->nvm);
-    W_BarPanel_destroy(&self->panel);
-    W_Gauge_destroy(&self->gauge);
+    UiSysInfo_hide(&self->root, &self->pageTitle,
+                   &self->bootCount, &self->threadMonitor,
+                   &self->resourceMonitor);
 }
 
-static SM_RetState Sm_Ui_sys_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
-    Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
-    SST_Evt const * const evt = e;
-
-    switch (evt->sig) {
+static SM_RetState Sm_Ui_sysInfo_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
+    (void)me;
+    switch (e->sig) {
         case UI_STATE_TIMEOUT_SIG:
-            return _SM_TRAN(&Sm_Ui_live);
-        case UI_REFRESH_SIG:
-            Sm_Ui_refreshResources_(self);
-            return _SM_HANDLED();
+            return _SM_TRAN(&Sm_Ui_liveShow);
         default:
             return _SM_SUPER();
     }
 }
 
-static void Sm_Ui_live_entry_(SM_Hsm * const me) SM_HSM_RETT {
+static void Sm_Ui_liveShow_entry_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
-
-    UiSurface_showPage(&self->surface, Asset_slot(Asset_get(), 1U));
-    W_Topbar_setTitle(&self->top, "LiveShow");
-    struct _lv_obj_t *parent = UiSurface_content(&self->surface);
-    W_Dial_create(&self->dial, parent, 20, 93, 60);
-    W_Switch_create(&self->sw, parent, 100, 93);
-    self->dialValue = 0U;
-    self->dialRising = true;
-    W_Switch_set(&self->sw, self->ledOn);
-    TimeEvt_arm(&self->stateTimeout, UI_LIVE_TICKS, 0U);
-    TimeEvt_arm(&self->dialTimeout, UI_DIAL_TICKS, UI_DIAL_TICKS);
+    // Page-owned background; a missing slot leaves the root black.
+    UiRoot_setBackground(&self->root, Asset_slot(Asset_get(), 1U));
+    TimeEvt_arm(&self->stateTimeout, UI_LIVE_SHOW_TICKS, 0U);
 }
 
-static void Sm_Ui_live_exit_(SM_Hsm * const me) SM_HSM_RETT {
+static void Sm_Ui_liveShow_exit_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
-    (void)TimeEvt_disarm(&self->dialTimeout);
     (void)TimeEvt_disarm(&self->stateTimeout);
-    W_Switch_destroy(&self->sw);
-    W_Dial_destroy(&self->dial);
+    UiRoot_setBackground(&self->root, NULL);
 }
 
-static SM_RetState Sm_Ui_live_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
-    Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
-    SST_Evt const * const evt = e;
-
-    switch (evt->sig) {
+static SM_RetState Sm_Ui_liveShow_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
+    (void)me;
+    switch (e->sig) {
         case UI_STATE_TIMEOUT_SIG:
-            return _SM_TRAN(&Sm_Ui_sys);
-        case UI_DIAL_TIMEOUT_SIG:
-            Sm_Ui_stepDial_(self);
-            return _SM_HANDLED();
-        case UI_REFRESH_SIG:
-            W_Switch_set(&self->sw, self->ledOn);
-            return _SM_HANDLED();
+            return _SM_TRAN(&Sm_Ui_sysInfo);
         default:
             return _SM_SUPER();
     }
-}
-
-// State actions coordinate passive components; no separate page object.
-static void Sm_Ui_refreshResources_(Sm_Ui *self) {
-    UiMetricsSnapshot const *snapshot = &self->metrics.snapshot;
-    W_BarPanel_setCount(&self->panel, Nvm_blinky());
-    if (self->sysShown && self->sysRevision == snapshot->revision) {
-        return;
-    }
-    UiResourceLevel const *small = &snapshot->rows[7];
-    unsigned const smallPct = small->total == 0U ? 0U
-        : (unsigned)((small->free * 100U) / small->total);
-    W_Gauge_setValue(&self->gauge, smallPct > 100U ? 100U : smallPct);
-    W_Gauge_setMaximum(&self->gauge, small->total);
-    W_Gauge_setBlockBytes(&self->gauge, snapshot->smallBlockBytes);
-    UiResourceLevel const *blinky = &snapshot->rows[2];
-    if (blinky->available && blinky->total != 0U) {
-        unsigned const free = blinky->free;
-        unsigned const used = blinky->total - free;
-        W_BarPanel_setWords(&self->panel, 0U,
-                            free * 100U / blinky->total, free);
-        W_BarPanel_setWords(&self->panel, 1U,
-                            used * 100U / blinky->total, used);
-    }
-    self->sysRevision = snapshot->revision;
-    self->sysShown = true;
-}
-
-static void Sm_Ui_stepDial_(Sm_Ui *self) {
-    if (self->dialRising) {
-        self->dialValue += 2U;
-        if (self->dialValue >= 100U) {
-            self->dialValue = 100U;
-            self->dialRising = false;
-        }
-    } else {
-        self->dialValue = self->dialValue > 2U ? self->dialValue - 2U : 0U;
-        if (self->dialValue == 0U) {
-            self->dialRising = true;
-        }
-    }
-    W_Dial_setValue(&self->dial, self->dialValue);
 }

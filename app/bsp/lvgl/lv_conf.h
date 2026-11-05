@@ -94,11 +94,12 @@
 #define LV_USE_WIN        0
 #define LV_USE_ANIMIMG    0
 
-// Layout engines: this UI positions everything explicitly.
-#define LV_USE_FLEX       0
+// Layout engines: Flex is available for component arrangement.
+#define LV_USE_FLEX       1
 #define LV_USE_GRID       0
 
-// One built-in font for every UI label.
+// Built-in fonts for the UI labels (14 default, 10 for meta).
+#define LV_FONT_MONTSERRAT_10 1
 #define LV_FONT_MONTSERRAT_14 1
 #define LV_FONT_DEFAULT &lv_font_montserrat_14
 
