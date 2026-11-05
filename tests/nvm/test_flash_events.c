@@ -70,7 +70,7 @@ int xTaskNotifyGiveIndexed(TaskHandle_t me,unsigned i){
         assert(i==0);SST_Evt const *evt;assert(Ui_evtPop(&evt));
         assert(evt->poolId==1 && evt->refCtr==1);
         if(evt->sig==UI_LED_ON_SIG || evt->sig==UI_LED_OFF_SIG){
-            ++uiLed;assert(blinkyEdges==uiLed);
+            ++uiLed;assert(blinkyEdges==(uiLed+1U)/2U);
         }else{
             assert(evt->sig==BRING_UP_READY_SIG ||
                    evt->sig==BRING_UP_ASSETS_LOADED_SIG);
@@ -206,12 +206,12 @@ int main(int argc,char **argv){
     Blinky_dispatch(&Blinky_inst,&save);assert(tail-head==1);
     step();
     assert(saveCount[NVM_BOOT_ID]==1 && saveCount[NVM_BLINKY_ID]==37);
-    // Both transition directions update the counter before UI delivery.
+    // Only ON transitions update NVM; both directions reach the UI.
     assert(blinkyEdges==1 && uiLed==1);
     Blinky_dispatch(&Blinky_inst,&beat);
-    assert(blinkyEdges==2 && uiLed==2);
+    assert(blinkyEdges==1 && uiLed==2);
     Blinky_dispatch(&Blinky_inst,&beat);
-    assert(blinkyEdges==3 && uiLed==3);
+    assert(blinkyEdges==2 && uiLed==3);
     assert(ops==16 && !Host_critical);
     // All event shapes must fit their native pool and return after GC.
     SST_Evt *smallEvents[48];Flash_Evt *mediumEvents[16];

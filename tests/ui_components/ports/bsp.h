@@ -6,3 +6,4 @@ void BSP_ledOn(void);
 void BSP_ledOff(void);
 
 void BSP_cpuSample(uint32_t *idle,uint32_t *total);
+bool BSP_timerQueueSample(uint32_t *minimum,uint32_t *total);

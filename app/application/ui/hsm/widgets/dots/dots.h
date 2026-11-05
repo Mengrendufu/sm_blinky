@@ -15,7 +15,7 @@
 // Passive indicator group: count 6x6 dots, gap 6, first active.
 // count must be nonzero; group width is count * 12 - 6.
 // The component owns its whole subtree; individual dots are internal.
-// Caller controls external placement; no pagination or animation yet.
+// Caller controls external placement and which index is active.
 // Zero-initialize before create; parent must outlive this instance.
 // Do not copy/move a live instance or externally delete its subtree.
 // UI thread only. Destroy is idempotent when already empty.
@@ -25,5 +25,7 @@ typedef struct {
 
 void UiDots_create(UiDots *me, lv_obj_t *parent, uint8_t count);
 void UiDots_destroy(UiDots *me);
+// Zero-based index, required to be smaller than the created dot count.
+void UiDots_setActive(UiDots *me, uint8_t index);
 
 #endif // UI_DOTS_H_

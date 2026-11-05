@@ -24,6 +24,7 @@
 #include "asset.h"
 #include "instance/nvm_boot.h"
 #include "instance/nvm_blinky.h"
+#include "nvm_port.h"
 #include "nvs.h"
 #include "flash.h"
 #include "sm_flash_evt.h"
@@ -54,6 +55,31 @@ void SM_Trace_push(SM_Tracer * const me,unsigned char *frame) {
 static unsigned hostTick,backlight,scenario;
 static uint32_t hostFps=30,hostIdle,hostTotal;
 static char const *expectedCpu="0%";
+static SST_Task hostBlinky={
+    .thread=(void *)2,.end=7,.nUsed=0,.queueMinFree=5};
+static SST_Task hostFlash={
+    .thread=(void *)3,.end=9,.nUsed=0,.queueMinFree=8};
+SST_Task * const AO_Blinky=&hostBlinky;
+SST_Task * const AO_Flash=&hostFlash;
+static StackType_t hostStacks[5][UI_STACK_WORDS];
+TaskHandle_t xTaskGetIdleTaskHandle(void){return (void *)4;}
+TaskHandle_t xTimerGetTimerDaemonTaskHandle(void){return (void *)5;}
+void vTaskGetInfo(TaskHandle_t task,TaskStatus_t *status,
+                   int freeStack,eTaskState state){
+    unsigned const i=(unsigned)(uintptr_t)task-1U;
+    static char const * const names[]={
+        "ui","Blinky","Flash","IDLE","Tmr Svc"};
+    static unsigned const words[]={UI_STACK_WORDS,256,256,128,256};
+    static unsigned const priorities[]={23,24,23,0,24};
+    assert(i<5&&freeStack==pdTRUE&&state==eInvalid);
+    *status=(TaskStatus_t){
+        .xHandle=task,.pcTaskName=names[i],
+        .pxStackBase=hostStacks[i],
+        .pxEndOfStack=hostStacks[i]+words[i]-1,
+        .usStackHighWaterMark=words[i]/4,
+        .uxCurrentPriority=priorities[i]
+    };
+}
 static Asset assets;
 static uint16_t pixels[3][240*320];
 static uint8_t drawBuffer[240*32*2];
@@ -90,6 +116,9 @@ uint32_t Ui_dispFps(void){return hostFps;}
 void BSP_cpuSample(uint32_t *idle,uint32_t *total){
     assert(Host_critical);
     *idle=hostIdle;*total=hostTotal;
+}
+bool BSP_timerQueueSample(uint32_t *minimum,uint32_t *total){
+    *minimum=7;*total=10;return true;
 }
 TickType_t Ui_dispHeartbeat(void){return 1;}
 // Include the actual thread binding/start/drain implementation. Its RTOS
@@ -1113,7 +1142,7 @@ static void testThreadMonitor_(lv_obj_t *root,lv_display_t *display){
     UiThreadMonitor monitor={0};
     UiThreadMonitor_destroy(&monitor);
     for(unsigned pass=0;pass<3;++pass){
-        UiThreadMonitor_create(&monitor,root,236,105);
+        UiThreadMonitor_create(&monitor,root,236,105,3);
         lv_obj_update_layout(root);
         assert(lv_obj_get_child_count(root)==2);
         assert(lv_obj_get_parent(monitor.container)==root);
@@ -1243,7 +1272,7 @@ static void checkResourceCard_(UiResourceCard const *card){
     assert(lv_obj_get_parent(card->percent)==card->gauge);
     assert(lv_obj_get_parent(card->range)==card->container);
     assert(xOf_(card->name)==x+2&&yOf_(card->name)==y+1);
-    assert(xOf_(card->sizeGroup)==x+207);
+    assert(xOf_(card->sizeGroup)==x+191);
     assert(yOf_(card->sizeGroup)==y+1);
     assert(xOf_(card->gauge)==x+67&&yOf_(card->gauge)==y+32);
     assert(xOf_(card->arc)==x+68&&yOf_(card->arc)==y+38);
@@ -1256,14 +1285,18 @@ static void checkResourceCard_(UiResourceCard const *card){
     assert(lv_obj_get_height(card->arc)==100);
     assert(lv_arc_get_bg_angle_start(card->arc)==207);
     assert(lv_arc_get_bg_angle_end(card->arc)==333);
-    assert(lv_arc_get_value(card->arc)==0);
     assert(lv_obj_get_style_arc_width(card->arc,LV_PART_MAIN)==6);
     assert(lv_obj_get_style_arc_width(card->arc,LV_PART_INDICATOR)==6);
     assert(!lv_obj_has_flag(card->arc,LV_OBJ_FLAG_CLICKABLE));
-    assert(!strcmp(lv_label_get_text(card->name),"--"));
-    assert(!strcmp(lv_label_get_text(card->size),"--"));
-    assert(!strcmp(lv_label_get_text(card->percent),"--%"));
-    assert(!strcmp(lv_label_get_text(card->maximum),"--"));
+    bool const bound=card==&Ui_sm_.resourceMonitor.cards[0]
+        ||card==&Ui_sm_.resourceMonitor.cards[1];
+    if(!bound){
+        assert(lv_arc_get_value(card->arc)==0);
+        assert(!strcmp(lv_label_get_text(card->name),"--"));
+        assert(!strcmp(lv_label_get_text(card->size),"--"));
+        assert(!strcmp(lv_label_get_text(card->percent),"--%"));
+        assert(!strcmp(lv_label_get_text(card->maximum),"--"));
+    }
 }
 static void checkResourceCardEmpty_(UiResourceCard const *card){
     assert(!card->container&&!card->header&&!card->sizeGroup);
@@ -1319,7 +1352,7 @@ static void testResourceMonitor_(lv_obj_t *root,lv_display_t *display){
         assert(lv_obj_get_parent(monitor.container)==root);
         assert(lv_obj_get_width(monitor.container)==236);
         assert(lv_obj_get_height(monitor.container)==144);
-        assert(countObjs_(monitor.container)==32);
+        assert(countObjs_(monitor.container)==33);
         assert(lv_obj_get_child_count(monitor.container)==2);
         assert(lv_obj_get_child_count(monitor.viewport)==2);
         assert(lv_obj_get_parent(monitor.viewport)==monitor.container);
@@ -1333,8 +1366,8 @@ static void testResourceMonitor_(lv_obj_t *root,lv_display_t *display){
                ==monitor.container);
         assert(xOf_(monitor.indicatorContainer)==2);
         assert(yOf_(monitor.indicatorContainer)==271);
-        checkDots_(&monitor.dots,monitor.indicatorContainer,4);
-        assert(xOf_(monitor.dots.container)==99);
+        checkDots_(&monitor.dots,monitor.indicatorContainer,5);
+        assert(xOf_(monitor.dots.container)==93);
         assert(yOf_(monitor.dots.container)==287);
         for(unsigned i=0;i<2;++i){
             lv_obj_t *box=monitor.cards[i].container;
@@ -1355,23 +1388,23 @@ static void testResourceMonitor_(lv_obj_t *root,lv_display_t *display){
                 lv_obj_set_x(monitor.cards[1].container,0);
             }
             lv_refr_now(display);
-            assert(countObjs_(monitor.container)==32);
-            checkDots_(&monitor.dots,monitor.indicatorContainer,4);
-            assert(xOf_(monitor.dots.container)==99);
+            assert(countObjs_(monitor.container)==33);
+            checkDots_(&monitor.dots,monitor.indicatorContainer,5);
+            assert(xOf_(monitor.dots.container)==93);
             assert(yOf_(monitor.dots.container)==287);
             uint16_t const color=slot?0x001FU:0xF800U;
             for(int y=0;y<320;++y)
                 for(int x=0;x<240;++x){
                     bool const inView=x>=2&&x<238&&y>=200&&y<318;
-                    bool const inDots=x>=99&&x<141&&y>=287&&y<293;
+                    bool const inDots=x>=93&&x<147&&y>=287&&y<293;
                     if(!inDots)
                         assert(framebuffer[y*240+x]==(inView?color:0));
                 }
-            for(unsigned i=0;i<4;++i){
-                assert(framebuffer[290*240+102+i*12]
+            for(unsigned i=0;i<5;++i){
+                assert(framebuffer[290*240+96+i*12]
                        ==(i?pack565_(0x33,0x41,0x55)
                            :pack565_(0x6F,0xE9,0x7B)));
-                if(i<3)assert(framebuffer[290*240+108+i*12]==color);
+                if(i<4)assert(framebuffer[290*240+102+i*12]==color);
             }
             if(!pass&&!slot)capture("resource-monitor.rgb565");
             verifyRepaint(display);
@@ -1398,7 +1431,7 @@ static void testMonitorFill_(lv_obj_t *root){
     lv_obj_set_size(parent,236,144);
     UiThreadMonitor thread={0};
     UiResourceMonitor resource={0};
-    UiThreadMonitor_create(&thread,parent,lv_pct(100),lv_pct(100));
+    UiThreadMonitor_create(&thread,parent,lv_pct(100),lv_pct(100),3);
     UiResourceMonitor_create(&resource,parent,lv_pct(100),lv_pct(100));
     for(unsigned pass=0;pass<2;++pass){
         int32_t const width=pass?276:236,height=pass?164:144;
@@ -1421,7 +1454,7 @@ static void testMonitorFill_(lv_obj_t *root){
         assert(xOf_(resource.cards[1].container)-xOf_(resource.viewport)
                ==width);
         assert(xOf_(resource.dots.container)-xOf_(resource.container)
-               ==(width-42)/2);
+               ==(width-54)/2);
     }
     UiThreadMonitor_destroy(&thread);
     UiResourceMonitor_destroy(&resource);
@@ -1486,19 +1519,24 @@ static void checkMountedMonitor_(UiThreadMonitor const *monitor){
     assert(lv_obj_get_style_margin_top(box,0)==2);
     assert(!lv_obj_has_flag(box,LV_OBJ_FLAG_IGNORE_LAYOUT));
     assert(xOf_(monitor->viewport)==4&&yOf_(monitor->viewport)==65);
-    assert(countObjs_(box)==30);
-    checkMonitorDots_(monitor,105,158);
-    assert(xOf_(monitor->cards[0].container)==4);
-    assert(xOf_(monitor->cards[1].container)==236);
+    assert(countObjs_(box)==32);
+    assert(lv_obj_get_child_count(monitor->dots.container)==5);
+    assert(xOf_(monitor->dots.container)==93);
+    assert(yOf_(monitor->dots.container)==158);
+    bool const bound=monitor==&Ui_sm_.threadMonitor;
+    unsigned const slot=bound?Ui_sm_.threadSlot:0U;
+    assert(xOf_(monitor->cards[slot].container)==4);
+    assert(xOf_(monitor->cards[slot^1U].container)==236);
     assert(yOf_(monitor->cards[0].container)==65);
     assert(yOf_(monitor->cards[1].container)==65);
-    assert(!strcmp(lv_label_get_text(monitor->cards[0].threadName),"Thread"));
-    assert(!strcmp(lv_label_get_text(monitor->cards[0].priority),"--"));
+    static char const * const names[]={
+        "ui","Blinky","Flash","IDLE","Tmr Svc"};
+    assert(!strcmp(lv_label_get_text(monitor->cards[slot].threadName),
+                   bound?names[Ui_sm_.threadIndex]:""));
     for(unsigned i=0;i<2;++i){
         checkThreadCardResources_(&monitor->cards[i]);
-        assert(!strcmp(lv_label_get_text(
-            monitor->cards[0].resources[i].value),"--"));
-        assert(lv_bar_get_value(monitor->cards[0].resources[i].bar)==0);
+        assert(lv_bar_get_value(monitor->cards[i]
+               .resources[UI_THREAD_CARD_STACK].bar)==(bound?25:0));
     }
 }
 // Figma lower slot: viewport (2,200), independent dots (99,287).
@@ -1511,7 +1549,7 @@ static void checkMountedResourceMonitor_(
            &&lv_obj_get_height(box)==144);
     assert(lv_obj_get_style_margin_left(box,0)==0);
     assert(!lv_obj_has_flag(box,LV_OBJ_FLAG_IGNORE_LAYOUT));
-    assert(countObjs_(box)==32);
+    assert(countObjs_(box)==33);
     assert(xOf_(monitor->viewport)==2);
     assert(yOf_(monitor->viewport)==200);
     assert(lv_obj_get_width(monitor->viewport)==236);
@@ -1519,13 +1557,15 @@ static void checkMountedResourceMonitor_(
     for(unsigned i=0;i<2;++i){
         lv_obj_t * const card=monitor->cards[i].container;
         assert(lv_obj_get_parent(card)==monitor->viewport);
-        assert(xOf_(card)==(int32_t)(2+i*236));
+        bool const bound=monitor==&Ui_sm_.resourceMonitor;
+        unsigned const slot=bound?Ui_sm_.resourceSlot:0U;
+        assert(xOf_(card)==(int32_t)(i==slot?2:238));
         assert(yOf_(card)==200);
         checkResourceCard_(&monitor->cards[i]);
     }
     assert(lv_obj_get_parent(monitor->indicatorContainer)==box);
-    checkDots_(&monitor->dots,monitor->indicatorContainer,4);
-    assert(xOf_(monitor->dots.container)==99);
+    checkDots_(&monitor->dots,monitor->indicatorContainer,5);
+    assert(xOf_(monitor->dots.container)==93);
     assert(yOf_(monitor->dots.container)==287);
 }
 // Active leaves placement to the parent; edge spacing is Flex padding.
@@ -1595,8 +1635,11 @@ static void checkActiveTopbar(uint16_t const *bg,
         assert(lv_obj_get_child_count(root)==1);
     }
     char expectedCount[11];
+    NVM_PORT_ENTER();
+    uint32_t const edges=NvmBlinky_get()->edges;
+    NVM_PORT_EXIT();
     snprintf(expectedCount,sizeof expectedCount,"%lu",
-              (unsigned long)NvmBlinky_get()->edges);
+              (unsigned long)edges);
     assert(!strcmp(lv_label_get_text(Ui_sm_.topbar.blinkyCount),
                    expectedCount));
     assert(!strcmp(lv_label_get_text(Ui_sm_.topbar.fps),"30FPS"));
@@ -1713,6 +1756,7 @@ int main(int argc,char **argv){
     SST_EvtPool_init(small,sizeof small,sizeof(SST_Evt));
     SST_EvtPool_init(medium,sizeof medium,sizeof(Flash_Evt));
     SM_Tracer_inst.nTot=16;SM_Tracer_inst.nMin=10;
+    SM_Tracer_inst.blockSize=128;
     assets=(Asset){.present=scenario!=4,.len=460800,.slots=3};
     char const *files[]={"figma/sys-page.rgb565", "figma/live-page.rgb565",
                          "bg-logo.rgb565"};
@@ -1777,7 +1821,9 @@ int main(int argc,char **argv){
     assert(backlight==1 && Ui_dbgSplashOk_==(scenario!=3));
     send(UI_LED_ON_SIG);send(UI_LED_OFF_SIG);
     assert(lv_obj_get_child_count(Ui_sm_.root.container)==0);
+    NVM_PORT_ENTER();
     assert(NvmBlinky_get()->edges==50); // UI events never update NVM.
+    NVM_PORT_EXIT();
     if(scenario==1){
         pulse(150);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_readyShow);
         checkSplash(true); // Splash survives the waiting half.
@@ -1800,6 +1846,94 @@ int main(int argc,char **argv){
     uint16_t const * const sysBg=scenario==4?NULL:pixels[0];
     uint16_t const * const liveBg=scenario==4?NULL:pixels[1];
     checkActiveTopbar(sysBg,true);
+    lv_obj_t * const threadCards[]={
+        Ui_sm_.threadMonitor.cards[0].container,
+        Ui_sm_.threadMonitor.cards[1].container};
+    static char const * const queueTexts[]={
+        NULL,"min 5/8","min 8/10","N/A","min 7/10"};
+    for(unsigned index=0;index<UI_THREAD_COUNT;++index){
+        UiThreadCard const * const card=
+            &Ui_sm_.threadMonitor.cards[Ui_sm_.threadSlot];
+        assert(Ui_sm_.threadIndex==index);
+        for(unsigned dot=0;dot<UI_THREAD_COUNT;++dot){
+            lv_obj_t const * const object=lv_obj_get_child(
+                Ui_sm_.threadMonitor.dots.container,(int32_t)dot);
+            uint32_t const color=lv_color_to_u32(
+                lv_obj_get_style_bg_color(object,0))&0xFFFFFFU;
+            assert(color==(dot==index?0x6FE97BU:0x334155U));
+        }
+        assert(!strcmp(lv_label_get_text(card->priority),
+                       index==1||index==4?"P24":index==3?"P0":"P23"));
+        if(index){
+            assert(!strcmp(lv_label_get_text(
+                card->resources[UI_THREAD_CARD_INBOX].value),
+                queueTexts[index]));
+        }
+        assert(Ui_sm_.threadMonitor.cards[0].container==threadCards[0]);
+        assert(Ui_sm_.threadMonitor.cards[1].container==threadCards[1]);
+        send(UI_THREAD_TIMEOUT_SIG);
+        assert(Ui_sm_.threadMonitor.sliding);
+        pulse(12);
+        lv_obj_update_layout(Ui_sm_.root.container);
+        unsigned const incoming=Ui_sm_.threadSlot;
+        int32_t const incomingX=xOf_(threadCards[incoming]);
+        int32_t const outgoingX=xOf_(threadCards[incoming^1U]);
+        assert(incomingX>4&&incomingX<236);
+        assert(outgoingX<4&&outgoingX>-228);
+        assert(incomingX-outgoingX==232);
+        assert(yOf_(Ui_sm_.threadMonitor.dots.container)==158);
+        pulse(16);
+        assert(!Ui_sm_.threadMonitor.sliding);
+    }
+    assert(Ui_sm_.threadIndex==0);
+    lv_obj_t * const resourceCards[]={
+        Ui_sm_.resourceMonitor.cards[0].container,
+        Ui_sm_.resourceMonitor.cards[1].container};
+    for(unsigned index=0;index<UI_RESOURCE_COUNT;++index){
+        assert(Ui_sm_.resourceIndex==index);
+        send(UI_STATS_TIMEOUT_SIG);
+        Sm_Ui_ResourceSample sample;
+        Ui_readResource_(NULL,index,&sample);
+        UiResourceCard const * const card=
+            &Ui_sm_.resourceMonitor.cards[Ui_sm_.resourceSlot];
+        assert(!strcmp(lv_label_get_text(card->name),sample.name));
+        assert(lv_arc_get_value(card->arc)==(sample.total
+            ?(int32_t)((uint64_t)sample.value*100/sample.total):0));
+        char text[12];
+        if(sample.total){
+            snprintf(text,sizeof text,"%lu",(unsigned long)sample.value);
+        }else{
+            assert(index==2&&!strcmp(sample.name,"Big reserved"));
+            strcpy(text,"--");
+            assert(!strcmp(lv_label_get_text(card->percent),"--%"));
+            assert(!strcmp(lv_label_get_text(card->size),"--"));
+        }
+        assert(!strcmp(lv_label_get_text(card->minimum),text));
+        if(sample.total)
+            snprintf(text,sizeof text,"%lu",(unsigned long)sample.total);
+        assert(!strcmp(lv_label_get_text(card->maximum),text));
+        assert(lv_obj_get_style_opa(card->arc,0)
+               ==(sample.total?LV_OPA_COVER:LV_OPA_30));
+        for(unsigned dot=0;dot<UI_RESOURCE_COUNT;++dot){
+            lv_obj_t const * const object=lv_obj_get_child(
+                Ui_sm_.resourceMonitor.dots.container,(int32_t)dot);
+            assert((lv_color_to_u32(lv_obj_get_style_bg_color(object,0))
+                    &0xFFFFFFU)==(dot==index?0x6FE97BU:0x334155U));
+        }
+        send(UI_RESOURCE_TIMEOUT_SIG);
+        hostTick+=120;render();
+        lv_obj_update_layout(Ui_sm_.root.container);
+        unsigned const slot=Ui_sm_.resourceSlot;
+        assert(xOf_(resourceCards[slot])>2);
+        assert(xOf_(resourceCards[slot])<238);
+        assert(xOf_(resourceCards[slot])-xOf_(resourceCards[slot^1U])==236);
+        assert(yOf_(Ui_sm_.resourceMonitor.dots.container)==287);
+        hostTick+=160;render();
+        assert(!Ui_sm_.resourceMonitor.sliding);
+        assert(Ui_sm_.resourceMonitor.cards[0].container==resourceCards[0]);
+        assert(Ui_sm_.resourceMonitor.cards[1].container==resourceCards[1]);
+    }
+    assert(Ui_sm_.resourceIndex==0);
     assert(!strcmp(lv_label_get_text(Ui_sm_.topbar.blinkyCount),"50"));
     NvmBlinky_add(1);
     send(UI_LED_ON_SIG);Ui_drain_();
@@ -1833,19 +1967,27 @@ int main(int argc,char **argv){
     assert(Ui_sm_.topbar.container==persistent);
     assert(Ui_sm_.pageTitle.title==titleObj);
     assert(Ui_sm_.pageTitle.container==titleBox);
-    UiBootCount_setCount(&Ui_sm_.bootCount,NvmBoot_get()->count);
+    NVM_PORT_ENTER();
+    uint32_t const boots=NvmBoot_get()->count;
+    NVM_PORT_EXIT();
+    UiBootCount_setCount(&Ui_sm_.bootCount,boots);
     assert(!strcmp(lv_label_get_text(Ui_sm_.bootCount.count),"1"));
     lv_refr_now(display);verifyRepaint(display);
     pulse(499);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sysInfo);
     pulse(1);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sysInfo);
+    assert(Ui_sm_.threadIndex==2U); // Two 2.5 s deadlines elapsed.
     send(UI_STATE_TIMEOUT_SIG);
     assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_liveShow);
+    assert(Ui_sm_.threadTimeout.remaining==0U);
+    assert(Ui_sm_.resourceTimeout.remaining==0U);
     verifyRepaint(display);checkActiveTopbar(liveBg,false);
     capture("live.rgb565");
     assert(Ui_sm_.topbar.container==persistent); // Pages share it.
     send(UI_LED_ON_SIG);send(UI_LED_OFF_SIG);Ui_drain_();
     verifyRepaint(display);checkActiveTopbar(liveBg,false);
+    NVM_PORT_ENTER();
     assert(NvmBlinky_get()->edges==51);
+    NVM_PORT_EXIT();
     pulse(999);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_liveShow);
     pulse(1);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sysInfo);
     verifyRepaint(display);checkActiveTopbar(sysBg,true);
@@ -1857,7 +1999,13 @@ int main(int argc,char **argv){
     // No production transition exits Active yet; invoke the page
     // action handlers directly to cover teardown. Direct entry
     // does not enter SysInfo.
+    send(UI_THREAD_TIMEOUT_SIG);
+    send(UI_RESOURCE_TIMEOUT_SIG);
+    pulse(10);
+    assert(Ui_sm_.threadMonitor.sliding);
+    assert(Ui_sm_.resourceMonitor.sliding);
     Sm_Ui_sysInfo.exit_(&Ui_sm_.sm_hsm_);
+    pulse(30); // A cancelled slide must not access deleted page objects.
     // Isolated LiveShow teardown: its own exit must clear the bg
     // independently of SysInfo overwriting it.
     Sm_Ui_liveShow.entry_(&Ui_sm_.sm_hsm_);

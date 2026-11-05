@@ -142,6 +142,15 @@ standard names. */
 #define xPortSysTickHandler SysTick_Handler
 
 /* USER CODE BEGIN Defines */
+/* Observe successful command sends before FreeRTOS increments queue usage. */
+void BSP_timerQueueRegister(void *queue, char const *name);
+void BSP_timerQueueSent(void *queue, uint32_t usedBefore, uint32_t total);
+#define traceQUEUE_REGISTRY_ADD(queue_, name_) \
+    BSP_timerQueueRegister((queue_), (name_))
+#define traceQUEUE_SEND(queue_) \
+    BSP_timerQueueSent((queue_), (queue_)->uxMessagesWaiting, \
+                       (queue_)->uxLength)
+#define traceQUEUE_SEND_FROM_ISR(queue_) traceQUEUE_SEND(queue_)
 /* Section where parameter definitions can be added (for instance, to override default ones in FreeRTOS.h) */
 /* USER CODE END Defines */
 

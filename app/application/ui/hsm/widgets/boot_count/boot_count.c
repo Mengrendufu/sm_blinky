@@ -41,7 +41,7 @@ void UiBootCount_create(UiBootCount *me, lv_obj_t *parent,
     me->count = Label_create(meta,
         &(LabelConfig){
             .width = 68, .height = 12,
-            .textAlign = LV_TEXT_ALIGN_LEFT,
+            .textAlign = LV_TEXT_ALIGN_RIGHT,
             .longMode = LV_LABEL_LONG_MODE_CLIP,
             .text = me->countText});
     lv_obj_add_style(me->count, &UiStyle_bootCountText,

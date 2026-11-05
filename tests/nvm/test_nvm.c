@@ -6,6 +6,7 @@
 #include <string.h>
 #include "instance/nvm_boot.h"
 #include "instance/nvm_blinky.h"
+#include "nvm_port.h"
 #include "nvs.h"
 
 unsigned Host_critical;
@@ -69,17 +70,25 @@ int main(int argc, char **argv) {
     assert(reads == 2 && writes == 0);
     assert(loaded == ((scenario == 2 || scenario == 3) ? -EIO : 0));
     NvmBoot_inc();
+    NVM_PORT_ENTER();
     assert(NvmBoot_get()->count == (scenario == 0 ? 1 : 8));
+    NVM_PORT_EXIT();
     bool const defaults = scenario == 0 || scenario == 2 || scenario == 3;
     NvmBlinky_add(5);
     uint32_t const expected = defaults ? 5 : 105;
+    NVM_PORT_ENTER();
     assert(NvmBlinky_get()->edges == expected);
+    NVM_PORT_EXIT();
     changeDuringWrite = true;
     assert(NvmManager_store(&manager, NVM_BLINKY_ID) == 0);
     assert(writtenKey == 2 && writtenValue == expected);
+    NVM_PORT_ENTER();
     assert(NvmBlinky_get()->edges == expected + 7);
+    NVM_PORT_EXIT();
     assert(NvmManager_store(&manager, NVM_BOOT_ID) == 0);
+    NVM_PORT_ENTER();
     assert(writtenKey == 1 && writtenValue == NvmBoot_get()->count);
+    NVM_PORT_EXIT();
     writeReturn = 0; // NVS skips an unchanged value; this is success.
     assert(NvmManager_store(&manager, NVM_BLINKY_ID) == 0);
     writeReturn = -ENOSPC;

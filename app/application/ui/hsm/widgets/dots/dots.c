@@ -41,6 +41,20 @@ void UiDots_create(UiDots *me, lv_obj_t *parent, uint8_t count) {
     }
 }
 
+void UiDots_setActive(UiDots *me, uint8_t index) {
+    SM_REQUIRE(me != NULL);
+    SM_REQUIRE(me->container != NULL);
+    uint32_t const count = lv_obj_get_child_count(me->container);
+    SM_REQUIRE(index < count);
+    for (uint32_t i = 0; i < count; ++i) {
+        lv_obj_t * const dot = lv_obj_get_child(me->container, (int32_t)i);
+        lv_obj_remove_style(dot, &UiStyle_dotActive, LV_PART_MAIN);
+        if (i == index) {
+            lv_obj_add_style(dot, &UiStyle_dotActive, LV_PART_MAIN);
+        }
+    }
+}
+
 void UiDots_destroy(UiDots *me) {
     SM_REQUIRE(me != NULL);
     if(me->container != NULL) {

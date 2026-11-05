@@ -10,7 +10,12 @@ typedef struct {
     StackType_t *pxEndOfStack;
     StackType_t *pxStackBase;
     unsigned usStackHighWaterMark;
+    UBaseType_t uxCurrentPriority;
 } TaskStatus_t;
+typedef enum { eInvalid } eTaskState;
+void vTaskGetInfo(TaskHandle_t task,TaskStatus_t *status,
+                   int freeStack,eTaskState state);
+TaskHandle_t xTaskGetIdleTaskHandle(void);
 UBaseType_t uxTaskGetSystemState(TaskStatus_t *tasks,unsigned cap,
                                 uint32_t *runtime);
 TaskHandle_t xTaskCreateStatic(void (*entry)(void *),char const *name,

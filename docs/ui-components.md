@@ -156,8 +156,7 @@ UiBootCount_create/destroy/setCount；setCount 把 uint32
 格式成带千分位逗号的十进制
 （上限 "4,294,967,295"；Figma 示例 2^32 是占位值）。
 外观来自共享 const 样式 UiStyle_pageTitleText /
-UiStyle_bootCountText。已挂载 SysInfo；BOOTS 当前为 0，
-NVM 数据绑定尚未接入。
+UiStyle_bootCountText。已挂载 SysInfo，进入时读取 NvmBoot 活块计数。
 
 widgets/thread_monitor/ 包含 thread_monitor.c/.h 和
 thread_card.c/.h。UiThreadCard_create/destroy 管一个
@@ -184,18 +183,43 @@ viewport 相对外框偏移 (2,6)。viewport 的兄弟节点是独立 UiDots
 不保存圆点数组或自己创建各圆点。UiDots_create/destroy
 负责整组生命周期；公开实例只有 container，各圆点是内部细节。
 UiDots_create 接收非零 uint8_t count，组宽为 count * 12 - 6，
-高度为 6，首点高亮。ThreadMonitor 传入 3，组件为 30x6，
-三颗 6x6 圆点，x 偏移 0/12/24、间距 6，
-外框 COLUMN flex 横向居中使组落在相对 (103,99)。
+高度为 6，首点高亮。ThreadMonitor_create 额外接收 pageCount，
+只改变分页点数，不改变预建卡片数。SysInfo 传入 5，组件为 54x6，
+五颗 6x6 圆点，间距 6，
+外框 COLUMN flex 横向居中使组落在相对 (91,99)。
 第一颗挂 UiStyle_dotActive（#6FE97B）于共享
 UiStyle_dot（#334155、CIRCLE、COVER）之上，外观不变。
-暂无翻页或动画语义。销毁时先销两张卡和 Dots，再销外框。
+UiDots_setActive 接收从零开始的索引，组件自身不定时或翻页。
+销毁时先销两张卡和 Dots，再销外框。
 实例须零初始化、仅在 UI 线程操作，destroy 可重复调用。
-每卡 12 个 LVGL 对象，Monitor 共 30 个；已由 SysInfo
+每卡 12 个 LVGL 对象，五点 Monitor 共 32 个；已由 SysInfo
 helper 挂载，Sm_Ui 持有实例，进入时创建、退出时销毁，
-不影响常驻 Topbar。当前卡显示 Thread / --，两条资源值为 --，
-单位 B / slots、进度为 0，仅为未接数据的占位，不是板端采样。
-没有圆弧、采样或动画。
+不影响常驻 Topbar。
+
+线程数据由 UI 线程适配器调用 vTaskGetInfo 采集，
+HSM 负责格式化、绑定与翻页，Card/Monitor 保持被动。
+固定顺序为 UI、Blinky、Flash、Idle、Timer daemon：
+
+- 优先级为 FreeRTOS 当前优先级，显示 P 数值，不是 SST 逻辑优先级。
+- 栈值为 min 最低剩余字节数／总字节数，Bar 表示剩余比例；
+  总量从栈起止地址得到，FreeRTOS 水位从 words 转为 B。
+- UI、Blinky、Flash、Timer 队列均显示 min 历史最低剩余／容量。
+  AO 水位在 port 的 task/ISR 入队临界区更新，不依赖页面采样。
+  Timer 水位通过 FreeRTOS 的 TmrQ 注册和成功发送 trace hook 更新，
+  同时覆盖 task/ISR 命令发送，不修改第三方内核或 SST 源码。
+- Idle 没有业务队列，显示 N/A；Timer 队列尚未注册时显示 --/10。
+  未知或不适用时队列 Bar 降低透明度，不把 0 当成真实耗尽值。
+
+SysInfo 进入时绑定首卡与备用卡，每秒刷新可见卡；
+每 250 个 100 Hz tick（2.5 s）启动一次 240 ms 水平滑动，
+旧卡向左退出，新卡从右进入；复用两个实例并同步五点高亮。
+Topbar、标题及分页点不参与动画，viewport 裁剪卡片内容。
+动画中忽略重复翻页事件，避免覆盖仍在显示的槽位数据。
+退出页面先停轮播，Monitor 销毁时取消动画，再销毁控件；
+动画无法启动时直接落到目标位置。暂停自动切页的设置保持不变。
+
+水位回归：python3 tests/test_queue_watermarks.py。
+覆盖 AO/Timer 在 task/ISR 入队产生的峰值，出队后水位不回升。
 
 定位依据为最新 .fig 的 ThreadStackHighWater（125:64）：
 页面内外框 (2,58.570732)、236x105，整数像素取 (2,59)；
@@ -227,25 +251,51 @@ viewport 为 236x118、相对外框 (0,26)，关闭滚动和溢出可见。
 顶部留白 1、分区间距 4，包含标题区 236x27、
 圆弧区 102x35 和范围区 236x17。
 标题区包裹资源名与容量组；圆弧区包裹原生 lv_arc 和百分比；
-范围区包裹 E 与总量。文字复用 Label_create 和共享 styles。
+范围区包裹观测值与总量。文字复用 Label_create 和共享 styles。
+块大小组宽 43、数值标签宽 32，容纳三位块字节数；
+底部两个标签宽 48，容纳 LVGL 的五位字节数，文字锚点不变。
 圆弧完整对象为 100x100，背景角度 207..333、线宽 6，
 白色轨道、绿色 #BEE086 指示条，无 knob；仅圆弧区允许溢出，
 外层卡片与 viewport 仍裁剪。初始值 0，未知文字为 -- / --%。
 
 indicatorContainer 为 viewport 的兄弟节点，
 236x46、相对外框 (0,97)，按设计稿与下方范围区叠放。
-四点 UiDots 为其子节点，42x6、相对 (97,16)，
-不会跟卡片移动；Figma 原稿三点按已确认四项资源扩成四点并居中。
-每卡 12 个 LVGL 对象，Monitor 共 32 个。
-四项资源数据不等于四套卡片控件。
+五点 UiDots 为其子节点，54x6、相对 (91,16)，
+不会跟卡片移动；包含 Big 预留项，点组保持居中。
+每卡 12 个 LVGL 对象，Monitor 共 33 个。
+五项轮播仍复用两张卡，不增加第三张资源卡。
 
 实例须零初始化，父对象须存活，UI 线程独占，destroy 可重复调用。
 已由 SysInfo helper 挂载（Sm_Ui 持有，entry 建、exit 销，
 在 ThreadMonitor 之后创建、横向由 Root padding 定位）：挂载后外框
 (2,174) 236x144，viewport (2,200) 236x118，卡片 x 2/238
-y 200，圆弧 (70,238)，四点组 (99,287) 42x6。
-未接采样或轮播动画；默认文字不表示真实资源读数。
-原 ThreadMonitor 的三点、布局和页面显示保持不变。
+y 200，圆弧 (70,238)，五点组 (93,287) 54x6。
+已接真实采样、每秒刷新、2.5 s 轮播及 240 ms 水平滑动。
+两张卡复用，旧卡向左退出、新卡从右进入，独立五点同步高亮。
+退出页面停掉资源定时器，销毁 Monitor 时先取消动画；
+动画中不接受重复翻页，不移动标题、Topbar 或圆点。
+UiResourceCard_setHeader/setGauge 仅绑定调用方字符串和百分比，
+字符串由 HSM 的双槽缓冲持有，Card 不采样、不计算比例。
+
+固定顺序与口径：
+
+- Small min free：小事件池最低剩余块数／总块数。
+- Medium min free：中事件池最低剩余块数／总块数。
+- Big reserved：大事件池预留位，未注册实际池；
+  块大小、容量、水位与百分比显示 --，圆弧降低透明度。
+- Tracer min free：Tracer 最低剩余块数／总块数。
+- LVGL peak used：LVGL 分配器 max_used／total_size，单位为 B。
+  表示历史峰值占用，不声称是最低可分配空间或最大连续空闲块。
+
+Small、Medium、Tracer 从已有 nMin 水位读取，释放后不回升；
+圆弧表示最低剩余比例。Big 仅预留展示项，不分配内存池，
+不访问尚未注册的 poolId 3。ResourceSample.total 为 0 表示未绑定，
+显示未知值，不作为健康的 0%；槽位重用后恢复正常圆弧透明度。
+右上为实际块大小 B；LVGL 按 1 B 为显示单位，不代表分配器块大小。
+底部左／右分别为观测值与总量，中央为对应比例。
+LVGL 与三种最低剩余读数方向不同，peak used 明确表示峰值占用。
+LVGL 最大连续空闲块及碎片率暂不增加额外字段。
+线程槽与资源槽各自使用独立五点组。
 
 ## SysInfo 资源健康范围备忘（已确认）
 
@@ -256,10 +306,10 @@ y 200，圆弧 (70,238)，四点组 (99,287) 42x6。
 - 上方线程卡片槽：各线程的栈水位、事件队列余量和优先级，
   包括 Timer daemon 等内核线程。无对应队列时显示不适用，
   不将其伪装成零余量；Timer daemon 的命令队列不是 AO 邮箱。
-- 下方公共资源卡片槽：小事件池、中事件池、Tracer 水位、
-  LVGL 内存池，共四项。槽位风格沿用线程卡片槽，
-  项目数不等于预建卡片数；分页指示应对应四项，
-  不能直接照搬当前固定三点的 Dots。
+- 下方公共资源卡片槽：小事件池、中事件池、Big 预留位、
+  Tracer 水位、LVGL 内存池，共五项。槽位风格沿用线程卡片槽，
+  项目数不等于预建卡片数；分页指示应对应五项，
+  与上方线程槽分别维护。
 - CPU 负载和 UI 刷新率沿用 Topbar，不在资源卡片中重复展示。
 - 本期不纳入 FreeRTOS heap：当前使用全静态分配，
   不为不存在的动态堆展示空闲量。
@@ -274,7 +324,7 @@ y 200，圆弧 (70,238)，四点组 (99,287) 42x6。
   栈高水位表示历史最低剩余；事件池接口的 min 也不是当前值。
 - 小池和中池分别观察，不将不同块大小的容量合成一个比例。
 - LVGL 内存池独立于应用事件池，不能用事件池余量替代。
-  LVGL 的具体字段及各指标更新周期留待采样设计确定。
+  当前选择 LVGL 历史峰值占用，资源卡每秒刷新。
 - 数据未知、不适用或过期时不能用正常的零值或旧值掩盖。
 - 采样、换算与数据适配放在被动控件外。
 

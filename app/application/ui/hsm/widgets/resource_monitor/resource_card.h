@@ -13,7 +13,7 @@
 #include "lvgl.h"
 
 // Passive 236x118 resource card: title, gauge and range containers.
-// Unknown resource values remain "--"; no sampling or animation.
+// Initial resource values remain "--"; no sampling or ratio math.
 // Zero-initialize before create; parent must outlive this instance.
 // Do not copy/move a live instance or externally delete its subtree.
 // UI thread only. Destroy removes only this subtree and is idempotent.
@@ -36,5 +36,11 @@ typedef struct {
 void UiResourceCard_create(UiResourceCard *me, lv_obj_t *parent,
                             int32_t width, int32_t height);
 void UiResourceCard_destroy(UiResourceCard *me);
+// All strings are borrowed until rebound/destroyed; UI thread only.
+void UiResourceCard_setHeader(UiResourceCard *me, char const *name,
+                              char const *size, char const *unit);
+void UiResourceCard_setGauge(UiResourceCard *me, char const *percentText,
+                             char const *value, char const *total,
+                             int32_t percent);
 
 #endif // RESOURCE_CARD_H_

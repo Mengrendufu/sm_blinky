@@ -16,6 +16,7 @@
 #include "asset.h"
 #include "instance/nvm_blinky.h"
 #include "instance/nvm_boot.h"
+#include "nvm_port.h"
 
 SM_DEFINE_MODULE("sm_ui")
 
@@ -131,6 +132,8 @@ void Sm_Ui_bindDisplay(Sm_Ui * const me,
     SM_REQUIRE(operations->setBacklight != NULL);
     SM_REQUIRE(operations->readFps != NULL);
     SM_REQUIRE(operations->readCpuSample != NULL);
+    SM_REQUIRE(operations->readThread != NULL);
+    SM_REQUIRE(operations->readResource != NULL);
     me->display = operations;
 }
 //............................................................................
@@ -146,17 +149,24 @@ void Sm_Ui_ctor(Sm_Ui * const me) {
     static SST_Evt const statsTimeoutEvt = {
         .sig = UI_STATS_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
     };
+    static SST_Evt const threadTimeoutEvt = {
+        .sig = UI_THREAD_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
+    };
+    static SST_Evt const resourceTimeoutEvt = {
+        .sig = UI_RESOURCE_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
+    };
     static TimeEvt_PostOperations const delivery = {
         .context = NULL, .post = Sm_Ui_deliverTimeout_
     };
     SM_REQUIRE(me != NULL);
-    me->ledOn = false;
     me->topbar = (UiTopbar){0};
     me->pageTitle = (UiPageTitle){0};
     me->bootCount = (UiBootCount){0};
     me->resourceMonitor = (UiResourceMonitor){0};
     TimeEvt_ctor(&me->stateTimeout, &stateTimeoutEvt, &delivery);
     TimeEvt_ctor(&me->statsTimeout, &statsTimeoutEvt, &delivery);
+    TimeEvt_ctor(&me->threadTimeout, &threadTimeoutEvt, &delivery);
+    TimeEvt_ctor(&me->resourceTimeout, &resourceTimeoutEvt, &delivery);
 }
 //............................................................................
 void Sm_Ui_init(Sm_Ui * const me) {
@@ -276,8 +286,10 @@ static SM_RetState Sm_Ui_readyShow_(SM_Hsm * const me, SST_Evt const * const e) 
 static void Sm_Ui_active_entry_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
     UiTopbar_create(&self->topbar, self->root.container, lv_pct(100), 17);
-    UiTopbar_setLed(&self->topbar, self->ledOn);
-    UiTopbar_setCount(&self->topbar, NvmBlinky_get()->edges);
+    NVM_PORT_ENTER();
+    uint32_t const edges = NvmBlinky_get()->edges;
+    NVM_PORT_EXIT();
+    UiTopbar_setCount(&self->topbar, edges);
     self->display->readCpuSample(self->display->context,
                                  &self->cpuIdle, &self->cpuTotal);
     uint32_t const fps = self->display->readFps(self->display->context);
@@ -310,11 +322,14 @@ static SM_RetState Sm_Ui_active_(SM_Hsm * const me, SST_Evt const * const e) SM_
             return _SM_HANDLED();
         }
         case UI_LED_ON_SIG:
-        case UI_LED_OFF_SIG:
-            self->ledOn = e->sig == UI_LED_ON_SIG;
-            UiTopbar_setLed(&self->topbar, self->ledOn);
-            UiTopbar_setCount(&self->topbar, NvmBlinky_get()->edges);
+        case UI_LED_OFF_SIG: {
+            UiTopbar_setLed(&self->topbar, e->sig == UI_LED_ON_SIG);
+            NVM_PORT_ENTER();
+            uint32_t const edges = NvmBlinky_get()->edges;
+            NVM_PORT_EXIT();
+            UiTopbar_setCount(&self->topbar, edges);
             return _SM_HANDLED();
+        }
         default:
             return _SM_SUPER();
     }
@@ -325,6 +340,80 @@ static SM_StatePtr Sm_Ui_active_initial_(SM_Hsm * const me) SM_HSM_RETT {
     return _SM_INIT(&Sm_Ui_sysInfo);
 }
 
+static void Sm_Ui_bindThread_(Sm_Ui *self, unsigned slot, unsigned index) {
+    Sm_Ui_ThreadSample sample;
+    self->display->readThread(self->display->context, index, &sample);
+    SM_ASSERT(sample.name != NULL);
+    SM_ASSERT(sample.stackBytes > 0U);
+    SM_ASSERT(sample.stackMinBytes <= sample.stackBytes);
+    UiThreadCard * const card = &self->threadMonitor.cards[slot];
+    lv_snprintf(self->threadPriority[slot],
+                 sizeof(self->threadPriority[slot]),
+                 "P%lu", (unsigned long)sample.priority);
+    lv_snprintf(self->threadStack[slot], sizeof(self->threadStack[slot]),
+                 "min %lu/%lu", (unsigned long)sample.stackMinBytes,
+                 (unsigned long)sample.stackBytes);
+    UiThreadCard_setHeader(card, sample.name, self->threadPriority[slot]);
+    UiThreadCard_setResource(card, UI_THREAD_CARD_STACK,
+        self->threadStack[slot], "B",
+        (int32_t)((uint64_t)sample.stackMinBytes * 100U / sample.stackBytes));
+    int32_t queuePercent = 0;
+    if (sample.queueKnown) {
+        SM_ASSERT(sample.queueTotal > 0U);
+        SM_ASSERT(sample.queueFree <= sample.queueTotal);
+        lv_snprintf(self->threadQueue[slot],
+            sizeof(self->threadQueue[slot]), "min %lu/%lu",
+            (unsigned long)sample.queueFree,
+            (unsigned long)sample.queueTotal);
+        queuePercent = (int32_t)(
+            (uint64_t)sample.queueFree * 100U / sample.queueTotal);
+    }
+    else if (sample.queueTotal != 0U) {
+        lv_snprintf(self->threadQueue[slot],
+            sizeof(self->threadQueue[slot]), "--/%lu",
+            (unsigned long)sample.queueTotal);
+    }
+    else {
+        lv_snprintf(self->threadQueue[slot],
+                     sizeof(self->threadQueue[slot]), "N/A");
+    }
+    UiThreadCard_setResource(card, UI_THREAD_CARD_INBOX,
+                             self->threadQueue[slot], "slots", queuePercent);
+    lv_obj_set_style_opa(card->resources[UI_THREAD_CARD_INBOX].bar,
+        sample.queueKnown ? LV_OPA_COVER : LV_OPA_30, LV_PART_MAIN);
+}
+
+static void Sm_Ui_bindResource_(Sm_Ui *self, unsigned slot, unsigned index) {
+    Sm_Ui_ResourceSample sample;
+    self->display->readResource(self->display->context, index, &sample);
+    SM_ASSERT(sample.name != NULL);
+    SM_ASSERT(sample.value <= sample.total);
+    UiResourceCard * const card = &self->resourceMonitor.cards[slot];
+    lv_obj_set_style_opa(card->arc,
+        sample.total == 0U ? LV_OPA_30 : LV_OPA_COVER, LV_PART_MAIN);
+    if (sample.total == 0U) {
+        UiResourceCard_setHeader(card, sample.name, "--", "B");
+        UiResourceCard_setGauge(card, "--%", "--", "--", 0);
+        return;
+    }
+    uint32_t const percent = (uint32_t)(
+        (uint64_t)sample.value * 100U / sample.total);
+    lv_snprintf(self->resourceSize[slot], sizeof(self->resourceSize[slot]),
+                 "%lu", (unsigned long)sample.blockBytes);
+    lv_snprintf(self->resourcePercent[slot],
+                 sizeof(self->resourcePercent[slot]),
+                 "%lu%%", (unsigned long)percent);
+    lv_snprintf(self->resourceValue[slot], sizeof(self->resourceValue[slot]),
+                 "%lu", (unsigned long)sample.value);
+    lv_snprintf(self->resourceTotal[slot], sizeof(self->resourceTotal[slot]),
+                 "%lu", (unsigned long)sample.total);
+    UiResourceCard_setHeader(card, sample.name,
+                              self->resourceSize[slot], "B");
+    UiResourceCard_setGauge(card, self->resourcePercent[slot],
+        self->resourceValue[slot], self->resourceTotal[slot],
+        (int32_t)percent);
+}
+
 static void Sm_Ui_sysInfo_entry_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
     // Page-owned background; a missing slot leaves the root black.
@@ -332,21 +421,72 @@ static void Sm_Ui_sysInfo_entry_(SM_Hsm * const me) SM_HSM_RETT {
                     &self->bootCount, &self->threadMonitor,
                     &self->resourceMonitor,
                     Asset_slot(Asset_get(), 0U));
-    UiBootCount_setCount(&self->bootCount, NvmBoot_get()->count);
+    NVM_PORT_ENTER();
+    uint32_t const boots = NvmBoot_get()->count;
+    NVM_PORT_EXIT();
+    UiBootCount_setCount(&self->bootCount, boots);
+    self->threadIndex = 0U;
+    self->threadSlot = 0U;
+    Sm_Ui_bindThread_(self, 0U, 0U);
+    Sm_Ui_bindThread_(self, 1U, 1U);
+    self->resourceIndex = 0U;
+    self->resourceSlot = 0U;
+    Sm_Ui_bindResource_(self, 0U, 0U);
+    Sm_Ui_bindResource_(self, 1U, 1U);
+    TimeEvt_arm(&self->threadTimeout,
+                 UI_THREAD_DWELL_TICKS, UI_THREAD_DWELL_TICKS);
+    TimeEvt_arm(&self->resourceTimeout,
+                 UI_THREAD_DWELL_TICKS, UI_THREAD_DWELL_TICKS);
     // TimeEvt_arm(&self->stateTimeout, UI_SYS_INFO_TICKS, 0U);
 }
 
 static void Sm_Ui_sysInfo_exit_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
     (void)TimeEvt_disarm(&self->stateTimeout);
+    (void)TimeEvt_disarm(&self->threadTimeout);
+    (void)TimeEvt_disarm(&self->resourceTimeout);
     UiSysInfo_hide(&self->root, &self->pageTitle,
                    &self->bootCount, &self->threadMonitor,
                    &self->resourceMonitor);
 }
 
 static SM_RetState Sm_Ui_sysInfo_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
-    (void)me;
+    Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
     switch (e->sig) {
+        case UI_STATS_TIMEOUT_SIG:
+            Sm_Ui_bindThread_(self, self->threadSlot, self->threadIndex);
+            Sm_Ui_bindResource_(self, self->resourceSlot,
+                                self->resourceIndex);
+            return _SM_SUPER();
+        case UI_RESOURCE_TIMEOUT_SIG: {
+            if (self->resourceMonitor.sliding) {
+                return _SM_HANDLED();
+            }
+            unsigned const next = self->resourceSlot ^ 1U;
+            self->resourceIndex =
+                (self->resourceIndex + 1U) % UI_RESOURCE_COUNT;
+            Sm_Ui_bindResource_(self, next, self->resourceIndex);
+            UiResourceMonitor_slide(&self->resourceMonitor,
+                (uint8_t)self->resourceSlot, (uint8_t)next);
+            self->resourceSlot = next;
+            UiDots_setActive(&self->resourceMonitor.dots,
+                              (uint8_t)self->resourceIndex);
+            return _SM_HANDLED();
+        }
+        case UI_THREAD_TIMEOUT_SIG: {
+            if (self->threadMonitor.sliding) {
+                return _SM_HANDLED();
+            }
+            unsigned const next = self->threadSlot ^ 1U;
+            self->threadIndex = (self->threadIndex + 1U) % UI_THREAD_COUNT;
+            Sm_Ui_bindThread_(self, next, self->threadIndex);
+            UiThreadMonitor_slide(&self->threadMonitor,
+                (uint8_t)self->threadSlot, (uint8_t)next);
+            self->threadSlot = next;
+            UiDots_setActive(&self->threadMonitor.dots,
+                              (uint8_t)self->threadIndex);
+            return _SM_HANDLED();
+        }
         case UI_STATE_TIMEOUT_SIG:
             return _SM_TRAN(&Sm_Ui_liveShow);
         default:

@@ -1,6 +1,8 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "sst.h"
+#include <stdbool.h>
+#include <string.h>
 
 // CPU load, sampled on the tick: how many of the last N ticks found the idle
 // task on the CPU. FreeRTOS ticks at 1 kHz, independently of the 100 Hz
@@ -10,6 +12,34 @@
 // The tracer's pump runs inside idle, so pumping records reads as idle.
 static volatile uint32_t BSP_cpuIdle_;
 static volatile uint32_t BSP_cpuTicks_;
+static void *BSP_timerQueue_;
+static uint32_t BSP_timerQueueMinFree_ = configTIMER_QUEUE_LENGTH;
+
+// FreeRTOS registers this private command queue as "TmrQ".
+void BSP_timerQueueRegister(void *queue, char const *name) {
+    if (strcmp(name, "TmrQ") == 0) {
+        BSP_timerQueue_ = queue;
+    }
+}
+
+void BSP_timerQueueSent(void *queue, uint32_t usedBefore, uint32_t total) {
+    if (queue == BSP_timerQueue_ && BSP_timerQueue_ != NULL) {
+        configASSERT(usedBefore < total);
+        uint32_t const freeSlots = total - usedBefore - 1U;
+        if (freeSlots < BSP_timerQueueMinFree_) {
+            BSP_timerQueueMinFree_ = freeSlots;
+        }
+    }
+}
+
+bool BSP_timerQueueSample(uint32_t *minimum, uint32_t *total) {
+    taskENTER_CRITICAL();
+    *minimum = BSP_timerQueueMinFree_;
+    *total = configTIMER_QUEUE_LENGTH;
+    bool const known = BSP_timerQueue_ != NULL;
+    taskEXIT_CRITICAL();
+    return known;
+}
 
 void vApplicationTickHook(void) {
     if (xTaskGetCurrentTaskHandle() == xTaskGetIdleTaskHandle()) {

@@ -18,6 +18,10 @@
 #include "ui_evt.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "timers.h"
+#include "flash.h"
+#include "aos/blinky/blinky.h"
+#include "sm_tracer.h"
 
 //============================================================================
 // Task storage: the UI owns its stack, so the size shows up here and in the
@@ -110,12 +114,87 @@ static void Ui_readCpuSample_(void *context,
     taskEXIT_CRITICAL();
 }
 
+static void Ui_readThread_(void *context, unsigned index,
+                           Sm_Ui_ThreadSample *sample) {
+    (void)context;
+    configASSERT(index < UI_THREAD_COUNT && sample != NULL);
+    TaskHandle_t const threads[UI_THREAD_COUNT] = {
+        Ui_handle_, AO_Blinky->thread, AO_Flash->thread,
+        xTaskGetIdleTaskHandle(), xTimerGetTimerDaemonTaskHandle()
+    };
+    configASSERT(threads[index] != NULL);
+    TaskStatus_t status;
+    vTaskGetInfo(threads[index], &status, pdTRUE, eInvalid);
+    *sample = (Sm_Ui_ThreadSample){
+        .name = status.pcTaskName,
+        .priority = status.uxCurrentPriority,
+        .stackMinBytes = status.usStackHighWaterMark * sizeof(StackType_t),
+        .stackBytes = (uint32_t)(status.pxEndOfStack - status.pxStackBase
+                                + 1U) * sizeof(StackType_t)
+    };
+    if (index == 0U) {
+        sample->queueFree = Ui_evtInboxMinFree();
+        sample->queueTotal = Ui_evtInboxLen();
+        sample->queueKnown = true;
+    }
+    else if (index == 1U || index == 2U) {
+        SST_Task const * const ao = index == 1U ? AO_Blinky : AO_Flash;
+        taskENTER_CRITICAL();
+        sample->queueTotal = (unsigned)ao->end + 1U;
+        sample->queueFree = ao->queueMinFree;
+        taskEXIT_CRITICAL();
+        sample->queueKnown = true;
+    }
+    else if (index == 4U) {
+        sample->queueKnown = BSP_timerQueueSample(
+            &sample->queueFree, &sample->queueTotal);
+    }
+}
+
+static void Ui_readResource_(void *context, unsigned index,
+                             Sm_Ui_ResourceSample *sample) {
+    (void)context;
+    configASSERT(index < UI_RESOURCE_COUNT && sample != NULL);
+    if (index < 2U) {
+        SST_EvtPoolLevel const level = SST_EvtPool_level(index + 1U);
+        *sample = (Sm_Ui_ResourceSample){
+            .name = index == 0U ? "Small min free" : "Medium min free",
+            .blockBytes = level.blockSize,
+            .value = level.min, .total = level.total
+        };
+    }
+    else if (index == 2U) {
+        // Display slot only: no third SST pool is registered yet.
+        *sample = (Sm_Ui_ResourceSample){.name = "Big reserved"};
+    }
+    else if (index == 3U) {
+        taskENTER_CRITICAL();
+        *sample = (Sm_Ui_ResourceSample){
+            .name = "Tracer min free",
+            .blockBytes = SM_Tracer_inst.blockSize,
+            .value = SM_Tracer_inst.nMin, .total = SM_Tracer_inst.nTot
+        };
+        taskEXIT_CRITICAL();
+    }
+    else {
+        lv_mem_monitor_t memory;
+        lv_mem_monitor(&memory);
+        *sample = (Sm_Ui_ResourceSample){
+            .name = "LVGL peak used", .blockBytes = 1U,
+            .value = (uint32_t)memory.max_used,
+            .total = (uint32_t)memory.total_size
+        };
+    }
+}
+
 static void Ui_bindDisplay_(void) {
     static Sm_Ui_DisplayOperations const operations = {
         .context = NULL,
         .setBacklight = Ui_setBacklight_,
         .readFps = Ui_readFps_,
-        .readCpuSample = Ui_readCpuSample_
+        .readCpuSample = Ui_readCpuSample_,
+        .readThread = Ui_readThread_,
+        .readResource = Ui_readResource_
     };
 
     Sm_Ui_bindDisplay(&Ui_sm_, &operations);

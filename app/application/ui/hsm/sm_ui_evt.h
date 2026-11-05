@@ -23,7 +23,9 @@ enum {
     UI_GO_SPLASHING_SIG,
     // Shared by mutually exclusive Splash/Sys/Live deadline owners.
     UI_STATE_TIMEOUT_SIG,
-    UI_STATS_TIMEOUT_SIG
+    UI_STATS_TIMEOUT_SIG,
+    UI_THREAD_TIMEOUT_SIG,
+    UI_RESOURCE_TIMEOUT_SIG
 };
 
 #endif // SM_UI_EVT_H_

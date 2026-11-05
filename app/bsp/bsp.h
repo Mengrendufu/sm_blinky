@@ -45,6 +45,8 @@ void BSP_ledOff(void);
 // CPU load as seen from the tick: the idle sample count and the tick count,
 // to be differenced by the caller over its own window (see freertos_hooks.c).
 void BSP_cpuSample(uint32_t *idle, uint32_t *total);
+// Lowest command-queue free slots since creation; false until registered.
+bool BSP_timerQueueSample(uint32_t *minimum, uint32_t *total);
 
 
 #endif // BSP_H_

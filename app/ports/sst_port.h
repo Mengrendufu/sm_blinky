@@ -39,10 +39,12 @@ typedef uint16_t SST_TaskPrio;
     TaskHandle_t thread; \
     StaticTask_t *tcb; \
     StackType_t *stack; \
-    configSTACK_DEPTH_TYPE stackSizeWords;
+    configSTACK_DEPTH_TYPE stackSizeWords; \
+    SST_QCtr queueMinFree;
 //............................................................................
 // additional SST-PORT task operations for ARM Cortex-M
 #define SST_PORT_TASK_OPER                                                   \
+    void SST_Task_pend(SST_Task * const me);                                 \
     void SST_Task_activate(SST_Task * const me);                             \
     void SST_Task_setPrio(SST_Task * const me, SST_TaskPrio prio);           \
     bool SST_Task_postFromISR(SST_Task * const me,                           \
@@ -61,7 +63,7 @@ typedef uint16_t SST_TaskPrio;
 // SST-PORT pend the Task after posting an eve
 // @NOTE: executed inside SST critical section.
 #define SST_PORT_TASK_PEND() \
-    ((void)xTaskNotifyGiveIndexed(me->thread, SST_TASK_NOTIFY_INDEX))
+    SST_Task_pend(me)
 
 //============================================================================
 // the idle SST callback for this SST port

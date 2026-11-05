@@ -33,14 +33,9 @@ void UiSysInfo_build(UiRoot *root, UiPageTitle *pageTitle,
     lv_obj_set_style_margin_top(pageTitle->container, 1, LV_PART_MAIN);
     UiBootCount_create(bootCount, pageTitle->container, 106, 12);
     lv_obj_align(bootCount->container, LV_ALIGN_RIGHT_MID, 0, 0);
-    UiThreadMonitor_create(monitor, root->container, lv_pct(100), 105);
+    UiThreadMonitor_create(monitor, root->container, lv_pct(100), 105, 5);
     // Root owns the side spacing; keep the Figma y=59 rounding in Flex.
     lv_obj_set_style_margin_top(monitor->container, 2, LV_PART_MAIN);
-    UiThreadCard_setHeader(&monitor->cards[0], "Thread", "--");
-    UiThreadCard_setResource(&monitor->cards[0], UI_THREAD_CARD_STACK,
-                             "--", "B", 0);
-    UiThreadCard_setResource(&monitor->cards[0], UI_THREAD_CARD_INBOX,
-                             "--", "slots", 0);
     UiResourceMonitor_create(resourceMonitor, root->container,
                               lv_pct(100), 144);
 }

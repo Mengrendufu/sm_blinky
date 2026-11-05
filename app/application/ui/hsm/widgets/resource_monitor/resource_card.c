@@ -67,9 +67,9 @@ void UiResourceCard_create(UiResourceCard *me, lv_obj_t *parent,
     me->name = UiResourceCard_label_(me->header, 174, "--",
                                      LV_TEXT_ALIGN_LEFT);
     lv_obj_align(me->name, LV_ALIGN_TOP_LEFT, 2, 0);
-    me->sizeGroup = UiResourceCard_container_(me->header, 27, 17);
+    me->sizeGroup = UiResourceCard_container_(me->header, 43, 17);
     lv_obj_align(me->sizeGroup, LV_ALIGN_TOP_RIGHT, -2, 0);
-    me->size = UiResourceCard_label_(me->sizeGroup, 16, "--",
+    me->size = UiResourceCard_label_(me->sizeGroup, 32, "--",
                                      LV_TEXT_ALIGN_RIGHT);
     me->unit = UiResourceCard_label_(me->sizeGroup, 11, "B",
                                      LV_TEXT_ALIGN_RIGHT);
@@ -93,12 +93,12 @@ void UiResourceCard_create(UiResourceCard *me, lv_obj_t *parent,
     lv_obj_set_pos(me->percent, 33, 21);
 
     me->range = UiResourceCard_container_(me->container, lv_pct(100), 17);
-    me->minimum = UiResourceCard_label_(me->range, 10, "E",
+    me->minimum = UiResourceCard_label_(me->range, 48, "E",
                                         LV_TEXT_ALIGN_LEFT);
-    lv_obj_align(me->minimum, LV_ALIGN_TOP_MID, -47, 0);
-    me->maximum = UiResourceCard_label_(me->range, 34, "--",
+    lv_obj_align(me->minimum, LV_ALIGN_TOP_MID, -28, 0);
+    me->maximum = UiResourceCard_label_(me->range, 48, "--",
                                         LV_TEXT_ALIGN_RIGHT);
-    lv_obj_align(me->maximum, LV_ALIGN_TOP_MID, 35, 0);
+    lv_obj_align(me->maximum, LV_ALIGN_TOP_MID, 42, 0);
 }
 
 void UiResourceCard_destroy(UiResourceCard *me) {
@@ -107,4 +107,25 @@ void UiResourceCard_destroy(UiResourceCard *me) {
         lv_obj_delete(me->container);
     }
     *me = (UiResourceCard){0};
+}
+
+void UiResourceCard_setHeader(UiResourceCard *me, char const *name,
+                              char const *size, char const *unit) {
+    SM_REQUIRE(me != NULL && me->container != NULL);
+    SM_REQUIRE(name != NULL && size != NULL && unit != NULL);
+    lv_label_set_text_static(me->name, name);
+    lv_label_set_text_static(me->size, size);
+    lv_label_set_text_static(me->unit, unit);
+}
+
+void UiResourceCard_setGauge(UiResourceCard *me, char const *percentText,
+                             char const *value, char const *total,
+                             int32_t percent) {
+    SM_REQUIRE(me != NULL && me->container != NULL);
+    SM_REQUIRE(percentText != NULL && value != NULL && total != NULL);
+    SM_REQUIRE(percent >= 0 && percent <= 100);
+    lv_label_set_text_static(me->percent, percentText);
+    lv_label_set_text_static(me->minimum, value);
+    lv_label_set_text_static(me->maximum, total);
+    lv_arc_set_value(me->arc, percent);
 }

@@ -7,7 +7,7 @@ typedef uint16_t SST_TaskPrio;
 typedef unsigned SST_LockKey;
 #define SST_PORT_TASK_ATTR \
     TaskHandle_t thread; StaticTask_t *tcb; StackType_t *stack; \
-    configSTACK_DEPTH_TYPE stackSizeWords;
+    configSTACK_DEPTH_TYPE stackSizeWords; SST_QCtr queueMinFree;
 #define SST_PORT_TASK_OPER \
     void SST_Task_activate(SST_Task *me); \
     void SST_Task_setPrio(SST_Task *me,SST_TaskPrio prio);

@@ -62,6 +62,7 @@ void SST_Task_setPrio(SST_Task * const me, SST_TaskPrio prio) {
     configASSERT(stackWords > 0U);
     configASSERT(freertosPrio < (uint8_t)configMAX_PRIORITIES);
     configASSERT(SST_tasks_[sstPrio] == (SST_Task *)0);
+    me->queueMinFree = (SST_QCtr)(me->end + 1U);
     me->prio = sstPrio;
     SST_tasks_[sstPrio] = me;
     me->thread = xTaskCreateStatic(
@@ -76,6 +77,19 @@ void SST_Task_setPrio(SST_Task * const me, SST_TaskPrio prio) {
     configASSERT(me->thread != (TaskHandle_t)0);
 }
 //............................................................................
+// Called after enqueue, while the task/ISR queue section is still held.
+static void SST_Task_recordQueue_(SST_Task *me) {
+    SST_QCtr const freeSlots = (SST_QCtr)(me->end + 1U - me->nUsed);
+    if (freeSlots < me->queueMinFree) {
+        me->queueMinFree = freeSlots;
+    }
+}
+
+void SST_Task_pend(SST_Task * const me) {
+    SST_Task_recordQueue_(me);
+    (void)xTaskNotifyGiveIndexed(me->thread, SST_TASK_NOTIFY_INDEX);
+}
+
 void SST_Task_activate(SST_Task * const me) {
     taskENTER_CRITICAL();
     if (me->nUsed == 0U) {           /* 队列为空（防御） */
@@ -111,6 +125,7 @@ bool SST_Task_postFromISR(SST_Task * const me,
         --me->head;
     }
     ++me->nUsed;
+    SST_Task_recordQueue_(me);
     taskEXIT_CRITICAL_FROM_ISR(isrStatus);
 
     // activate thread

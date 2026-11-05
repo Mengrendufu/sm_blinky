@@ -19,7 +19,8 @@ void NvmBlinky_ctor(NvmManager *mgr);
 // writes issued before restore are clobbered by the load commit.
 void NvmBlinky_add(uint32_t edges);
 
-// The live block is the single snapshot; readers get it directly.
+// Borrow the live block, not a snapshot. Caller holds NVM_PORT_ENTER/EXIT
+// while reading its contents; copy needed values before leaving the section.
 NvmBlinkyData const *NvmBlinky_get(void);
 
 #endif /* NVM_BLINKY_H_ */

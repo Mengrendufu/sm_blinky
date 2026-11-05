@@ -20,6 +20,7 @@
 #include "nvs.h"
 #include "instance/nvm_boot.h"
 #include "instance/nvm_blinky.h"
+#include "nvm_port.h"
 #include "sm_tracer.h"
 
 #include "FreeRTOS.h"
@@ -110,7 +111,10 @@ static void Flash_nvsBoot_(void) {
     Flash_dbgNvsValue_(FLASH_TRACE_NVS_INIT_MS, initMs);
     Flash_dbgNvsValue_(FLASH_TRACE_NVS_RESTORE_RESULT,
                        (uint32_t)(int32_t)result);
-    Flash_dbgNvsValue_(FLASH_TRACE_NVM_BOOT_COUNT, NvmBoot_get()->count);
+    NVM_PORT_ENTER();
+    uint32_t const boots = NvmBoot_get()->count;
+    NVM_PORT_EXIT();
+    Flash_dbgNvsValue_(FLASH_TRACE_NVM_BOOT_COUNT, boots);
 }
 
 //============================================================================

@@ -39,6 +39,27 @@
 #define UI_SYS_INFO_TICKS    500U
 #define UI_LIVE_SHOW_TICKS   1000U
 #define UI_STATS_TICKS       100U
+#define UI_THREAD_DWELL_TICKS 250U
+#define UI_THREAD_COUNT        5U
+#define UI_RESOURCE_COUNT      5U
+
+typedef struct {
+    char const *name;
+    uint32_t priority;
+    uint32_t stackMinBytes;
+    uint32_t stackBytes;
+    uint32_t queueFree;
+    uint32_t queueTotal;
+    bool queueKnown;
+} Sm_Ui_ThreadSample;
+
+typedef struct {
+    char const *name;
+    uint32_t blockBytes;
+    uint32_t value;
+    // Zero means an unbound reserved resource; display unknown, not 0%.
+    uint32_t total;
+} Sm_Ui_ResourceSample;
 
 // Required display capabilities, called synchronously on the UI thread.
 // Bind before initialization; the immutable table/context outlive the HSM.
@@ -47,6 +68,11 @@ typedef struct {
     void (*setBacklight)(void *context, bool on);
     uint32_t (*readFps)(void *context);
     void (*readCpuSample)(void *context, uint32_t *idle, uint32_t *total);
+    // Fixed roster: UI, Blinky, Flash, Idle, Timer daemon.
+    void (*readThread)(void *context, unsigned index,
+                        Sm_Ui_ThreadSample *sample);
+    void (*readResource)(void *context, unsigned index,
+                          Sm_Ui_ResourceSample *sample);
 } Sm_Ui_DisplayOperations;
 
 typedef struct {
@@ -55,9 +81,22 @@ typedef struct {
     // Registered before scheduling; states directly arm/disarm their nodes.
     TimeEvt stateTimeout;
     TimeEvt statsTimeout;
+    TimeEvt threadTimeout;
+    TimeEvt resourceTimeout;
+    unsigned resourceIndex;
+    unsigned resourceSlot;
+    char resourceSize[2][12];
+    char resourcePercent[2][8];
+    char resourceValue[2][12];
+    char resourceTotal[2][12];
+    unsigned threadIndex;
+    unsigned threadSlot;
+    // Card setters borrow these strings until the slot is rebound.
+    char threadPriority[2][12];
+    char threadStack[2][32];
+    char threadQueue[2][32];
     uint32_t cpuIdle;
     uint32_t cpuTotal;
-    bool ledOn;
 
     // The one persistent content container; Splash borrows its
     // background, no second object. Its COLUMN flex stacks page
@@ -72,9 +111,9 @@ typedef struct {
     // SysInfo-only boot-count group, composed under pageTitle by
     // the page helper; reads the restored count on page entry.
     UiBootCount bootCount;
-    // SysInfo-owned two-card monitor; no resource sampling or animation.
+    // SysInfo-owned two-card monitor; sampled data and sliding pagination.
     UiThreadMonitor threadMonitor;
-    // SysInfo-owned lower skeleton monitor; no contents yet.
+    // SysInfo-owned resource watermarks and sliding pagination.
     UiResourceMonitor resourceMonitor;
 } Sm_Ui;
 

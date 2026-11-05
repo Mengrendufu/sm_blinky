@@ -18,7 +18,8 @@ void NvmBoot_ctor(NvmManager *mgr);
 // Post-restore business step: the loaded count gains this boot.
 void NvmBoot_inc(void);
 
-// The live block is the single snapshot; readers get it directly.
+// Borrow the live block, not a snapshot. Caller holds NVM_PORT_ENTER/EXIT
+// while reading its contents; copy needed values before leaving the section.
 NvmBootData const *NvmBoot_get(void);
 
 #endif /* NVM_BOOT_H_ */
