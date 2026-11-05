@@ -22,13 +22,18 @@
 #include "ui_evt_priv.h"
 #include "time_evt.h"
 #include "asset.h"
-#include "nvm.h"
+#include "instance/nvm_boot.h"
+#include "instance/nvm_blinky.h"
 #include "nvs.h"
 #include "flash.h"
 #include "sm_flash_evt.h"
 #include "sm_tracer.h"
 #include "ui_disp_priv.h"
 // UI accesses RAM only; persistence must remain on the Flash AO.
+void *nvs_port_device(void){return (void *)1;}
+int nvs_mount(struct nvs_fs *fs){
+    (void)fs;assert(!"unexpected UI storage mount");return -1;
+}
 ssize_t nvs_read(struct nvs_fs *fs,uint16_t id,void *dst,size_t size){
     (void)fs;(void)id;(void)dst;(void)size;
     assert(!"unexpected UI storage read");return -1;
@@ -47,6 +52,8 @@ void SM_Trace_push(SM_Tracer * const me,unsigned char *frame) {
     (void)me;(void)frame;assert(!"unexpected UI trace");
 }
 static unsigned hostTick,backlight,scenario;
+static uint32_t hostFps=30,hostIdle,hostTotal;
+static char const *expectedCpu="0%";
 static Asset assets;
 static uint16_t pixels[3][240*320];
 static uint8_t drawBuffer[240*32*2];
@@ -79,7 +86,11 @@ void const *Asset_slot(Asset const *a,uint32_t slot){
 void const *Asset_splash(void){return scenario==3 ? NULL : pixels[2];}
 void Ui_dispInit(void){}
 void Ui_dispBacklight(bool on){assert(on);++backlight;}
-uint32_t Ui_dispFps(void){return 30;}
+uint32_t Ui_dispFps(void){return hostFps;}
+void BSP_cpuSample(uint32_t *idle,uint32_t *total){
+    assert(Host_critical);
+    *idle=hostIdle;*total=hostTotal;
+}
 TickType_t Ui_dispHeartbeat(void){return 1;}
 // Include the actual thread binding/start/drain implementation. Its RTOS
 // entry stays parked; the host drives the same drain on this single owner.
@@ -667,7 +678,7 @@ static void testPageTitleAndBootCount_(lv_obj_t *root,
     lv_obj_set_pos(sibling,0,40);
     lv_obj_add_flag(sibling,LV_OBJ_FLAG_HIDDEN);
     UiPageTitle pt={0};
-    UiPageTitle_create(&pt,root,title);
+    UiPageTitle_create(&pt,root,236,17,title);
     assert(lv_obj_get_parent(pt.container)==root);
     assert(lv_obj_get_child_count(root)==2);
     assert(countObjs_(pt.container)==2); // Box + title only.
@@ -677,7 +688,7 @@ static void testPageTitleAndBootCount_(lv_obj_t *root,
     assert(lv_obj_get_style_layout(pt.container,0)
            ==LV_LAYOUT_NONE);
     UiBootCount bc={0};
-    UiBootCount_create(&bc,pt.container);
+    UiBootCount_create(&bc,pt.container,106,12);
     lv_obj_align(bc.container,LV_ALIGN_RIGHT_MID,0,0);
     assert(countObjs_(bc.container)==3);
     assert(countObjs_(pt.container)==5);
@@ -825,8 +836,8 @@ static void testPageTitleAndBootCount_(lv_obj_t *root,
     assert(lv_obj_get_child_count(root)==1);
     UiPageTitle_destroy(&pt); // Idempotent when empty.
     for(unsigned i=0;i<10;++i){
-        UiPageTitle_create(&pt,root,title);
-        UiBootCount_create(&bc,pt.container);
+        UiPageTitle_create(&pt,root,236,17,title);
+        UiBootCount_create(&bc,pt.container,106,12);
         UiBootCount_setCount(&bc,i*123456789U);
         UiBootCount_destroy(&bc);
         UiPageTitle_destroy(&pt);
@@ -880,7 +891,7 @@ static void testThreadCard_(lv_obj_t *root,lv_display_t *display){
     UiThreadCard card={0};
     UiThreadCard_destroy(&card);
     for(unsigned pass=0;pass<3;++pass){
-        UiThreadCard_create(&card,root);
+        UiThreadCard_create(&card,root,232,83);
         lv_obj_update_layout(root);
         assert(lv_obj_get_parent(card.container)==root);
         assert(lv_obj_get_child_count(root)==2);
@@ -1102,7 +1113,7 @@ static void testThreadMonitor_(lv_obj_t *root,lv_display_t *display){
     UiThreadMonitor monitor={0};
     UiThreadMonitor_destroy(&monitor);
     for(unsigned pass=0;pass<3;++pass){
-        UiThreadMonitor_create(&monitor,root);
+        UiThreadMonitor_create(&monitor,root,236,105);
         lv_obj_update_layout(root);
         assert(lv_obj_get_child_count(root)==2);
         assert(lv_obj_get_parent(monitor.container)==root);
@@ -1266,7 +1277,7 @@ static void testResourceMonitor_(lv_obj_t *root,lv_display_t *display){
     UiResourceCard card={0};
     UiResourceCard_destroy(&card);
     for(unsigned pass=0;pass<3;++pass){
-        UiResourceCard_create(&card,root);
+        UiResourceCard_create(&card,root,236,118);
         lv_obj_update_layout(root);
         assert(lv_obj_get_parent(card.container)==root);
         checkResourceCard_(&card);
@@ -1302,7 +1313,7 @@ static void testResourceMonitor_(lv_obj_t *root,lv_display_t *display){
     UiResourceMonitor monitor={0};
     UiResourceMonitor_destroy(&monitor);
     for(unsigned pass=0;pass<3;++pass){
-        UiResourceMonitor_create(&monitor,root);
+        UiResourceMonitor_create(&monitor,root,236,144);
         lv_obj_set_pos(monitor.container,2,174);
         lv_obj_update_layout(root);
         assert(lv_obj_get_parent(monitor.container)==root);
@@ -1381,6 +1392,41 @@ static void testResourceMonitor_(lv_obj_t *root,lv_display_t *display){
     assert(lv_obj_get_child_count(root)==0);
     lv_refr_now(display);blank();
 }
+static void testMonitorFill_(lv_obj_t *root){
+    lv_obj_t * const parent=lv_obj_create(root);
+    lv_obj_remove_style_all(parent);
+    lv_obj_set_size(parent,236,144);
+    UiThreadMonitor thread={0};
+    UiResourceMonitor resource={0};
+    UiThreadMonitor_create(&thread,parent,lv_pct(100),lv_pct(100));
+    UiResourceMonitor_create(&resource,parent,lv_pct(100),lv_pct(100));
+    for(unsigned pass=0;pass<2;++pass){
+        int32_t const width=pass?276:236,height=pass?164:144;
+        lv_obj_set_size(parent,width,height);
+        lv_obj_update_layout(root);
+        assert(lv_obj_get_width(thread.container)==width);
+        assert(lv_obj_get_height(thread.container)==height);
+        assert(lv_obj_get_width(thread.viewport)==width-4);
+        assert(lv_obj_get_height(thread.viewport)==height-22);
+        assert(lv_obj_get_width(thread.cards[0].header)==width-4);
+        assert(lv_obj_get_width(thread.cards[0].resources[0].bar)==width-4);
+        assert(xOf_(thread.cards[1].container)-xOf_(thread.viewport)
+               ==width-4);
+        assert(lv_obj_get_width(resource.container)==width);
+        assert(lv_obj_get_height(resource.container)==height);
+        assert(lv_obj_get_height(resource.viewport)==height-26);
+        assert(lv_obj_get_width(resource.cards[0].container)==width);
+        assert(lv_obj_get_height(resource.cards[0].container)==height-26);
+        assert(lv_obj_get_width(resource.cards[0].header)==width);
+        assert(xOf_(resource.cards[1].container)-xOf_(resource.viewport)
+               ==width);
+        assert(xOf_(resource.dots.container)-xOf_(resource.container)
+               ==(width-42)/2);
+    }
+    UiThreadMonitor_destroy(&thread);
+    UiResourceMonitor_destroy(&resource);
+    lv_obj_delete(parent);
+}
 static void checkSplash(bool image){
     checkRootOnly();
     assert(!lv_obj_get_style_bg_image_src(Ui_sm_.root.container,0)
@@ -1395,22 +1441,48 @@ static void checkSplash(bool image){
     assert(Ui_sm_.threadMonitor.container==NULL);
     assert(Ui_sm_.resourceMonitor.container==NULL);
 }
-// Topbar owns its edge spacing as internal Flex padding, not an
-// external caller offset.
+// Figma's 2 px page spacing belongs to Root, not the Topbar.
 static void checkTopbarPads_(lv_obj_t const *o){
-    assert(lv_obj_get_style_pad_top(o,0)==2);
-    assert(lv_obj_get_style_pad_bottom(o,0)==2);
-    assert(lv_obj_get_style_pad_left(o,0)==2);
-    assert(lv_obj_get_style_pad_right(o,0)==2);
+    assert(lv_obj_get_style_pad_top(o,0)==0);
+    assert(lv_obj_get_style_pad_bottom(o,0)==0);
+    assert(lv_obj_get_style_pad_left(o,0)==0);
+    assert(lv_obj_get_style_pad_right(o,0)==0);
     assert(lv_obj_get_style_pad_row(o,0)==0);
     assert(lv_obj_get_style_pad_column(o,0)==0);
+}
+static void checkTopbarLayout_(UiTopbar const *bar){
+    lv_obj_t * const box=bar->container;
+    int32_t const x=xOf_(box),y=yOf_(box);
+    assert(lv_obj_get_width(box)==236&&lv_obj_get_height(box)==17);
+    checkTopbarPads_(box);
+    lv_obj_t * const left=lv_obj_get_parent(bar->led);
+    lv_obj_t * const right=lv_obj_get_parent(bar->fps);
+    assert(lv_obj_get_parent(left)==box);
+    assert(lv_obj_get_parent(right)==box);
+    assert(xOf_(left)==x&&yOf_(left)==y);
+    assert(lv_obj_get_width(left)==99&&lv_obj_get_height(left)==17);
+    assert(lv_obj_get_width(right)==93&&lv_obj_get_height(right)==17);
+    assert(xOf_(bar->led)==x&&yOf_(bar->led)==y+4);
+    assert(xOf_(bar->blinkyCount)==x+13);
+    assert(xOf_(bar->fps)==x+143);
+    assert(xOf_(bar->cpu)==x+200);
+    // Figma's exclusive right edges are 101/200/238 on a 240 px page.
+    assert(xOf_(bar->blinkyCount)+lv_obj_get_width(bar->blinkyCount)==x+99);
+    assert(xOf_(bar->fps)+lv_obj_get_width(bar->fps)==x+198);
+    assert(xOf_(bar->cpu)+lv_obj_get_width(bar->cpu)==x+236);
+    assert(xOf_(bar->cpu)-xOf_(bar->fps)-lv_obj_get_width(bar->fps)==2);
+    lv_obj_t * const labels[]={bar->blinkyCount,bar->fps,bar->cpu};
+    for(unsigned i=0;i<3;++i){
+        assert(yOf_(labels[i])==y&&lv_obj_get_height(labels[i])==17);
+        assert(lv_obj_get_style_text_align(labels[i],0)==LV_TEXT_ALIGN_RIGHT);
+    }
 }
 static void checkMountedMonitor_(UiThreadMonitor const *monitor){
     lv_obj_t * const box=monitor->container;
     assert(box!=NULL&&monitor->viewport!=NULL);
     assert(xOf_(box)==2&&yOf_(box)==59);
     assert(lv_obj_get_width(box)==236&&lv_obj_get_height(box)==105);
-    assert(lv_obj_get_style_margin_left(box,0)==2);
+    assert(lv_obj_get_style_margin_left(box,0)==0);
     assert(lv_obj_get_style_margin_top(box,0)==2);
     assert(!lv_obj_has_flag(box,LV_OBJ_FLAG_IGNORE_LAYOUT));
     assert(xOf_(monitor->viewport)==4&&yOf_(monitor->viewport)==65);
@@ -1437,7 +1509,7 @@ static void checkMountedResourceMonitor_(
     assert(xOf_(box)==2&&yOf_(box)==174);
     assert(lv_obj_get_width(box)==236
            &&lv_obj_get_height(box)==144);
-    assert(lv_obj_get_style_margin_left(box,0)==2);
+    assert(lv_obj_get_style_margin_left(box,0)==0);
     assert(!lv_obj_has_flag(box,LV_OBJ_FLAG_IGNORE_LAYOUT));
     assert(countObjs_(box)==32);
     assert(xOf_(monitor->viewport)==2);
@@ -1469,7 +1541,12 @@ static void checkActiveTopbar(uint16_t const *bg,
     checkTopbarPads_(top);
     lv_obj_update_layout(root);
     lv_area_t a;lv_obj_get_coords(top,&a);
-    assert(a.x2-a.x1+1==236&&a.y2-a.y1+1==20);
+    assert(a.x1==2&&a.y1==2);
+    checkTopbarLayout_(&Ui_sm_.topbar);
+    assert(lv_obj_get_style_pad_top(root,0)==2);
+    assert(lv_obj_get_style_pad_bottom(root,0)==2);
+    assert(lv_obj_get_style_pad_left(root,0)==2);
+    assert(lv_obj_get_style_pad_right(root,0)==2);
     lv_area_t ta={0,0,0,0};
     lv_area_t ma={0,0,0,0};
     lv_area_t ra={0,0,0,0};
@@ -1488,14 +1565,14 @@ static void checkActiveTopbar(uint16_t const *bg,
                ==Ui_sm_.pageTitle.container);
         assert(countObjs_(Ui_sm_.bootCount.container)==3);
         assert(!strcmp(lv_label_get_text(
-            Ui_sm_.bootCount.count),"0"));
+            Ui_sm_.bootCount.count),"1"));
         assert(lv_obj_get_style_flex_flow(root,0)
                ==LV_FLEX_FLOW_COLUMN);
         assert(lv_obj_get_style_pad_row(root,0)==10);
         lv_obj_get_coords(Ui_sm_.pageTitle.container,&ta);
         assert(ta.x2-ta.x1+1==236&&ta.y2-ta.y1+1==17);
         assert(ta.x1==a.x1);
-        assert(ta.y1-a.y2-1==10);
+        assert(ta.y1==30&&ta.y1-a.y2-1==11);
         checkMountedMonitor_(&Ui_sm_.threadMonitor);
         assert(lv_obj_get_parent(Ui_sm_.threadMonitor.container)==root);
         assert(lv_obj_get_child(root,2)==Ui_sm_.threadMonitor.container);
@@ -1517,9 +1594,13 @@ static void checkActiveTopbar(uint16_t const *bg,
         assert(Ui_sm_.resourceMonitor.viewport==NULL);
         assert(lv_obj_get_child_count(root)==1);
     }
-    assert(!strcmp(lv_label_get_text(Ui_sm_.topbar.blinkyCount),"0"));
-    assert(!strcmp(lv_label_get_text(Ui_sm_.topbar.fps),"0FPS"));
-    assert(!strcmp(lv_label_get_text(Ui_sm_.topbar.cpu),"0%"));
+    char expectedCount[11];
+    snprintf(expectedCount,sizeof expectedCount,"%lu",
+              (unsigned long)NvmBlinky_get()->edges);
+    assert(!strcmp(lv_label_get_text(Ui_sm_.topbar.blinkyCount),
+                   expectedCount));
+    assert(!strcmp(lv_label_get_text(Ui_sm_.topbar.fps),"30FPS"));
+    assert(!strcmp(lv_label_get_text(Ui_sm_.topbar.cpu),expectedCpu));
     if(bg!=NULL){
         assert(lv_obj_get_style_bg_image_src(root,0)
                ==&Ui_sm_.root.background);
@@ -1556,13 +1637,14 @@ static void checkActiveTopbar(uint16_t const *bg,
 // touches the shared Topbar, siblings, or the root object.
 static void testUiSysInfo_(UiRoot *root,lv_display_t *display){
     lv_obj_t * const rc=root->container;
-    // Match the Active-owned common layout the helper mounts into.
+    // Restore UiRoot's layout after the preceding isolated fixtures.
     lv_obj_set_flex_flow(rc,LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(rc,LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_all(rc,2,LV_PART_MAIN);
     lv_obj_set_style_pad_row(rc,10,LV_PART_MAIN);
     UiTopbar bar={0};
-    UiTopbar_create(&bar,rc);
+    UiTopbar_create(&bar,rc,lv_pct(100),17);
     lv_obj_t * const barbox=bar.container;
     lv_obj_t * const sibling=lv_obj_create(rc);
     lv_obj_add_flag(sibling,LV_OBJ_FLAG_HIDDEN);
@@ -1582,7 +1664,8 @@ static void testUiSysInfo_(UiRoot *root,lv_display_t *display){
     lv_area_t ba,ta;
     lv_obj_get_coords(barbox,&ba);
     lv_obj_get_coords(title.container,&ta);
-    assert(ta.y1-ba.y2-1==10);
+    assert(ta.y1-ba.y2-1==11);
+    checkTopbarLayout_(&bar);
     checkMountedMonitor_(&monitor);
     checkMountedResourceMonitor_(&res);
     verifyRepaint(display);
@@ -1614,11 +1697,17 @@ static void testUiSysInfo_(UiRoot *root,lv_display_t *display){
     lv_obj_delete(sibling);
     assert(root->container==rc&&lv_obj_get_child_count(rc)==0);
     lv_obj_set_layout(rc,LV_LAYOUT_NONE);
+    lv_obj_set_style_pad_all(rc,0,LV_PART_MAIN);
     lv_obj_set_style_pad_row(rc,0,LV_PART_MAIN);
     lv_refr_now(display);blank();
 }
 int main(int argc,char **argv){
     assert(argc==2);scenario=(unsigned)atoi(argv[1]);
+    static NvmManager manager;
+    NvmManager_ctor(&manager);
+    NvmBoot_ctor(&manager);
+    NvmBlinky_ctor(&manager);
+    NvmBoot_inc();
     static STATIC_POOL_ELEM_TYPE(SST_Evt) small[48];
     static STATIC_POOL_ELEM_TYPE(Flash_Evt) medium[16];
     SST_EvtPool_init(small,sizeof small,sizeof(SST_Evt));
@@ -1642,14 +1731,31 @@ int main(int argc,char **argv){
     lv_display_set_flush_cb(display,flush);
     Ui_start();Ui_bindDisplay_();Sm_Ui_init(&Ui_sm_);
     assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_standby);
+    assert(lv_obj_get_style_flex_flow(Ui_sm_.root.container,0)
+           ==LV_FLEX_FLOW_COLUMN);
+    assert(lv_obj_get_style_pad_row(Ui_sm_.root.container,0)==10);
     checkRootOnly();
     assert(!lv_obj_get_style_bg_image_src(Ui_sm_.root.container,0));
     assert(Ui_sm_.root.background.data==NULL);
     assert(Ui_sm_.topbar.container==NULL);
     assert(Ui_sm_.stateTimeout.remaining==0);
+    SST_Evt const * const timeoutEvt=Ui_sm_.stateTimeout.event;
+    assert(timeoutEvt!=NULL);
+    assert(timeoutEvt->sig==UI_STATE_TIMEOUT_SIG);
+    assert(timeoutEvt->poolId==0U);
+    assert(timeoutEvt->refCtr==0U);
+    TimeEvt_arm(&Ui_sm_.stateTimeout,1U,0U);
+    TimeEvt_tick();
+    SST_Evt const *timeout;
+    assert(Ui_evtPop(&timeout));
+    assert(timeout==timeoutEvt);
+    SST_GC(timeout);
+    assert(timeoutEvt->poolId==0U);
+    assert(timeoutEvt->refCtr==0U);
+    assert(!Ui_evtPop(&timeout));
     send(UI_LED_ON_SIG);send(UI_LED_OFF_SIG);
     assert(lv_obj_get_child_count(Ui_sm_.root.container)==0);
-    Nvm_addBlinky(50); // Business snapshot is independent of UI events.
+    NvmBlinky_add(50); // Business snapshot is independent of UI events.
     send(BRING_UP_READY_SIG);
     if(scenario==2)send(BRING_UP_ASSETS_LOADED_SIG);
     if(scenario==5){
@@ -1671,7 +1777,7 @@ int main(int argc,char **argv){
     assert(backlight==1 && Ui_dbgSplashOk_==(scenario!=3));
     send(UI_LED_ON_SIG);send(UI_LED_OFF_SIG);
     assert(lv_obj_get_child_count(Ui_sm_.root.container)==0);
-    assert(Nvm_blinky()==50); // LED display events never update NVM.
+    assert(NvmBlinky_get()->edges==50); // UI events never update NVM.
     if(scenario==1){
         pulse(150);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_readyShow);
         checkSplash(true); // Splash survives the waiting half.
@@ -1684,7 +1790,7 @@ int main(int argc,char **argv){
         for(unsigned i=0;i<20;++i){hostTick+=10;TimeEvt_tick();}
         assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_readyShow);
         checkSplash(true); // Splash survives the waiting half.
-        Ui_drain_();assert(Ui_sm_.stateTimeout.remaining==500);
+        Ui_drain_();assert(Ui_sm_.stateTimeout.remaining==0);
     }else{send(BRING_UP_ASSETS_LOADED_SIG);pulse(150);}
     render();
     verifyRepaint(display);
@@ -1694,6 +1800,26 @@ int main(int argc,char **argv){
     uint16_t const * const sysBg=scenario==4?NULL:pixels[0];
     uint16_t const * const liveBg=scenario==4?NULL:pixels[1];
     checkActiveTopbar(sysBg,true);
+    assert(!strcmp(lv_label_get_text(Ui_sm_.topbar.blinkyCount),"50"));
+    NvmBlinky_add(1);
+    send(UI_LED_ON_SIG);Ui_drain_();
+    assert(!strcmp(lv_label_get_text(Ui_sm_.topbar.blinkyCount),"51"));
+    assert((lv_color_to_u32(lv_obj_get_style_bg_color(
+        Ui_sm_.topbar.led,0))&0xFFFFFFU)==0x40E080U);
+    send(UI_LED_OFF_SIG);Ui_drain_();
+    assert((lv_color_to_u32(lv_obj_get_style_bg_color(
+        Ui_sm_.topbar.led,0))&0xFFFFFFU)==0xD9D9D9U);
+    // Independent periodic statistics update, without any LED event.
+    assert(Ui_sm_.statsTimeout.interval==UI_STATS_TICKS);
+    hostIdle+=25;hostTotal+=100;hostFps=27;
+    pulse(UI_STATS_TICKS);
+    assert(!strcmp(lv_label_get_text(Ui_sm_.topbar.fps),"27FPS"));
+    assert(!strcmp(lv_label_get_text(Ui_sm_.topbar.cpu),"75%"));
+    expectedCpu="75%";
+    hostFps=30;send(UI_STATS_TIMEOUT_SIG);
+    // No elapsed CPU sample retains the last valid reading.
+    assert(!strcmp(lv_label_get_text(Ui_sm_.topbar.cpu),"75%"));
+    verifyRepaint(display);
     // Native proof a live data update repaints the count inside
     // the real HSM page -- no ticks, no NVM, count restore after.
     lv_obj_t const * const persistent=Ui_sm_.topbar.container;
@@ -1707,21 +1833,25 @@ int main(int argc,char **argv){
     assert(Ui_sm_.topbar.container==persistent);
     assert(Ui_sm_.pageTitle.title==titleObj);
     assert(Ui_sm_.pageTitle.container==titleBox);
-    UiBootCount_setCount(&Ui_sm_.bootCount,0U);
-    assert(!strcmp(lv_label_get_text(Ui_sm_.bootCount.count),"0"));
+    UiBootCount_setCount(&Ui_sm_.bootCount,NvmBoot_get()->count);
+    assert(!strcmp(lv_label_get_text(Ui_sm_.bootCount.count),"1"));
     lv_refr_now(display);verifyRepaint(display);
     pulse(499);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sysInfo);
-    pulse(1);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_liveShow);
+    pulse(1);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sysInfo);
+    send(UI_STATE_TIMEOUT_SIG);
+    assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_liveShow);
     verifyRepaint(display);checkActiveTopbar(liveBg,false);
     capture("live.rgb565");
     assert(Ui_sm_.topbar.container==persistent); // Pages share it.
     send(UI_LED_ON_SIG);send(UI_LED_OFF_SIG);Ui_drain_();
     verifyRepaint(display);checkActiveTopbar(liveBg,false);
-    assert(Nvm_blinky()==50);
+    assert(NvmBlinky_get()->edges==51);
     pulse(999);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_liveShow);
     pulse(1);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sysInfo);
     verifyRepaint(display);checkActiveTopbar(sysBg,true);
-    for(unsigned i=0;i<3;++i){pulse(500);pulse(1000);}
+    for(unsigned i=0;i<3;++i){
+        send(UI_STATE_TIMEOUT_SIG);pulse(1000);
+    }
     verifyRepaint(display);checkActiveTopbar(sysBg,true);
     assert(Ui_sm_.topbar.container==persistent);
     // No production transition exits Active yet; invoke the page
@@ -1740,15 +1870,17 @@ int main(int argc,char **argv){
     assert(Ui_sm_.topbar.container==persistent);
     // TEST FIXTURE teardown only -- the whole UI test is ending,
     // this is not a production page exit.
+    (void)TimeEvt_disarm(&Ui_sm_.statsTimeout);
     UiTopbar_destroy(&Ui_sm_.topbar);
     assert(!Ui_sm_.topbar.container&&!Ui_sm_.topbar.blinkyCount);
     assert(!Ui_sm_.pageTitle.container);
     assert(!Ui_sm_.bootCount.container);
     assert(!Ui_sm_.threadMonitor.container);
     assert(lv_obj_get_child_count(Ui_sm_.root.container)==0);
-    // Reset the Active-owned root layout so later isolated
+    // Reset the root layout so later isolated
     // component fixtures see a normal parent again.
     lv_obj_set_layout(Ui_sm_.root.container,LV_LAYOUT_NONE);
+    lv_obj_set_style_pad_all(Ui_sm_.root.container,0,LV_PART_MAIN);
     lv_obj_set_style_pad_row(Ui_sm_.root.container,0,
                              LV_PART_MAIN);
     lv_refr_now(display);blank();
@@ -1784,7 +1916,7 @@ int main(int argc,char **argv){
     lv_obj_set_size(sibling,10,10);
     lv_obj_set_pos(sibling,0,40); // Below the strip, out of the shot.
     UiTopbar bar={0};
-    UiTopbar_create(&bar,root);
+    UiTopbar_create(&bar,root,236,17);
     assert(lv_obj_get_child_count(lv_screen_active())==1);
     assert(lv_obj_get_child_count(root)==2);
     assert(lv_obj_get_parent(bar.container)==root);
@@ -1792,7 +1924,8 @@ int main(int argc,char **argv){
     lv_obj_update_layout(root);
     lv_obj_get_coords(bar.container,&barArea);
     assert(barArea.x2-barArea.x1+1==236);
-    assert(barArea.y2-barArea.y1+1==20);
+    assert(barArea.y2-barArea.y1+1==17);
+    checkTopbarLayout_(&bar);
     checkTopbarPads_(bar.container);
     assert(lv_obj_get_style_flex_flow(bar.container,0)
            ==LV_FLEX_FLOW_ROW);
@@ -1860,7 +1993,7 @@ int main(int argc,char **argv){
     lv_refr_now(display);
     assert(memcmp(prev,framebuffer,sizeof prev));
     verifyRepaint(display);
-    assert(rightEdge_(bar.blinkyCount)<countA.x1+sz.x);
+    assert(rightEdge_(bar.blinkyCount)>=countA.x2-2);
     memcpy(prev,framebuffer,sizeof prev);
     UiTopbar_setFps(&bar,1U);
     lv_refr_now(display);
@@ -1868,7 +2001,7 @@ int main(int argc,char **argv){
     verifyRepaint(display);
     lv_text_get_size(&sz,"1FPS",&lv_font_montserrat_14,0,0,
                      LV_COORD_MAX,LV_TEXT_FLAG_NONE);
-    assert(rightEdge_(bar.fps)<fpsA.x1+sz.x);
+    assert(rightEdge_(bar.fps)>=fpsA.x2-2);
     memcpy(prev,framebuffer,sizeof prev);
     UiTopbar_setCpu(&bar,1U);
     lv_refr_now(display);
@@ -1876,7 +2009,7 @@ int main(int argc,char **argv){
     verifyRepaint(display);
     lv_text_get_size(&sz,"1%",&lv_font_montserrat_14,0,0,
                      LV_COORD_MAX,LV_TEXT_FLAG_NONE);
-    assert(rightEdge_(bar.cpu)<cpuA.x1+sz.x);
+    assert(rightEdge_(bar.cpu)>=cpuA.x2-2);
     lv_obj_get_coords(bar.led,&a);
     assert(a.x1==ledA.x1 && a.x2==ledA.x2);
     lv_obj_get_coords(bar.blinkyCount,&a);
@@ -1914,7 +2047,7 @@ int main(int argc,char **argv){
     assert(lv_obj_get_child(root,0)==sibling);
     UiTopbar_destroy(&bar); // Destroy is idempotent when empty.
     for(unsigned i=0;i<10;++i){
-        UiTopbar_create(&bar,root);
+        UiTopbar_create(&bar,root,236,17);
         UiTopbar_setCount(&bar,i);
         UiTopbar_setLed(&bar,(i&1U)!=0);
         UiTopbar_destroy(&bar);
@@ -1934,6 +2067,7 @@ int main(int argc,char **argv){
     testDots_(root,display);
     testThreadMonitor_(root,display);
     testResourceMonitor_(root,display);
+    testMonitorFill_(root);
     assert(!Host_critical);
     SST_Evt *smallEvents[48];Flash_Evt *mediumEvents[16];
     for(unsigned i=0;i<48;++i)smallEvents[i]=SST_NEW(SST_Evt);

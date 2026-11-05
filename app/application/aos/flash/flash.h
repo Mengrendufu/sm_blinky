@@ -13,7 +13,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "sst.h"
-#include "nvm.h"
 
 #define FLASH_QUEUE_LEN 10U
 
@@ -72,7 +71,8 @@ bool Flash_eraseSector(uint32_t address);
 // Nonblocking, task context. False means storage initialization is pending.
 // Every accepted call queues a separate event; no per-item coalescing.
 // Queue/pool capacity must cover pending requests, following SST contracts.
-// Saves sample RAM when handled; Nvm_writeResult reports completed IO.
-bool Flash_postNvm(SST_Signal sig, Nvm_Id id);
+// id must name a mounted Manager slot. Saves sample RAM when handled;
+// IO failures are traced by the Flash AO, not returned by this enqueue.
+bool Flash_postNvm(SST_Signal sig, uint16_t id);
 
 #endif // FLASH_H_

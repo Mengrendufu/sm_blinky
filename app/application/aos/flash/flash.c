@@ -18,8 +18,8 @@
 #include "flash_req_priv.h"
 #include "flash_priv.h"
 #include "nvs.h"
-#include "nvm.h"
-#include "nor_partitions.h"   // where the log lives and how many sectors
+#include "instance/nvm_boot.h"
+#include "instance/nvm_blinky.h"
 #include "sm_tracer.h"
 
 #include "FreeRTOS.h"
@@ -43,10 +43,12 @@ void Flash_ctor(void) {
     AO_Flash->tcb = &Flash_tcb_;
     AO_Flash->stack = Flash_stack_;
     AO_Flash->stackSizeWords = FLASH_STACK_WORDS;
+    NvmManager_ctor(&Flash_inst_.nvm);
+    NvmBoot_ctor(&Flash_inst_.nvm);
+    NvmBlinky_ctor(&Flash_inst_.nvm);
 }
 //............................................................................
-// NVS belongs to this AO. Restore runs on its task after asset loading.
-static struct nvs_fs Flash_nvs_;
+// The manager restores on this AO's task, after asset loading.
 #define FLASH_NVS_MOUNT_ATTEMPTS 2U
 #define FLASH_TRACE_NVS_MOUNT_ERROR 8U
 #define FLASH_TRACE_NVS_UNAVAILABLE 9U
@@ -66,8 +68,7 @@ static void Flash_dbgNvsError_(uint8_t record, uint16_t detail, int error) {
 }
 
 // Record 91 is retired. Each boot value now retains all 32 bits.
-#define FLASH_TRACE_NVS_MOUNT_MS 12U
-#define FLASH_TRACE_NVS_RESTORE_MS 13U
+#define FLASH_TRACE_NVS_INIT_MS 13U
 #define FLASH_TRACE_NVS_RESTORE_RESULT 14U
 #define FLASH_TRACE_NVM_BOOT_COUNT 15U
 
@@ -81,49 +82,35 @@ static void Flash_dbgNvsValue_(uint8_t record, uint32_t value) {
 }
 
 static void Flash_nvsBoot_(void) {
-    uint32_t t0;
-    uint32_t mountMs;
-    uint32_t readMs;
-
-    Flash_nvs_.offset = 0U;
-    Flash_nvs_.sector_size = 4096U;   // the W25Q128's erasable sector
-    Flash_nvs_.sector_count = NOR_NVS_SECTORS;   // 256 KB: sixteen times
-                                                 // the sectors, sixteen
-                                                 // times the erase budget
-    Flash_nvs_.flash_device = nvs_port_device();
-
-    t0 = HAL_GetTick();
-    int mounted = 0;
+    NvmManager * const mgr = &Flash_inst_.nvm;
+    struct nvs_fs const * const fs = mgr->fs;
+    uint32_t const t0 = HAL_GetTick();
+    int result = 0;
     for (
         unsigned attempt = 1U;
         attempt <= FLASH_NVS_MOUNT_ATTEMPTS;
         ++attempt
     ) {
-        mounted = nvs_mount(&Flash_nvs_);
-        if (mounted == 0) {
+        result = NvmManager_init(mgr);
+        // A restore error must not cause a second restore of live data.
+        if (fs->ready) {
             break;
         }
         Flash_dbgNvsError_(FLASH_TRACE_NVS_MOUNT_ERROR,
-                           (uint16_t)attempt, mounted);
+                           (uint16_t)attempt, result);
     }
-    if (mounted != 0) {
+    if (!fs->ready) {
         // Leave NVS unready; raw Flash requests remain independent.
         Flash_dbgNvsError_(FLASH_TRACE_NVS_UNAVAILABLE,
-                           FLASH_NVS_MOUNT_ATTEMPTS, mounted);
-        return;
+                           FLASH_NVS_MOUNT_ATTEMPTS, result);
     }
-    mountMs = HAL_GetTick() - t0;
-
-    t0 = HAL_GetTick();
-    int const restored = Nvm_load(&Flash_nvs_);
-    readMs = HAL_GetTick() - t0;
-    uint32_t const boots = Nvm_bootCount();
-
-    Flash_dbgNvsValue_(FLASH_TRACE_NVS_MOUNT_MS, mountMs);
-    Flash_dbgNvsValue_(FLASH_TRACE_NVS_RESTORE_MS, readMs);
+    // Count this boot even when storage is unavailable; RAM stays usable.
+    NvmBoot_inc();
+    uint32_t const initMs = HAL_GetTick() - t0;
+    Flash_dbgNvsValue_(FLASH_TRACE_NVS_INIT_MS, initMs);
     Flash_dbgNvsValue_(FLASH_TRACE_NVS_RESTORE_RESULT,
-                       (uint32_t)(int32_t)restored);
-    Flash_dbgNvsValue_(FLASH_TRACE_NVM_BOOT_COUNT, boots);
+                       (uint32_t)(int32_t)result);
+    Flash_dbgNvsValue_(FLASH_TRACE_NVM_BOOT_COUNT, NvmBoot_get()->count);
 }
 
 //============================================================================
@@ -197,9 +184,9 @@ void Flash_initStorage(void) {
     Flash_reqBind(AO_Flash);
 }
 
-void Flash_writeNvm(Nvm_Id id) {
-    // NVM records the result per item; enqueue success is not save success.
-    int const result = Nvm_store(&Flash_nvs_, id);
+void Flash_writeNvm(uint16_t id) {
+    // Enqueue success is not save success; IO failures are traced here.
+    int const result = NvmManager_store(&Flash_inst_.nvm, id);
     if (result != 0) {
         Flash_dbgNvsError_(FLASH_TRACE_NVM_STORE_ERROR,
                            (uint16_t)id, result);

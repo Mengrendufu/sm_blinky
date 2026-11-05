@@ -17,8 +17,8 @@
 #include "widgets/resource_monitor/resource_monitor.h"
 
 // Stateless SysInfo-page visual operations: the caller (Sm_Ui) owns
-// the initialized root (its common COLUMN layout is configured by
-// Active, not here) plus the zeroed/living PageTitle, BootCount and monitor
+// the initialized root (UiRoot_init owns its common COLUMN layout)
+// plus the zeroed/living PageTitle, BootCount and monitor
 // instances. This helper does NOT own the root and cannot destroy
 // it, the shared Topbar, or any sibling; no state, timing, or NVM.
 // build borrows the given pixels as the root background (NULL is a

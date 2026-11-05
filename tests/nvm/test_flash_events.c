@@ -9,6 +9,7 @@
 #include "sst_priv.h"
 #include "ui_evt_priv.h"
 #include "ui_evt.h"
+#include "nvm_conf.h"
 #include "flash_req.c"
 #include "blinky.c"
 unsigned Host_critical;
@@ -17,9 +18,9 @@ SST_Task *const AO_Flash=&ao.super;
 static SST_Evt const *queue[16];
 static unsigned head,tail,notified,ops,stage,published,uiReady;
 SST_Task *SST_tasks_[SST_MAX_TASK+1];
-static unsigned saveCount[NVM_ID_LIMIT];
+static unsigned saveCount[NVM_REGISTER_MAX];
 static unsigned blinkyEdges,uiLed;
-void Nvm_addBlinky(uint32_t edges){blinkyEdges+=edges;}
+void NvmBlinky_add(uint32_t edges){blinkyEdges+=edges;}
 static SST_Signal expected;
 static bool outcome=true,reuse;
 static SST_Evt const *dispatching;
@@ -32,7 +33,10 @@ void SST_TimeEvt_ctor(SST_TimeEvt *me,SST_Signal sig,SST_Task *task){
     me->super.sig=sig;me->task=task;
 }
 void SST_TimeEvt_arm(SST_TimeEvt *me,SST_TCtr count,SST_TCtr interval){
-    (void)me;(void)count;(void)interval;
+    assert(me->task==AO_Blinky);
+    assert(count==(me->super.sig==BLINKY_TIMEOUT_SIG?50:1000));
+    assert(interval==count);
+    me->ctr=count;me->interval=interval;
 }
 void BSP_ledOn(void){}
 void BSP_ledOff(void){}
@@ -108,7 +112,7 @@ void Flash_bindRuntime(void){assert(stage==0);++stage;}
 void Asset_loadSplash(void){assert(stage==1);++stage;}
 void Asset_loadRemaining(void){assert(stage==2);++stage;}
 void Flash_initStorage(void){assert(stage==3);Flash_reqBind(AO_Flash);}
-void Flash_writeNvm(Nvm_Id id){
+void Flash_writeNvm(uint16_t id){
     assert(stage==3);++saveCount[id];
 }
 void Flash_completeRequest(Flash_Req *const req){Flash_reqFinish(req);}
@@ -126,6 +130,9 @@ int main(int argc,char **argv){
     Blinky_ctor();
     Blinky_init(&Blinky_inst,NULL);
     SST_Evt beat={.sig=BLINKY_TIMEOUT_SIG};
+    SST_Evt save={.sig=BLINKY_NVM_TIMEOUT_SIG};
+    assert(Blinky_inst.nvmTimeEvt.ctr==0);
+    Blinky_dispatch(&Blinky_inst,&save);
     for(unsigned i=0;i<25;++i)Blinky_dispatch(&Blinky_inst,&beat);
     assert(!blinkyEdges && !uiLed && head==tail);
     if(!subscribed){
@@ -134,19 +141,20 @@ int main(int argc,char **argv){
         SST_Task_unsubscribe(AO_Blinky,BRING_UP_NVM_READY_SIG);
     }
     ao.super.thread=(void *)1;
-    assert(!Flash_postNvm(FLASH_NVM_WRITE_SIG, NVM_BOOT_COUNT));
+    assert(!Flash_postNvm(FLASH_NVM_WRITE_SIG, NVM_BOOT_ID));
     Sm_Flash_init(AO_Flash,NULL);step();step();
     assert(stage==3 && published==(subscribed ? 3U : 0U));
     assert(uiReady==2);
     SST_Evt ready={.sig=BRING_UP_NVM_READY_SIG};
     if(!subscribed)Blinky_dispatch(&Blinky_inst,&ready);
     assert(blinkyEdges==1 && uiLed==1 && tail-head==1);
-    step();assert(saveCount[NVM_BOOT_COUNT]==1);
+    assert(Blinky_inst.nvmTimeEvt.ctr==1000);
+    step();assert(saveCount[NVM_BOOT_ID]==1);
     // Repeated ready does not reenter active or save the boot count again.
     Blinky_dispatch(&Blinky_inst,&ready);
     assert(head==tail && blinkyEdges==1);
-    saveCount[NVM_BOOT_COUNT]=0;
-    assert(!saveCount[NVM_BLINKY_EDGES]);
+    saveCount[NVM_BOOT_ID]=0;
+    assert(!saveCount[NVM_BLINKY_ID]);
     for(unsigned fail=0;fail<2;++fail){
         outcome=!fail;
         expected=FLASH_READ_SIG;
@@ -164,8 +172,8 @@ int main(int argc,char **argv){
         assert(Flash_post_(FLASH_READ_SIG,&pending[i]));
     }
     assert(!Flash_post_(FLASH_WRITE_SIG,&reused));
-    assert(Flash_postNvm(FLASH_NVM_WRITE_SIG, NVM_BOOT_COUNT));
-    assert(Flash_postNvm(FLASH_NVM_WRITE_SIG, NVM_BLINKY_EDGES));
+    assert(Flash_postNvm(FLASH_NVM_WRITE_SIG, NVM_BOOT_ID));
+    assert(Flash_postNvm(FLASH_NVM_WRITE_SIG, NVM_BLINKY_ID));
     assert(tail-head==FLASH_QUEUE_LEN);
     assert(queue[(tail-1)%16] != queue[(tail-2)%16]);
     assert(queue[(tail-1)%16]->poolId==1);
@@ -173,7 +181,7 @@ int main(int argc,char **argv){
     expected=FLASH_READ_SIG;
     for(unsigned i=0;i<FLASH_REQUEST_CAPACITY;++i)step();
     step();step();
-    assert(saveCount[NVM_BOOT_COUNT]==1 && saveCount[NVM_BLINKY_EDGES]==1);
+    assert(saveCount[NVM_BOOT_ID]==1 && saveCount[NVM_BLINKY_ID]==1);
     for(unsigned i=0;i<FLASH_REQUEST_CAPACITY;++i)assert(pending[i].ok);
     notified=0;
     reused=(Flash_Req){.address=0x1234,.dst=&data,.len=4,
@@ -181,24 +189,23 @@ int main(int argc,char **argv){
     reuse=true;expected=FLASH_WRITE_SIG;
     assert(Flash_writeBlock(0x1234,&data,4));
     assert(head<tail);expected=FLASH_READ_SIG;step();assert(reused.ok);
-    assert(Flash_postNvm(FLASH_NVM_WRITE_SIG, NVM_BLINKY_EDGES));
-    assert(saveCount[NVM_BLINKY_EDGES]==1);step();
-    assert(saveCount[NVM_BLINKY_EDGES]==2);
-    unsigned const saved=saveCount[NVM_BLINKY_EDGES];
-    assert(Flash_postNvm(FLASH_NVM_WRITE_SIG,NVM_BLINKY_EDGES));
-    assert(Flash_postNvm(FLASH_NVM_WRITE_SIG,NVM_BLINKY_EDGES));
+    assert(Flash_postNvm(FLASH_NVM_WRITE_SIG, NVM_BLINKY_ID));
+    assert(saveCount[NVM_BLINKY_ID]==1);step();
+    assert(saveCount[NVM_BLINKY_ID]==2);
+    unsigned const saved=saveCount[NVM_BLINKY_ID];
+    assert(Flash_postNvm(FLASH_NVM_WRITE_SIG,NVM_BLINKY_ID));
+    assert(Flash_postNvm(FLASH_NVM_WRITE_SIG,NVM_BLINKY_ID));
     assert(tail-head==2);
-    step();step();assert(saveCount[NVM_BLINKY_EDGES]==saved+2);
+    step();step();assert(saveCount[NVM_BLINKY_ID]==saved+2);
     // More requests than the pool can hold proves completed events return.
     for(unsigned i=0;i<32;++i){
-        assert(Flash_postNvm(FLASH_NVM_WRITE_SIG,NVM_BLINKY_EDGES));step();
+        assert(Flash_postNvm(FLASH_NVM_WRITE_SIG,NVM_BLINKY_ID));step();
     }
     assert(head==tail);
-    for(unsigned i=0;i<19;++i)Blinky_maintenance_();
-    assert(head==tail);
-    Blinky_maintenance_();assert(tail-head==1);
+    // Saving is independent of blink beats and does not toggle the LED.
+    Blinky_dispatch(&Blinky_inst,&save);assert(tail-head==1);
     step();
-    assert(saveCount[NVM_BOOT_COUNT]==1 && saveCount[NVM_BLINKY_EDGES]==37);
+    assert(saveCount[NVM_BOOT_ID]==1 && saveCount[NVM_BLINKY_ID]==37);
     // Both transition directions update the counter before UI delivery.
     assert(blinkyEdges==1 && uiLed==1);
     Blinky_dispatch(&Blinky_inst,&beat);

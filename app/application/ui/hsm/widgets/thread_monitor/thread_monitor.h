@@ -29,7 +29,9 @@ typedef struct {
     UiDots dots;
 } UiThreadMonitor;
 
-void UiThreadMonitor_create(UiThreadMonitor *me, lv_obj_t *parent);
+// Outer dimensions accept native LVGL pixels or lv_pct().
+void UiThreadMonitor_create(UiThreadMonitor *me, lv_obj_t *parent,
+                             int32_t width, int32_t height);
 void UiThreadMonitor_destroy(UiThreadMonitor *me);
 
 #endif // THREAD_MONITOR_H_

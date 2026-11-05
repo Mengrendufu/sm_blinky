@@ -14,9 +14,12 @@ command = ["gcc", "-std=c11", "-Wall", "-Wextra", "-Werror",
            "-fsanitize=address,undefined", "-fno-pie", "-no-pie"]
 for folder in includes:
     command += ["-I", str(ROOT / folder)]
+sources = ["app/application/nvm/nvm_manager.c",
+           "app/application/nvm/nvm_meta.c",
+           "app/application/nvm/instance/nvm_boot.c",
+           "app/application/nvm/instance/nvm_blinky.c"]
 command += [str(ROOT / source) for source in [
-    "tests/nvm/test_nvm.c", "app/application/nvm/nvm.c",
-    "tests/nvm/trace_stub.c"]]
+    "tests/nvm/test_nvm.c", "tests/nvm/trace_stub.c", *sources]]
 command += ["-o", str(work / "test")]
 print(f"NVM test artifacts: {work}", flush=True)
 subprocess.run(command, check=True)
@@ -53,42 +56,14 @@ subprocess.run(command, check=True)
 subprocess.run([str(work / "events")], check=True)
 subprocess.run([str(work / "events"), "0"], check=True)
 
-# Register a real structured item only in the temporary test copy. This
-# checks the extension path without adding a fake field to device firmware.
-typed = work / "typed"
-typed.mkdir()
-header = (ROOT / "app/application/nvm/nvm.h").read_text()
-header = header.replace("    NVM_ID_LIMIT", "    NVM_TEST_RECORD = 3U,\n"
-                        "    NVM_ID_LIMIT")
-header = header.replace("// Stable IDs:",
-                        "typedef struct {\n    uint64_t flags;\n"
-                        "    uint8_t payload[17];\n} Nvm_TestData;\n\n"
-                        "// Stable IDs:")
-(typed / "nvm.h").write_text(header)
-source = (ROOT / "app/application/nvm/nvm.c").read_text()
-source = source.replace("static Nvm_BlinkyData Nvm_blinky_;",
-                        "static Nvm_BlinkyData Nvm_blinky_;\n"
-                        "static Nvm_TestData Nvm_test_;")
-source = source.replace("    Nvm_BlinkyData blinky;",
-                        "    Nvm_BlinkyData blinky;\n"
-                        "    Nvm_TestData record;")
-source = source.replace("    [NVM_BOOT_COUNT] = {\n",
-                        "    [NVM_TEST_RECORD] = {\n"
-                        "        .data = &Nvm_test_, .size = sizeof(Nvm_test_)\n"
-                        "    },\n    [NVM_BOOT_COUNT] = {\n")
-source = source.replace("    [NVM_BOOT_COUNT] = -EAGAIN,",
-                        "    [NVM_TEST_RECORD] = -EAGAIN,\n"
-                        "    [NVM_BOOT_COUNT] = -EAGAIN,")
-(typed / "nvm.c").write_text(source)
+# A structured block uses the public registration API directly.
 command = ["gcc", "-std=c11", "-Wall", "-Wextra", "-Werror",
-           "-fsanitize=address,undefined", "-fno-pie", "-no-pie",
-           "-I", str(typed)]
+           "-fsanitize=address,undefined", "-fno-pie", "-no-pie"]
 for folder in includes:
     command += ["-I", str(ROOT / folder)]
-command += [str(ROOT / "tests/nvm/test_typed.c"), str(typed / "nvm.c"),
-            str(ROOT / "tests/nvm/trace_stub.c"),
-            "-o", str(work / "typed-test")]
+command += [str(ROOT / source) for source in [
+    "tests/nvm/test_typed.c", "tests/nvm/trace_stub.c", *sources]]
+command += ["-o", str(work / "typed-test")]
 subprocess.run(command, check=True)
 for scenario in range(3):
     subprocess.run([str(work / "typed-test"), str(scenario)], check=True)
-

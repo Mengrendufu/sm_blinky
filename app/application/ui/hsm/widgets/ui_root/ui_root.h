@@ -15,7 +15,8 @@
 
 // Owns the sole content container under the active screen and one
 // descriptor for its current background; borrows verified RGB565
-// pixels for the lifetime of their presentation.
+// pixels for the lifetime of their presentation. Initializes COLUMN
+// Flex with START alignment, 2 px edge padding and 10 px row spacing.
 typedef struct {
     lv_obj_t *container;
     lv_image_dsc_t background;

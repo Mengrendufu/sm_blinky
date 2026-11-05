@@ -18,7 +18,8 @@ SM_DEFINE_MODULE("topbar")
 #define TOPBAR_LED_OFF 0xD9D9D9U
 #define TOPBAR_LED_ON  0x40E080U
 
-void UiTopbar_create(UiTopbar *me, lv_obj_t *parent) {
+void UiTopbar_create(UiTopbar *me, lv_obj_t *parent,
+                      int32_t width, int32_t height) {
     SM_REQUIRE(me != NULL);
     SM_REQUIRE(parent != NULL);
     SM_REQUIRE(me->container == NULL);
@@ -26,23 +27,21 @@ void UiTopbar_create(UiTopbar *me, lv_obj_t *parent) {
     // bar container
     lv_obj_t * const bar = FlexContainer_create(parent,
         &(UiFlexConfig){
-            .width = 236, .height = 20, .flow = LV_FLEX_FLOW_ROW,
+            .width = width, .height = height, .flow = LV_FLEX_FLOW_ROW,
             .mainPlace = LV_FLEX_ALIGN_SPACE_BETWEEN,
             .crossPlace = LV_FLEX_ALIGN_CENTER,
             .trackPlace = LV_FLEX_ALIGN_START,
-            .padTop = 2, .padBottom = 2, .padLeft = 2, .padRight = 2,
             .padRow = 0, .padColumn = 0});
     me->container = bar;
 
     // [led] [blinkyCounts]
     lv_obj_t * const left = FlexContainer_create(bar,
         &(UiFlexConfig){
-            .width = 104, .height = 20, .flow = LV_FLEX_FLOW_ROW,
-            .mainPlace = LV_FLEX_ALIGN_START,
+            .width = 99, .height = lv_pct(100), .flow = LV_FLEX_FLOW_ROW,
+            .mainPlace = LV_FLEX_ALIGN_SPACE_BETWEEN,
             .crossPlace = LV_FLEX_ALIGN_CENTER,
             .trackPlace = LV_FLEX_ALIGN_START,
-            .padTop = 0, .padBottom = 0, .padLeft = 2, .padRight = 0,
-            .padRow = 0, .padColumn = 4});
+            .padRow = 0, .padColumn = 0});
     me->led = lv_obj_create(left);
     lv_obj_remove_style_all(me->led);
     lv_obj_set_size(me->led, 10, 10);
@@ -52,30 +51,35 @@ void UiTopbar_create(UiTopbar *me, lv_obj_t *parent) {
     lv_obj_remove_flag(me->led, LV_OBJ_FLAG_CLICKABLE);
     me->blinkyCount = Label_create(left,
         &(LabelConfig){
-            .width = 90, .height = LV_SIZE_CONTENT,
+            // One pixel wider than Figma; preserve its right edge.
+            .width = 86, .height = 17,
             .longMode = LV_LABEL_LONG_MODE_CLIP,
+            .textAlign = LV_TEXT_ALIGN_RIGHT,
             .text = me->blinkyCountText});
     lv_obj_add_style(me->blinkyCount, &UiStyle_topbarText, LV_PART_MAIN);
 
     // [fps] [cpu_usage]
     lv_obj_t * const right = FlexContainer_create(bar,
         &(UiFlexConfig){
-            .width = 105, .height = 20, .flow = LV_FLEX_FLOW_ROW,
+            // Native "999FPS" needs 55 px, versus Figma's 52 px.
+            // Expand leftwards while preserving FPS/CPU right edges.
+            .width = 93, .height = lv_pct(100), .flow = LV_FLEX_FLOW_ROW,
             .mainPlace = LV_FLEX_ALIGN_START,
             .crossPlace = LV_FLEX_ALIGN_CENTER,
             .trackPlace = LV_FLEX_ALIGN_START,
-            .padTop = 0, .padBottom = 0, .padLeft = 0, .padRight = 0,
-            .padRow = 0, .padColumn = 4});
+            .padRow = 0, .padColumn = 2});
     me->fps = Label_create(right,
         &(LabelConfig){
-            .width = 61, .height = LV_SIZE_CONTENT,
+            .width = 55, .height = 17,
             .longMode = LV_LABEL_LONG_MODE_CLIP,
+            .textAlign = LV_TEXT_ALIGN_RIGHT,
             .text = me->fpsText});
     lv_obj_add_style(me->fps, &UiStyle_topbarText, LV_PART_MAIN);
     me->cpu = Label_create(right,
         &(LabelConfig){
-            .width = 40, .height = LV_SIZE_CONTENT,
+            .width = 36, .height = 17,
             .longMode = LV_LABEL_LONG_MODE_CLIP,
+            .textAlign = LV_TEXT_ALIGN_RIGHT,
             .text = me->cpuText});
     lv_obj_add_style(me->cpu, &UiStyle_topbarText, LV_PART_MAIN);
     UiTopbar_setLed(me, false);

@@ -97,10 +97,25 @@ static void Ui_setBacklight_(void *context, bool on) {
     Ui_dispBacklight(on);
 }
 
+static uint32_t Ui_readFps_(void *context) {
+    (void)context;
+    return Ui_dispFps();
+}
+
+static void Ui_readCpuSample_(void *context,
+                              uint32_t *idle, uint32_t *total) {
+    (void)context;
+    taskENTER_CRITICAL();
+    BSP_cpuSample(idle, total);
+    taskEXIT_CRITICAL();
+}
+
 static void Ui_bindDisplay_(void) {
     static Sm_Ui_DisplayOperations const operations = {
         .context = NULL,
-        .setBacklight = Ui_setBacklight_
+        .setBacklight = Ui_setBacklight_,
+        .readFps = Ui_readFps_,
+        .readCpuSample = Ui_readCpuSample_
     };
 
     Sm_Ui_bindDisplay(&Ui_sm_, &operations);

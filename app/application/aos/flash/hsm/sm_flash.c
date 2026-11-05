@@ -156,7 +156,7 @@ static SM_RetState Sm_Flash_ready_(void * const me,
             return _SM_HANDLED();
         }
         case FLASH_NVM_WRITE_SIG: {
-            Nvm_Id const id = SST_EVT_DOWNCAST(Flash_NvmEvt, evt)->id;
+            uint16_t const id = SST_EVT_DOWNCAST(Flash_NvmEvt, evt)->id;
             Flash_writeNvm(id);
             return _SM_HANDLED();
         }

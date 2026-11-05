@@ -20,13 +20,13 @@ static void UiThreadCard_createResource_(UiThreadCardResource *row,
                                          lv_obj_t *parent) {
     row->container = lv_obj_create(parent);
     lv_obj_remove_style_all(row->container);
-    lv_obj_set_size(row->container, 232, 23);
+    lv_obj_set_size(row->container, lv_pct(100), 23);
     lv_obj_remove_flag(row->container, LV_OBJ_FLAG_SCROLLABLE
                                        | LV_OBJ_FLAG_CLICKABLE
                                        | LV_OBJ_FLAG_OVERFLOW_VISIBLE);
     row->value = Label_create(row->container,
         &(LabelConfig){
-            .width = 174, .height = 17,
+            .width = lv_pct(75), .height = 17,
             .longMode = LV_LABEL_LONG_MODE_CLIP,
             .textAlign = LV_TEXT_ALIGN_LEFT,
             .text = ""});
@@ -34,7 +34,7 @@ static void UiThreadCard_createResource_(UiThreadCardResource *row,
     lv_obj_align(row->value, LV_ALIGN_TOP_LEFT, 0, 0);
     row->unit = Label_create(row->container,
         &(LabelConfig){
-            .width = 58, .height = 17,
+            .width = lv_pct(25), .height = 17,
             .longMode = LV_LABEL_LONG_MODE_CLIP,
             .textAlign = LV_TEXT_ALIGN_RIGHT,
             .text = ""});
@@ -42,14 +42,15 @@ static void UiThreadCard_createResource_(UiThreadCardResource *row,
     lv_obj_align(row->unit, LV_ALIGN_TOP_RIGHT, 0, 0);
     row->bar = Bar_create(row->container,
         &(BarConfig){
-            .width = 232, .height = 6,
+            .width = lv_pct(100), .height = 6,
             .minValue = 0, .maxValue = 100, .value = 0});
     lv_obj_add_style(row->bar, &UiStyle_barTrack, LV_PART_MAIN);
     lv_obj_add_style(row->bar, &UiStyle_barIndicator, LV_PART_INDICATOR);
     lv_obj_align(row->bar, LV_ALIGN_BOTTOM_MID, 0, 0);
 }
 
-void UiThreadCard_create(UiThreadCard *me, lv_obj_t *parent) {
+void UiThreadCard_create(UiThreadCard *me, lv_obj_t *parent,
+                          int32_t width, int32_t height) {
     SM_REQUIRE(me != NULL);
     SM_REQUIRE(parent != NULL);
     SM_REQUIRE(me->container == NULL);
@@ -65,7 +66,7 @@ void UiThreadCard_create(UiThreadCard *me, lv_obj_t *parent) {
 
     lv_obj_t * const box = FlexContainer_create(parent,
         &(UiFlexConfig){
-            .width = 232, .height = 83,
+            .width = width, .height = height,
             .flow = LV_FLEX_FLOW_COLUMN,
             .mainPlace = LV_FLEX_ALIGN_START,
             .crossPlace = LV_FLEX_ALIGN_START,
@@ -76,13 +77,13 @@ void UiThreadCard_create(UiThreadCard *me, lv_obj_t *parent) {
 
     me->header = lv_obj_create(box);
     lv_obj_remove_style_all(me->header);
-    lv_obj_set_size(me->header, 232, 17);
+    lv_obj_set_size(me->header, lv_pct(100), 17);
     lv_obj_remove_flag(me->header, LV_OBJ_FLAG_SCROLLABLE
                                    | LV_OBJ_FLAG_CLICKABLE
                                    | LV_OBJ_FLAG_OVERFLOW_VISIBLE);
     me->threadName = Label_create(me->header,
         &(LabelConfig){
-            .width = 174, .height = 17,
+            .width = lv_pct(75), .height = 17,
             .longMode = LV_LABEL_LONG_MODE_CLIP,
             .textAlign = LV_TEXT_ALIGN_LEFT,
             .text = ""});
@@ -90,7 +91,7 @@ void UiThreadCard_create(UiThreadCard *me, lv_obj_t *parent) {
     lv_obj_align(me->threadName, LV_ALIGN_LEFT_MID, 0, 0);
     me->priority = Label_create(me->header,
         &(LabelConfig){
-            .width = 58, .height = 17,
+            .width = lv_pct(25), .height = 17,
             .longMode = LV_LABEL_LONG_MODE_CLIP,
             .textAlign = LV_TEXT_ALIGN_RIGHT,
             .text = ""});

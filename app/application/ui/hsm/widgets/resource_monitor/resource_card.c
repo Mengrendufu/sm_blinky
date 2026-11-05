@@ -38,7 +38,8 @@ static lv_obj_t *UiResourceCard_label_(lv_obj_t *parent, int32_t width,
     return label;
 }
 
-void UiResourceCard_create(UiResourceCard *me, lv_obj_t *parent) {
+void UiResourceCard_create(UiResourceCard *me, lv_obj_t *parent,
+                            int32_t width, int32_t height) {
     SM_REQUIRE(me != NULL);
     SM_REQUIRE(parent != NULL);
     SM_REQUIRE(me->container == NULL);
@@ -55,14 +56,14 @@ void UiResourceCard_create(UiResourceCard *me, lv_obj_t *parent) {
     SM_REQUIRE(me->maximum == NULL);
     me->container = FlexContainer_create(parent,
         &(UiFlexConfig){
-            .width = 236, .height = 118,
+            .width = width, .height = height,
             .flow = LV_FLEX_FLOW_COLUMN,
             .mainPlace = LV_FLEX_ALIGN_START,
             .crossPlace = LV_FLEX_ALIGN_CENTER,
             .trackPlace = LV_FLEX_ALIGN_START,
             .padTop = 1, .padBottom = 1, .padRow = 4});
     lv_obj_remove_flag(me->container, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
-    me->header = UiResourceCard_container_(me->container, 236, 27);
+    me->header = UiResourceCard_container_(me->container, lv_pct(100), 27);
     me->name = UiResourceCard_label_(me->header, 174, "--",
                                      LV_TEXT_ALIGN_LEFT);
     lv_obj_align(me->name, LV_ALIGN_TOP_LEFT, 2, 0);
@@ -91,13 +92,13 @@ void UiResourceCard_create(UiResourceCard *me, lv_obj_t *parent) {
                                         LV_TEXT_ALIGN_CENTER);
     lv_obj_set_pos(me->percent, 33, 21);
 
-    me->range = UiResourceCard_container_(me->container, 236, 17);
+    me->range = UiResourceCard_container_(me->container, lv_pct(100), 17);
     me->minimum = UiResourceCard_label_(me->range, 10, "E",
                                         LV_TEXT_ALIGN_LEFT);
-    lv_obj_set_pos(me->minimum, 66, 0);
+    lv_obj_align(me->minimum, LV_ALIGN_TOP_MID, -47, 0);
     me->maximum = UiResourceCard_label_(me->range, 34, "--",
                                         LV_TEXT_ALIGN_RIGHT);
-    lv_obj_set_pos(me->maximum, 136, 0);
+    lv_obj_align(me->maximum, LV_ALIGN_TOP_MID, 35, 0);
 }
 
 void UiResourceCard_destroy(UiResourceCard *me) {

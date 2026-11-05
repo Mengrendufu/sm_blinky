@@ -14,12 +14,10 @@
 #include "helpers/ui_sys_info.h"
 #include "ui_evt.h"
 #include "asset.h"
+#include "instance/nvm_blinky.h"
+#include "instance/nvm_boot.h"
 
 SM_DEFINE_MODULE("sm_ui")
-
-static SST_Evt const Sm_Ui_stateTimeoutEvt = {
-    .sig = UI_STATE_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
-};
 
 // == DEBUG: whether the HSM installed a verified Splash image. ==
 volatile uint8_t Ui_dbgSplashOk_;
@@ -131,6 +129,8 @@ void Sm_Ui_bindDisplay(Sm_Ui * const me,
     SM_REQUIRE(me != NULL);
     SM_REQUIRE(operations != NULL);
     SM_REQUIRE(operations->setBacklight != NULL);
+    SM_REQUIRE(operations->readFps != NULL);
+    SM_REQUIRE(operations->readCpuSample != NULL);
     me->display = operations;
 }
 //............................................................................
@@ -140,15 +140,23 @@ static void Sm_Ui_deliverTimeout_(void *context, void const *evt) {
 }
 
 void Sm_Ui_ctor(Sm_Ui * const me) {
+    static SST_Evt const stateTimeoutEvt = {
+        .sig = UI_STATE_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
+    };
+    static SST_Evt const statsTimeoutEvt = {
+        .sig = UI_STATS_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
+    };
     static TimeEvt_PostOperations const delivery = {
         .context = NULL, .post = Sm_Ui_deliverTimeout_
     };
     SM_REQUIRE(me != NULL);
+    me->ledOn = false;
     me->topbar = (UiTopbar){0};
     me->pageTitle = (UiPageTitle){0};
     me->bootCount = (UiBootCount){0};
     me->resourceMonitor = (UiResourceMonitor){0};
-    TimeEvt_ctor(&me->stateTimeout, &Sm_Ui_stateTimeoutEvt, &delivery);
+    TimeEvt_ctor(&me->stateTimeout, &stateTimeoutEvt, &delivery);
+    TimeEvt_ctor(&me->statsTimeout, &statsTimeoutEvt, &delivery);
 }
 //............................................................................
 void Sm_Ui_init(Sm_Ui * const me) {
@@ -267,20 +275,49 @@ static SM_RetState Sm_Ui_readyShow_(SM_Hsm * const me, SST_Evt const * const e) 
 // action destroys it. The component destroy API remains for tests.
 static void Sm_Ui_active_entry_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
-    lv_obj_set_flex_flow(self->root.container, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(self->root.container,
-                          LV_FLEX_ALIGN_START,
-                          LV_FLEX_ALIGN_START,
-                          LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_row(self->root.container, 10,
-                             LV_PART_MAIN);
-    UiTopbar_create(&self->topbar, self->root.container);
+    UiTopbar_create(&self->topbar, self->root.container, lv_pct(100), 17);
+    UiTopbar_setLed(&self->topbar, self->ledOn);
+    UiTopbar_setCount(&self->topbar, NvmBlinky_get()->edges);
+    self->display->readCpuSample(self->display->context,
+                                 &self->cpuIdle, &self->cpuTotal);
+    uint32_t const fps = self->display->readFps(self->display->context);
+    UiTopbar_setFps(&self->topbar, (uint16_t)(fps > 999U ? 999U : fps));
+    TimeEvt_arm(&self->statsTimeout, UI_STATS_TICKS, UI_STATS_TICKS);
 }
 
 static SM_RetState Sm_Ui_active_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
-    (void)me;
-    (void)e;
-    return _SM_SUPER();
+    Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
+    switch (e->sig) {
+        case UI_STATS_TIMEOUT_SIG: {
+            uint32_t idle, total;
+            self->display->readCpuSample(self->display->context,
+                                         &idle, &total);
+            uint32_t const elapsed = total - self->cpuTotal;
+            uint32_t const idleDelta = idle - self->cpuIdle;
+            self->cpuIdle = idle;
+            self->cpuTotal = total;
+            if (elapsed != 0U) {
+                SM_ASSERT(idleDelta <= elapsed);
+                uint8_t const cpu = (uint8_t)(
+                    ((uint64_t)(elapsed - idleDelta) * 100U
+                     + elapsed / 2U) / elapsed);
+                UiTopbar_setCpu(&self->topbar, cpu);
+            }
+            uint32_t const fps =
+                self->display->readFps(self->display->context);
+            UiTopbar_setFps(&self->topbar,
+                            (uint16_t)(fps > 999U ? 999U : fps));
+            return _SM_HANDLED();
+        }
+        case UI_LED_ON_SIG:
+        case UI_LED_OFF_SIG:
+            self->ledOn = e->sig == UI_LED_ON_SIG;
+            UiTopbar_setLed(&self->topbar, self->ledOn);
+            UiTopbar_setCount(&self->topbar, NvmBlinky_get()->edges);
+            return _SM_HANDLED();
+        default:
+            return _SM_SUPER();
+    }
 }
 
 static SM_StatePtr Sm_Ui_active_initial_(SM_Hsm * const me) SM_HSM_RETT {
@@ -295,7 +332,8 @@ static void Sm_Ui_sysInfo_entry_(SM_Hsm * const me) SM_HSM_RETT {
                     &self->bootCount, &self->threadMonitor,
                     &self->resourceMonitor,
                     Asset_slot(Asset_get(), 0U));
-    TimeEvt_arm(&self->stateTimeout, UI_SYS_INFO_TICKS, 0U);
+    UiBootCount_setCount(&self->bootCount, NvmBoot_get()->count);
+    // TimeEvt_arm(&self->stateTimeout, UI_SYS_INFO_TICKS, 0U);
 }
 
 static void Sm_Ui_sysInfo_exit_(SM_Hsm * const me) SM_HSM_RETT {

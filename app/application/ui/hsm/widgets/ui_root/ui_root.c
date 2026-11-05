@@ -22,7 +22,13 @@ void UiRoot_init(UiRoot *me) {
     lv_obj_set_pos(me->container, 0, 0);
     lv_obj_set_style_border_width(me->container, 0, 0);
     lv_obj_set_style_radius(me->container, 0, 0);
-    lv_obj_set_style_pad_all(me->container, 0, 0);
+    lv_obj_set_style_pad_all(me->container, 2, 0);
+    lv_obj_set_flex_flow(me->container, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(me->container,
+                          LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_row(me->container, 10, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(me->container, 0, 0);
     lv_obj_remove_flag(me->container, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(me->container, LV_SCROLLBAR_MODE_OFF);

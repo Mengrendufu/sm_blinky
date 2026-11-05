@@ -1,5 +1,18 @@
 # UI 重构准备状态
 
+## 组件尺寸参数
+
+Topbar、PageTitle、BootCount、ThreadMonitor、ThreadCard、
+ResourceMonitor、ResourceCard 的 create 接口统一在 parent 后接收
+int32_t width / height；PageTitle 的 title 参数随后传入。
+尺寸直接使用 LVGL 原生值：像素数或 lv_pct(100)，不另造 Fill 枚举。
+例如 UiTopbar_create(&bar, root.container, lv_pct(100), 17)。
+页面指定区域高度，宽度使用 Fill；Monitor 内部 viewport 和两张
+卡片随父尺寸变化，第二张卡的位置也使用百分比，不缓存像素宽度。
+ThreadMonitor 的 viewport 通过 flex_grow 获取剩余高度。
+字体、LED、圆点和圆弧保持设计尺寸，不随外框缩放。
+UiRoot 始终取屏幕尺寸；UiDots 的自然尺寸仍由点数决定。
+
 当前只保留唯一持久可见的 UiRoot 内容根容器，Splash 复用其背景。
 原 Sys/Live 的业务控件、背景挂载、资源采样、Header/Dial 时间事件
 及相关数据展示调用已移除。资产格式、Flash 加载和 NVM 模块未改动。
@@ -24,7 +37,7 @@ UI 线程 → Sm_Ui HSM → UiSplash → UiRoot → LVGL
 目录分两类助手：hsm/helpers 放 HSM 持有的无状态页面操作
 （ui_splash.c/.h 让根容器借用验证过的 RGB565 像素；
 ui_sys_info.c/.h 做 SysInfo 页的背景借用和页标题
-build/hide（PageTitle 挂在根容器下，Active 配置的
+build/hide（PageTitle 挂在根容器下，UiRoot_init 配置的
 COLUMN flex 让它落在 Topbar 下方、行距 10）；
 不动 Topbar 或兄弟节点；LiveShow 的
 页面助手留待其实现落地时再建）。共享 Topbar 由
@@ -100,16 +113,30 @@ lv_style_t（UiStyle_topbarText = Montserrat 14 白色文字属性组）
 （blinkyCount/fps/cpu）都挂它。LED 圆角/颜色仍在
 Topbar 内部，不进共享样式。
 
-Topbar 是被动组件，已由 Active entry 挂载但尚无数据采样：
+Topbar 是被动组件，由 Active entry 挂载并读取 NVM 边沿累计值；
+LED 事件更新灯状态并重新读取累计值。
+独立 1 s 时间事件更新 FPS 和 CPU，跨 SysInfo/LiveShow 持续运行；
+FPS 取显示适配层实际完成帧率，静态画面不保证持续满帧。
+CPU 对 BSP 的 idle/total 计数作窗口差分，显示非 idle 占比；
+首个窗口前为 0，无新增采样时保留上次值。
+UI 线程适配器在临界区读取计数对，Topbar 不承担采样逻辑。
+LED 事件由 Active 状态处理；Splash 期间不更新 Topbar。
+SysInfo 每次进入时读取 NvmBoot 的 RAM 启动次数：
 7 个 LVGL 对象
-（236x20 flex 行容器 + 左右两个透明分组 + LED + 三个静态文本
-标签）；位置由父布局/调用方决定，2 px 四边间距是外框内部
-Flex pad（padRow/Column 均为 0），不靠 HSM 加 (2,2) 偏移。
+（236x17 flex 行容器 + 左右两个透明分组 + LED + 三个静态文本
+标签）；外框无 padding。UiRoot_init 设置四边 2 px 的页面内边距，
+并配置纵向 Flex、START 对齐和 10 px 行距，Topbar 自然落在 (2,2)。
+Active 入口仅创建 Topbar，不再配置 Root 的布局。
+Splash 借用 Root 的整屏背景，不创建参与 padding 布局的子对象。
 接口 UiTopbar_create/destroy/
 setLed/setCount/setFps/setCpu；fps 域 0..999，cpu 0..100，
-count 全 uint32。Figma 原件混用 Inter，实现统一用编译内的
-Montserrat 14，标签宽度按域上限值（"4294967295"/"999FPS"/"100%"）
-留足；文本经 lv_label_set_text_static 借用实例内缓冲，
+count 全 uint32。最新版 Figma 和实现均为 Montserrat 14，
+本地字库实测最大计数宽 86、999FPS 宽 55、100% 宽 35；
+相对 Figma 的 85/52/36 框，计数/FPS 向左扩 1/3 px，
+保持页面右边界 101/200/238，三个标签全部右对齐、高 17。
+左分组 99x17，LED 10x10 居中；右分组 93x17，FPS/CPU 间距 2。
+LED 的 Figma y=5.5 在 LVGL 居中布局取 6，误差为半像素。
+文本经 lv_label_set_text_static 借用实例内缓冲，
 实例不得在存活期移动或复制。
 
 widgets/page_title/page_title.c/.h 是被动页标题组件，
@@ -173,10 +200,10 @@ helper 挂载，Sm_Ui 持有实例，进入时创建、退出时销毁，
 定位依据为最新 .fig 的 ThreadStackHighWater（125:64）：
 页面内外框 (2,58.570732)、236x105，整数像素取 (2,59)；
 viewport 相对外框 (2,6)，故页面坐标为 (4,65)、232x83。
-现有 Topbar/PageTitle 尺寸与 Figma 上游容器不同，自然 Flex
-位置是 (0,57)；SysInfo 给 Monitor 设置左/上 margin 各 2，
-继续参与 Flex，不使用 IGNORE_LAYOUT 或绝对坐标补丁，
-不改共享 Root、Topbar 和 PageTitle 的既有位置。
+Root 的页面 padding 提供 x=2；Topbar 高 17，PageTitle 顶部
+margin=1，使标题落在 (2,30)，对应 Figma 的 (2,30.285)。
+ThreadMonitor 保留顶部 margin=2，横向不再重复补边距；
+继续参与 Flex，使卡槽和 viewport 的坐标保持不变。
 
 [原 UML](uml/ui/ui-components.html)是清空前的历史快照。
 
@@ -214,7 +241,7 @@ indicatorContainer 为 viewport 的兄弟节点，
 
 实例须零初始化，父对象须存活，UI 线程独占，destroy 可重复调用。
 已由 SysInfo helper 挂载（Sm_Ui 持有，entry 建、exit 销，
-在 ThreadMonitor 之后创建、仅左外边距 2）：挂载后外框
+在 ThreadMonitor 之后创建、横向由 Root padding 定位）：挂载后外框
 (2,174) 236x144，viewport (2,200) 236x118，卡片 x 2/238
 y 200，圆弧 (70,238)，四点组 (99,287) 42x6。
 未接采样或轮播动画；默认文字不表示真实资源读数。

@@ -15,7 +15,7 @@
 SM_DEFINE_MODULE("page_title")
 
 void UiPageTitle_create(UiPageTitle *me, lv_obj_t *parent,
-                        char const *title) {
+                        int32_t width, int32_t height, char const *title) {
     SM_REQUIRE(me != NULL);
     SM_REQUIRE(parent != NULL);
     SM_REQUIRE(title != NULL);
@@ -23,7 +23,7 @@ void UiPageTitle_create(UiPageTitle *me, lv_obj_t *parent,
 
     lv_obj_t * const box = lv_obj_create(parent);
     lv_obj_remove_style_all(box);
-    lv_obj_set_size(box, 236, 17);
+    lv_obj_set_size(box, width, height);
     lv_obj_remove_flag(box, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(box, LV_OBJ_FLAG_CLICKABLE);
     me->container = box;

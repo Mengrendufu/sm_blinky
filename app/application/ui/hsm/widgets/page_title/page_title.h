@@ -28,8 +28,9 @@ typedef struct {
     lv_obj_t *title;
 } UiPageTitle;
 
+// Outer dimensions accept native LVGL pixels or lv_pct().
 void UiPageTitle_create(UiPageTitle *me, lv_obj_t *parent,
-                        char const *title);
+                        int32_t width, int32_t height, char const *title);
 void UiPageTitle_destroy(UiPageTitle *me);
 void UiPageTitle_setTitle(UiPageTitle *me, char const *title);
 

@@ -1,11 +1,18 @@
 // Exercise the real tracer macros without a UART or target firmware.
 #include <assert.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "sm_tracer.h"
 
 extern unsigned Host_critical;
 SM_Tracer SM_Tracer_inst;
 static unsigned char frame[8];
+
+void SM_onAssert(char const *module, int id) {
+    fprintf(stderr, "ASSERT %s:%d\n", module, id);
+    abort();
+}
 
 unsigned char *SM_Trace_getBlock(SM_Tracer * const me) {
     assert(me == &SM_Tracer_inst && Host_critical == 0);

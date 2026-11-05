@@ -28,7 +28,9 @@ typedef struct {
     UiDots dots;
 } UiResourceMonitor;
 
-void UiResourceMonitor_create(UiResourceMonitor *me, lv_obj_t *parent);
+// Outer dimensions accept native LVGL pixels or lv_pct().
+void UiResourceMonitor_create(UiResourceMonitor *me, lv_obj_t *parent,
+                               int32_t width, int32_t height);
 void UiResourceMonitor_destroy(UiResourceMonitor *me);
 
 #endif // RESOURCE_MONITOR_H_

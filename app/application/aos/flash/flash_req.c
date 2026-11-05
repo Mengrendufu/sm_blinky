@@ -117,9 +117,8 @@ bool Flash_eraseSector(uint32_t address) {
 }
 //============================================================================
 // Application supplies the operation signal and logical item ID.
-bool Flash_postNvm(SST_Signal sig, Nvm_Id id) {
+bool Flash_postNvm(SST_Signal sig, uint16_t id) {
     SM_REQUIRE(sig == FLASH_NVM_WRITE_SIG);
-    SM_REQUIRE(id > NVM_ID_INVALID && (unsigned)id < NVM_ID_LIMIT);
     configASSERT(xPortIsInsideInterrupt() == pdFALSE);
     bool accepted = false;
 

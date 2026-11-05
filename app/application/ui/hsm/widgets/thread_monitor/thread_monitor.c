@@ -13,7 +13,8 @@
 
 SM_DEFINE_MODULE("thread_monitor")
 
-void UiThreadMonitor_create(UiThreadMonitor *me, lv_obj_t *parent) {
+void UiThreadMonitor_create(UiThreadMonitor *me, lv_obj_t *parent,
+                             int32_t width, int32_t height) {
     SM_REQUIRE(me != NULL);
     SM_REQUIRE(parent != NULL);
     SM_REQUIRE(me->container == NULL);
@@ -24,7 +25,7 @@ void UiThreadMonitor_create(UiThreadMonitor *me, lv_obj_t *parent) {
 
     me->container = FlexContainer_create(parent,
         &(UiFlexConfig){
-            .width = 236, .height = 105,
+            .width = width, .height = height,
             .flow = LV_FLEX_FLOW_COLUMN,
             .mainPlace = LV_FLEX_ALIGN_START,
             .crossPlace = LV_FLEX_ALIGN_CENTER,
@@ -34,16 +35,18 @@ void UiThreadMonitor_create(UiThreadMonitor *me, lv_obj_t *parent) {
     lv_obj_remove_flag(me->container, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
     me->viewport = lv_obj_create(me->container);
     lv_obj_remove_style_all(me->viewport);
-    lv_obj_set_size(me->viewport, 232, 83);
+    lv_obj_set_size(me->viewport, lv_pct(100), 0);
+    lv_obj_set_flex_grow(me->viewport, 1);
     lv_obj_remove_flag(me->viewport, LV_OBJ_FLAG_SCROLLABLE
                                      | LV_OBJ_FLAG_CLICKABLE
                                      | LV_OBJ_FLAG_OVERFLOW_VISIBLE);
     lv_point_t const cardPositions[2] = {
         {.x = 0, .y = 0},
-        {.x = 232, .y = 0}
+        {.x = lv_pct(100), .y = 0}
     };
     for(unsigned i = 0; i < 2; ++i) {
-        UiThreadCard_create(&me->cards[i], me->viewport);
+        UiThreadCard_create(&me->cards[i], me->viewport,
+                             lv_pct(100), lv_pct(100));
         lv_obj_set_pos(me->cards[i].container,
                         cardPositions[i].x, cardPositions[i].y);
     }

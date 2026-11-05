@@ -12,6 +12,7 @@
 
 #include "sm_hsm.h"
 #include "sm_flash_evt.h"
+#include "nvm_manager.h"
 
 //============================================================================
 //=== Flash state machine
@@ -23,6 +24,7 @@
 typedef struct {
     SST_Task super;
     SM_Hsm sm_hsm_;
+    NvmManager nvm;
 } Sm_Flash;
 
 // SST virtual functions, registered directly. init runs on the starter;

@@ -44,7 +44,9 @@ typedef struct {
     UiThreadCardResource resources[UI_THREAD_CARD_RESOURCE_COUNT];
 } UiThreadCard;
 
-void UiThreadCard_create(UiThreadCard *me, lv_obj_t *parent);
+// Outer dimensions accept native LVGL pixels or lv_pct().
+void UiThreadCard_create(UiThreadCard *me, lv_obj_t *parent,
+                          int32_t width, int32_t height);
 void UiThreadCard_destroy(UiThreadCard *me);
 void UiThreadCard_setHeader(UiThreadCard *me, char const *threadName,
                             char const *priorityText);

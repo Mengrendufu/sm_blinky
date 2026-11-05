@@ -1,4 +1,44 @@
-# 应用 NVM 映射与事件写入
+# 应用 NVM Manager 与事件写入
+
+## 当前实现
+
+正式实现位于 app/application/nvm：框架文件置于根目录，
+具体数据块置于 instance/，模块说明见该目录 README.md。
+draft 层及旧 nvm.c/.h 已移除；下文旧静态映射部分仅为历史记录，
+不是当前 API。
+
+- Sm_Flash 内嵌 NvmManager；Flash_ctor 装配 manager 及
+  NvmBoot/NvmBlinky 私有实例，manager 不依赖具体数据类型。
+- NvmMeta 绑定每块的双份后备 RAM，前半为活块、后半暂存 IO；
+  取消旧的共享联合体和逐项保存结果表。
+- NVM_BOOT_ID=1、NVM_BLINKY_ID=2 保持不变，当前记录均为 4 B。
+  新块由自身 ctor 调 NvmManager_mountBlock 注册，不修改 manager。
+- Flash 完成资产加载后调用 NvmManager_init；缺项保留默认值，
+  单项失败继续恢复其他项。仅挂载失败时重试，最多两次；
+  已挂载但恢复失败不再次加载活块。
+- 恢复结束由 Flash AO 调 NvmBoot_inc，再绑定请求入口并广播
+  NVM_READY。完全挂载失败也累计本次 RAM 启动次数并结束初始化。
+- Blinky 等待 NVM_READY；之后通过 NvmBlinky_add 修改活块，
+  无恢复前增量缓存。get 返回活块只读指针，不进行 IO。
+- active 入口启动独立的 10 s 周期时间事件，
+  BLINKY_NVM_TIMEOUT_SIG 触发保存，不再累计闪烁节拍。
+- Flash_postNvm(sig, uint16_t id) 只投递 ID；Flash 处理时调用
+  NvmManager_store，错误由 AO 记录。未变化返回 0 仍为成功，
+  不提供旧 Nvm_writeResult，也不把入列成功当作保存完成。
+- UI Topbar 随 LED 事件更新灯状态和 NvmBlinky 活块累计值；
+  Active 入口补读当前值，SysInfo 入口读取 NvmBoot 启动次数。
+  UI 只读取 RAM，不进行存储 IO，也不自行累计边沿。
+
+启动 trace 13 改为 manager 初始化总耗时（挂载及恢复），
+14 为初始化结果，15 为 RAM 启动次数；均为完整大端 32 位值。
+原单独挂载耗时记录 12 不再发出。8/9 仍报告挂载失败，
+10 报告逐项恢复失败，11 报告保存失败。
+
+运行 python3 tests/nvm/run.py 验证恢复、挂载重试、保存快照、
+结构体块注册，以及真实 Flash HSM/Blinky 的事件路由。
+只使用宿主 ASan/UBSan，不构建固件或访问硬件。
+
+## 历史实现（已退出构建）
 
 app/application/nvm 是应用共享模块；数据布局、逻辑 ID 与 NVS key 的
 对应关系集中在这里。Flash AO 不定义业务 key，不维护 checkpoint。

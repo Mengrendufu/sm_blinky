@@ -16,14 +16,15 @@
 
 SM_DEFINE_MODULE("boot_count")
 
-void UiBootCount_create(UiBootCount *me, lv_obj_t *parent) {
+void UiBootCount_create(UiBootCount *me, lv_obj_t *parent,
+                         int32_t width, int32_t height) {
     SM_REQUIRE(me != NULL);
     SM_REQUIRE(parent != NULL);
     SM_REQUIRE(me->container == NULL);
 
     lv_obj_t * const meta = FlexContainer_create(parent,
         &(UiFlexConfig){
-            .width = 106, .height = 12, .flow = LV_FLEX_FLOW_ROW,
+            .width = width, .height = height, .flow = LV_FLEX_FLOW_ROW,
             .mainPlace = LV_FLEX_ALIGN_SPACE_EVENLY,
             .crossPlace = LV_FLEX_ALIGN_CENTER,
             .trackPlace = LV_FLEX_ALIGN_START,

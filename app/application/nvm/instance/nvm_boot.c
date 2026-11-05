@@ -1,5 +1,5 @@
 #include "nvm_boot.h"
-#include "../nvm_port.h"
+#include "nvm_port.h"
 
 typedef struct {
     NvmMeta meta;

@@ -28,7 +28,9 @@ typedef struct {
     char countText[14]; // "4,294,967,295"
 } UiBootCount;
 
-void UiBootCount_create(UiBootCount *me, lv_obj_t *parent);
+// Outer dimensions accept native LVGL pixels or lv_pct().
+void UiBootCount_create(UiBootCount *me, lv_obj_t *parent,
+                         int32_t width, int32_t height);
 void UiBootCount_destroy(UiBootCount *me);
 void UiBootCount_setCount(UiBootCount *me, uint32_t count);
 

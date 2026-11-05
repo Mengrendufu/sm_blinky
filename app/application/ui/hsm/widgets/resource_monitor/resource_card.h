@@ -32,7 +32,9 @@ typedef struct {
     lv_obj_t *maximum;
 } UiResourceCard;
 
-void UiResourceCard_create(UiResourceCard *me, lv_obj_t *parent);
+// Outer dimensions accept native LVGL pixels or lv_pct().
+void UiResourceCard_create(UiResourceCard *me, lv_obj_t *parent,
+                            int32_t width, int32_t height);
 void UiResourceCard_destroy(UiResourceCard *me);
 
 #endif // RESOURCE_CARD_H_

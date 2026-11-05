@@ -906,7 +906,8 @@ Blinky 每 20 个半秒节拍分别请求保存启动次数和 LED 累计值。
 SST GC 回收；没有逐项静态事件或 pending 标记。队列固定十个槽位，
 事件池仍为十六块，块大小由裸事件扩至 8 B 以容纳 ID。
 物理 key 不再通过 Flash_nvsRead/Write 暴露，裸区 RPC 保持。
-Nvm_writeResult 记录完成结果，NVS 未变化返回 0 也视为成功。
+此段为旧实现记录。当前已改用 nvm 的 NvmManager 和具体实例，
+不再提供 Nvm_writeResult；保存失败由 Flash AO 记录。
 细节与验证命令见 [nvm-storage.md](nvm-storage.md)。
 
 
@@ -949,8 +950,9 @@ Bootloader 仍为 DMA + 自旋等待。SPI 超时及诊断统一使用 HAL tick�
 
 打点用 HAL_GetTick 无符号差分，记录保存低 16 位，继承原有范围。
 该记录排除资产/NVS、调度器启动及首帧；不再预留零耗时资产字段。
-NVS 记录 12/13/14/15 分别报告挂载耗时、恢复耗时、
-恢复结果和启动计数，均为完整 32 位值。tools/trace_read.py 按帧长度
+接入 NvmManager 后，13/14/15 分别报告初始化总耗时、
+初始化结果和启动计数，均为完整 32 位值，12 不再发出。
+tools/trace_read.py 按帧长度
 输出原始 payload，没有记录 79 的专用解码器；旧日志仍可按原格式读。
 
 UI TOP 进入 standby，收到就绪后才允许 Splash；当前 GO 为自投递。

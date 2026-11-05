@@ -1,5 +1,5 @@
 #include "nvm_blinky.h"
-#include "../nvm_port.h"
+#include "nvm_port.h"
 
 typedef struct {
     NvmMeta meta;

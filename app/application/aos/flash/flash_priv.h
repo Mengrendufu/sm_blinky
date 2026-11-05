@@ -22,7 +22,7 @@ void Flash_bindRuntime(void);
 void Flash_initStorage(void);
 
 // Save one mapped RAM item in response to an application event.
-void Flash_writeNvm(Nvm_Id id);
+void Flash_writeNvm(uint16_t id);
 
 // Complete a borrowed request and report AO stack usage. No request access
 // is allowed after this call, because its caller may already have resumed.

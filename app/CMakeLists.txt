@@ -68,7 +68,10 @@ set(SRC_ALL
     ${APP_ROOT}/application/ui/hsm/widgets/helpers/ui_arc.c
     ${APP_ROOT}/application/ui/hsm/widgets/styles/ui_style.c
     ${APP_ROOT}/application/ui/hsm/sm_ui.c
-    ${APP_ROOT}/application/nvm/nvm.c
+    ${APP_ROOT}/application/nvm/nvm_manager.c
+    ${APP_ROOT}/application/nvm/nvm_meta.c
+    ${APP_ROOT}/application/nvm/instance/nvm_boot.c
+    ${APP_ROOT}/application/nvm/instance/nvm_blinky.c
     ${APP_ROOT}/application/aos/flash
     ${REPO_ROOT}/3rd_party/sm_nvs/include
     ${APP_ROOT}/application/aos/flash/flash.c

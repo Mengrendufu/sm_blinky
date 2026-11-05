@@ -15,14 +15,13 @@
 #include <stdint.h>
 
 // Passive status strip: LED indicator, LED edge counter, FPS and CPU
-// text. The container is a 236x20 flex row with 2 px padding on all
-// four sides; groups keep the LED+count left and FPS+CPU right.
-// A parent layout or caller MAY position the object, but that is not
-// the 2 px edge-spacing contract -- the padding lives inside Flex.
+// text. The container is a 236x17 flex row without padding.
+// The parent owns page-edge spacing (UiRoot_init sets padding to 2).
+// Groups keep LED+count left and FPS+CPU right; labels align right.
 //
-// Figma used Inter for some labels; this component draws text with
-// the compiled-in Montserrat 14, so internal widths are adapted to keep
-// the maximum values ("4294967295", "999FPS", "100%") unclipped.
+// Figma and the compiled font are Montserrat 14, with slightly different
+// metrics. Count/FPS boxes extend 1/3 px left of Figma's bounds to fit
+// maximum values while retaining its text right edges.
 // Domains: fps 0..999, cpu 0..100, count full uint32.
 //
 // Contracts: zero-initialize the instance before create; never copy
@@ -41,7 +40,9 @@ typedef struct {
     char cpuText[5];    // "100%"
 } UiTopbar;
 
-void UiTopbar_create(UiTopbar *me, lv_obj_t *parent);
+// Outer dimensions accept native LVGL pixels or lv_pct().
+void UiTopbar_create(UiTopbar *me, lv_obj_t *parent,
+                      int32_t width, int32_t height);
 void UiTopbar_destroy(UiTopbar *me);
 void UiTopbar_setLed(UiTopbar *me, bool on);
 void UiTopbar_setCount(UiTopbar *me, uint32_t count);

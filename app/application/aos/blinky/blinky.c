@@ -18,7 +18,8 @@
 #include "ui_evt.h"
 #include "sm_ui_evt.h"
 #include "flash.h"
-#include "nvm.h"
+#include "instance/nvm_blinky.h"
+#include "instance/nvm_boot.h"
 #include "sm_flash_evt.h"
 
 // Class =====================================================================
@@ -26,24 +27,26 @@ typedef struct Blinky {
     SST_Task super;
     SM_Hsm sm_hsm_;
     SST_TimeEvt timeEvt;
+    SST_TimeEvt nvmTimeEvt;
 } Blinky;
 
 // Virtual ===================================================================
 static void Blinky_init(Blinky * const me, SST_Evt const * const ie);
 static void Blinky_dispatch(Blinky * const me, SST_Evt const * const e);
-static void Blinky_maintenance_(void);
 
 // SM_Hsm ====================================================================
 // UML-Top-Initial
 static SM_StatePtr Blinky_TOP_initial_(SM_Hsm * const me) SM_HSM_RETT;
 static SM_RetState Blinky_inactive_(Blinky *me, SST_Evt const *e);
 static SM_StatePtr Blinky_active_initial_(SM_Hsm *me);
+static void Blinky_active_entry_(SM_Hsm *me);
 static SM_RetState Blinky_active_(Blinky *me, SST_Evt const *e);
 static SM_HsmState SM_HSM_ROM Blinky_inactive = {
     SM_HSM_TOP, 0, 0, 0, (SM_StateHandler)&Blinky_inactive_
 };
 static SM_HsmState SM_HSM_ROM Blinky_active = {
-    SM_HSM_TOP, (SM_InitHandler)&Blinky_active_initial_, 0, 0,
+    SM_HSM_TOP, (SM_InitHandler)&Blinky_active_initial_,
+    (SM_ActionHandler)&Blinky_active_entry_, 0,
     (SM_StateHandler)&Blinky_active_
 };
 // State-Blinky_on
@@ -81,11 +84,6 @@ SST_Task * const AO_Blinky = &Blinky_inst.super;
 static StaticTask_t Blinky_tcb;
 static StackType_t  Blinky_stack[BLINKY_STACK_WORDS];
 
-#define BLINKY_SAVE_BEATS 20U // 20 half-second beats = 10 s
-
-static uint8_t blinky_saveBeats_;
-
-
 // Class implementation ======================================================
 void Blinky_ctor(void) {
     SST_Task_ctor(AO_Blinky,
@@ -95,6 +93,8 @@ void Blinky_ctor(void) {
     AO_Blinky->stack = Blinky_stack;
     AO_Blinky->stackSizeWords = BLINKY_STACK_WORDS;
     SST_TimeEvt_ctor(&Blinky_inst.timeEvt, BLINKY_TIMEOUT_SIG, AO_Blinky);
+    SST_TimeEvt_ctor(&Blinky_inst.nvmTimeEvt,
+                     BLINKY_NVM_TIMEOUT_SIG, AO_Blinky);
 }
 //............................................................................
 static void Blinky_init(Blinky * const me, SST_Evt const * const ie) {
@@ -123,7 +123,7 @@ static SM_RetState Blinky_inactive_(Blinky *me, SST_Evt const *e) {
     (void)me;
     switch (e->sig) {
         case BRING_UP_NVM_READY_SIG:
-            (void)Flash_postNvm(FLASH_NVM_WRITE_SIG, NVM_BOOT_COUNT);
+            (void)Flash_postNvm(FLASH_NVM_WRITE_SIG, NVM_BOOT_ID);
             return _SM_TRAN(&Blinky_active);
         default:
             return _SM_SUPER();
@@ -135,16 +135,27 @@ static SM_StatePtr Blinky_active_initial_(SM_Hsm *me) {
     return _SM_INIT(&Blinky_on);
 }
 
+static void Blinky_active_entry_(SM_Hsm *me) {
+    Blinky * const self = container_of(me, Blinky, sm_hsm_);
+    SST_TimeEvt_arm(&self->nvmTimeEvt,
+                    10U * BSP_TICKS_PER_SEC, 10U * BSP_TICKS_PER_SEC);
+}
+
 static SM_RetState Blinky_active_(Blinky *me, SST_Evt const *e) {
     (void)me;
-    (void)e;
-    return _SM_SUPER();
+    switch (e->sig) {
+        case BLINKY_NVM_TIMEOUT_SIG:
+            (void)Flash_postNvm(FLASH_NVM_WRITE_SIG, NVM_BLINKY_ID);
+            return _SM_HANDLED();
+        default:
+            return _SM_SUPER();
+    }
 }
 // State-Blinky_on
 static void Blinky_on_entry_(SM_Hsm * const me) SM_HSM_RETT {
     (void)me;
     BSP_ledOn();
-    Nvm_addBlinky(1U);
+    NvmBlinky_add(1U);
     SST_Evt *evt = SST_NEW(SST_Evt);
     evt->sig = UI_LED_ON_SIG;
     Ui_post(evt);
@@ -153,7 +164,6 @@ static SM_RetState Blinky_on_(Blinky * const me,
                               SST_Evt const * const e) SM_HSM_RETT {
     switch (e->sig) {
         case BLINKY_TIMEOUT_SIG: {
-            Blinky_maintenance_();
             return _SM_TRAN(&Blinky_off);
         }
         default: {
@@ -165,7 +175,6 @@ static SM_RetState Blinky_on_(Blinky * const me,
 static void Blinky_off_entry_(SM_Hsm * const me) SM_HSM_RETT {
     (void)me;
     BSP_ledOff();
-    Nvm_addBlinky(1U);
     SST_Evt *evt = SST_NEW(SST_Evt);
     evt->sig = UI_LED_OFF_SIG;
     Ui_post(evt);
@@ -174,20 +183,10 @@ static SM_RetState Blinky_off_(Blinky * const me,
                                SST_Evt const * const e) SM_HSM_RETT {
     switch (e->sig) {
         case BLINKY_TIMEOUT_SIG: {
-            Blinky_maintenance_();
             return _SM_TRAN(&Blinky_on);
         }
         default: {
             return _SM_SUPER();
         }
-    }
-}
-//............................................................................
-// The same work in both states, so the beat counter lives in one place.
-static void Blinky_maintenance_(void) {
-    if (++blinky_saveBeats_ == BLINKY_SAVE_BEATS) {
-        blinky_saveBeats_ = 0U;
-        // The AO snapshots the counter when this event is handled.
-        (void)Flash_postNvm(FLASH_NVM_WRITE_SIG, NVM_BLINKY_EDGES);
     }
 }

@@ -38,12 +38,15 @@
 #define UI_SPLASH_TICKS 150U
 #define UI_SYS_INFO_TICKS    500U
 #define UI_LIVE_SHOW_TICKS   1000U
+#define UI_STATS_TICKS       100U
 
 // Required display capabilities, called synchronously on the UI thread.
 // Bind before initialization; the immutable table/context outlive the HSM.
 typedef struct {
     void *context;
     void (*setBacklight)(void *context, bool on);
+    uint32_t (*readFps)(void *context);
+    void (*readCpuSample)(void *context, uint32_t *idle, uint32_t *total);
 } Sm_Ui_DisplayOperations;
 
 typedef struct {
@@ -51,19 +54,23 @@ typedef struct {
     Sm_Ui_DisplayOperations const *display;
     // Registered before scheduling; states directly arm/disarm their nodes.
     TimeEvt stateTimeout;
+    TimeEvt statsTimeout;
+    uint32_t cpuIdle;
+    uint32_t cpuTotal;
+    bool ledOn;
 
     // The one persistent content container; Splash borrows its
-    // background, no second object. Active puts it in COLUMN flex so
-    // page content stacks under the shared Topbar.
+    // background, no second object. Its COLUMN flex stacks page
+    // content under the shared Topbar.
     UiRoot root;
     // Passive Topbar, alive for the whole Active superstate; Sys and
-    // Live share it, no per-page create/delete. No data sampling yet.
+    // Live share it; LED events refresh the state and NVM edge count.
     UiTopbar topbar;
     // SysInfo-only page title; created on SysInfo entry, destroyed
     // on exit -- NOT shared across pages.
     UiPageTitle pageTitle;
     // SysInfo-only boot-count group, composed under pageTitle by
-    // the page helper; count stays 0 (no NVM binding yet).
+    // the page helper; reads the restored count on page entry.
     UiBootCount bootCount;
     // SysInfo-owned two-card monitor; no resource sampling or animation.
     UiThreadMonitor threadMonitor;

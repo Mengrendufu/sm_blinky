@@ -1,7 +1,12 @@
-# NVM OOP 雏形（语义重构方向，未接入构建）
+# NVM 对象框架（已接入应用构建）
 
-现有 `../nvm.c/.h` 不变。本目录是完整框架 + 应用形态，供结构审核；
-与旧模块语义不逐条兼容，接入在 UI 框架重建后统一进行。
+本目录为应用使用的 NVM 实现，框架文件置于根目录，
+具体数据块置于 `instance/`。旧 `nvm.c/.h` 已删除，历史由 Git 保留。
+平台适配头 `nvm_port.h` 位于 `app/ports/`。
+Flash AO 内嵌 NvmManager，在 Flash_ctor 中依次装配 manager、
+NvmBoot 和 NvmBlinky；初始化恢复后调用 NvmBoot_inc。
+Blinky 等 NVM_READY 才开始修改活块；保存由 Flash AO 串行执行。
+不保留旧的恢复前增量缓存或 Nvm_writeResult 结果表。
 
 | 对象 | 数据与职责 |
 |---|---|
@@ -37,7 +42,7 @@
 common_c 或接入时执行。
 
 **归属链 `Flash AO ⊃ NvmManager ⊃ fs`**：对象由 AO 侧内嵌持有
-（draft 不代持任何 manager 对象，接入时就是 AO 结构的一个成员）；
+（本模块不代持 manager 对象，Sm_Flash 内嵌持有）；
 槽位表随对象走——`nvmRegister` 指针 + `idNum` 容量是对象字段
 （当前 ctor 一律绑 `nvm_manager.c` 的文件静态默认表；第二个
 manager 要独立槽位表仍待参数化。fs 侧换绑已兑现为动词——
@@ -85,7 +90,7 @@ Manager 不特殊排除槽位 0；本应用从 1 起编号是装配约定，不�
 
 | 文件 | 持久化数据 | 语义操作 |
 |---|---|---|
-| `instance/nvm_boot.h/.c` | count | inc（恢复后本次启动计数）、get（活块指针） |
+| `instance/nvm_boot.h/.c` | count | inc（恢复后 +1）、get（活块指针） |
 | `instance/nvm_blinky.h/.c` | edges | add、get（活块指针） |
 
 `get` 的形态是直接返回活块指针（`&data[0]`）——活块就是全局
@@ -154,15 +159,14 @@ load/store 的参数前置条件全部断言（未定义 ID 是违例而非
 恢复逐项失败经记录 10（UINT16 id + INT32 error，
 沿用旧模块分配）上报。
 
-## 尚未实现的部分
+## 接入状态与未保留的旧能力
 
-- 接入固件构建与 Flash AO/blinky 调用侧改造：待 UI 框架重建后
-  统一进行；旧 `Nvm_load/Nvm_store/Nvm_addBlinky/Nvm_blinky/
-  Nvm_bootCount/Nvm_writeResult` 的迁移映射见下表。
+- 已接入固件源码清单及 Flash AO/Blinky 调用侧；
+  旧 API 的迁移映射见下表。接入不等于固件编译或硬件验证。
 - 逐项 store 结果查询（旧 Nvm_writeResult）未保留：
   save 同步返回结果，需要观测时由调用方记录。
-- init（含内部 restore）后的 fixups（inc）归调用方（AO 侧）
-  依次跑；也可以再下沉成实例级 restored 钩子，到时再议。
+- init（含内部 restore）后的 fixup 由 Flash AO 调 NvmBoot_inc。
+  挂载完全失败时仍从默认值累计本次启动，后续保存失败由 AO 记录。
 
 | 旧 API | 新对应 |
 |---|---|

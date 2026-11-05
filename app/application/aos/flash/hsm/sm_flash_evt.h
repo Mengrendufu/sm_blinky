@@ -13,7 +13,7 @@
 #include "sst.h"
 #include "application_evt.h"
 #include "flash_req.h"
-#include "nvm.h"
+#include <stdint.h>
 
 //============================================================================
 //=== Event contract shared by the Flash AO queue and the flash HSM
@@ -32,7 +32,7 @@ typedef struct {
 // Payload selects the item; its RAM data is snapshotted at handling time.
 typedef struct {
     SST_Evt super;
-    Nvm_Id id;
+    uint16_t id;
 } Flash_NvmEvt;
 
 enum {
@@ -40,7 +40,7 @@ enum {
     FLASH_READ_SIG = APPLICATION_PUB_SIG_MAX,
     FLASH_WRITE_SIG,
     FLASH_ERASE_SIG,
-    // Save one mapped application item; payload is Nvm_Id.
+    // Save one mounted application item; payload is a uint16_t slot ID.
     FLASH_NVM_WRITE_SIG,
     LOADING_SPLASH_ASSETS_SIG,
     LOADING_ASSETS_SIG
