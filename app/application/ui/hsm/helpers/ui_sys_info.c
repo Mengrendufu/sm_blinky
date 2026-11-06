@@ -31,7 +31,7 @@ void UiSysInfo_build(UiRoot *root, UiPageTitle *pageTitle,
                        lv_pct(100), 17, "SysMonitor");
     // Figma title y=30.285 rounds to 30 below the 17 px Topbar.
     lv_obj_set_style_margin_top(pageTitle->container, 1, LV_PART_MAIN);
-    UiBootCount_create(bootCount, pageTitle->container, 106, 12);
+    UiBootCount_create(bootCount, pageTitle->container, 151, 17);
     lv_obj_align(bootCount->container, LV_ALIGN_RIGHT_MID, 0, 0);
     UiThreadMonitor_create(monitor, root->container, lv_pct(100), 105, 5);
     // Root owns the side spacing; keep the Figma y=59 rounding in Flex.

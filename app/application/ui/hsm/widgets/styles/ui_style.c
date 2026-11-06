@@ -33,7 +33,7 @@ LV_STYLE_CONST_INIT(UiStyle_pageTitleText,
 static lv_style_const_prop_t const
     UiStyle_bootCountTextProps_[] = {
     {.prop = LV_STYLE_TEXT_FONT,
-     .value = {.ptr = &lv_font_montserrat_10}},
+     .value = {.ptr = &lv_font_montserrat_14}},
     {.prop = LV_STYLE_TEXT_COLOR,
      .value = {.color = LV_COLOR_MAKE(0xFF, 0xFF, 0xFF)}},
     LV_STYLE_CONST_PROPS_END
@@ -126,3 +126,48 @@ static lv_style_const_prop_t const
 };
 
 LV_STYLE_CONST_INIT(UiStyle_arcIndicator, UiStyle_arcIndicatorProps_);
+
+static lv_style_const_prop_t const UiStyle_liveTextProps_[] = {
+    {.prop = LV_STYLE_TEXT_FONT,
+     .value = {.ptr = &lv_font_montserrat_14}},
+    {.prop = LV_STYLE_TEXT_COLOR,
+     .value = {.color = LV_COLOR_MAKE(0xFF, 0xFF, 0xFF)}},
+    LV_STYLE_CONST_PROPS_END
+};
+
+LV_STYLE_CONST_INIT(UiStyle_liveText, UiStyle_liveTextProps_);
+
+static lv_style_const_prop_t const UiStyle_signalTextProps_[] = {
+    {.prop = LV_STYLE_TEXT_FONT,
+     .value = {.ptr = &lv_font_montserrat_14}},
+    {.prop = LV_STYLE_TEXT_COLOR,
+     .value = {.color = LV_COLOR_MAKE(0xFF, 0xFF, 0xFF)}},
+    LV_STYLE_CONST_PROPS_END
+};
+LV_STYLE_CONST_INIT(UiStyle_signalText, UiStyle_signalTextProps_);
+
+static lv_style_const_prop_t const UiStyle_signalWaveProps_[] = {
+    {.prop = LV_STYLE_LINE_WIDTH, .value = {.num = 2}},
+    {.prop = LV_STYLE_LINE_ROUNDED, .value = {.num = 1}},
+    {.prop = LV_STYLE_LINE_OPA, .value = {.num = LV_OPA_COVER}},
+    {.prop = LV_STYLE_LINE_COLOR,
+     .value = {.color = LV_COLOR_MAKE(0xBE, 0xE0, 0x86)}},
+    LV_STYLE_CONST_PROPS_END
+};
+LV_STYLE_CONST_INIT(UiStyle_signalWave, UiStyle_signalWaveProps_);
+
+static lv_style_const_prop_t const UiStyle_signalPhaseProps_[] = {
+    {.prop = LV_STYLE_BG_OPA, .value = {.num = LV_OPA_COVER}},
+    {.prop = LV_STYLE_BG_COLOR,
+     .value = {.color = LV_COLOR_MAKE(0x81, 0x94, 0x80)}},
+    LV_STYLE_CONST_PROPS_END
+};
+LV_STYLE_CONST_INIT(UiStyle_signalPhase, UiStyle_signalPhaseProps_);
+
+static lv_style_const_prop_t const UiStyle_signalPhaseActiveProps_[] = {
+    {.prop = LV_STYLE_BG_COLOR,
+     .value = {.color = LV_COLOR_MAKE(0x61, 0xDF, 0x5A)}},
+    LV_STYLE_CONST_PROPS_END
+};
+LV_STYLE_CONST_INIT(UiStyle_signalPhaseActive,
+                    UiStyle_signalPhaseActiveProps_);

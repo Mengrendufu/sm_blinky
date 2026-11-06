@@ -54,6 +54,9 @@ set(SRC_ALL
     ${APP_ROOT}/application/ui/hsm/widgets/ui_root/ui_root.c
     ${APP_ROOT}/application/ui/hsm/widgets/topbar/topbar.c
     ${APP_ROOT}/application/ui/hsm/widgets/page_title/page_title.c
+    ${APP_ROOT}/application/ui/hsm/widgets/arc/arc.c
+    ${APP_ROOT}/application/ui/hsm/widgets/live_motion/live_motion.c
+    ${APP_ROOT}/application/ui/hsm/widgets/live_signal/live_signal.c
     ${APP_ROOT}/application/ui/hsm/widgets/boot_count/boot_count.c
     ${APP_ROOT}/application/ui/hsm/widgets/thread_monitor/thread_monitor.c
     ${APP_ROOT}/application/ui/hsm/widgets/thread_monitor/thread_card.c

@@ -13,7 +13,7 @@
 #include "lvgl.h"
 #include <stdint.h>
 
-// Passive boot-count group: a 106x12 flex row holding the fixed
+// Passive boot-count group: a 151x17 flex row holding the fixed
 // "BOOTS" caption and a comma-formatted count label. The caller
 // composes it under a parent container and positions it (this
 // factory does not align it externally). Zero-initialize the

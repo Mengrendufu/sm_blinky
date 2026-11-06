@@ -29,18 +29,18 @@ void UiBootCount_create(UiBootCount *me, lv_obj_t *parent,
             .crossPlace = LV_FLEX_ALIGN_CENTER,
             .trackPlace = LV_FLEX_ALIGN_START,
             .padTop = 0, .padBottom = 0, .padLeft = 0,
-            .padRight = 0, .padRow = 0, .padColumn = 1});
+            .padRight = 0, .padRow = 0, .padColumn = 2});
     me->container = meta;
 
     lv_obj_t * const boots = Label_create(meta,
         &(LabelConfig){
-            .width = 37, .height = 12,
+            .width = 52, .height = 17,
             .longMode = LV_LABEL_LONG_MODE_CLIP,
             .text = "BOOTS"});
     lv_obj_add_style(boots, &UiStyle_bootCountText, LV_PART_MAIN);
     me->count = Label_create(meta,
         &(LabelConfig){
-            .width = 68, .height = 12,
+            .width = 97, .height = 17,
             .textAlign = LV_TEXT_ALIGN_RIGHT,
             .longMode = LV_LABEL_LONG_MODE_CLIP,
             .text = me->countText});

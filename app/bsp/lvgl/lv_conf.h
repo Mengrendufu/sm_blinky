@@ -61,7 +61,7 @@
 // and the default theme names every widget class, so an unused chart still
 // lands in the image: this build was 475 KB (91% of the 512 KB part) before
 // the list below, 404 KB of it LVGL. What is kept is what the UI draws with -
-// obj, label (and its span helper), bar, led, line, the default theme and
+// obj, label, bar, led, line, the default theme and
 // Montserrat 14. Each line is one feature back; add it when a screen
 // needs it.
 
@@ -86,6 +86,8 @@
 #define LV_USE_SLIDER     0
 #define LV_USE_SPINBOX    0
 #define LV_USE_SPINNER    0
+// No rich-text groups: avoid the unused startup snippet-stack allocation.
+#define LV_USE_SPAN       0
 #define LV_USE_SWITCH     1
 #define LV_USE_TABLE      0
 #define LV_USE_TABVIEW    0

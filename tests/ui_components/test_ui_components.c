@@ -127,6 +127,7 @@ TickType_t Ui_dispHeartbeat(void){return 1;}
 extern SM_HsmState Sm_Ui_standby,Sm_Ui_readySplash,Sm_Ui_earlyReadyShow;
 extern SM_HsmState Sm_Ui_splashing,Sm_Ui_readyShow,Sm_Ui_sysInfo;
 extern SM_HsmState Sm_Ui_liveShow;
+extern SM_HsmState Sm_Ui_arcShow,Sm_Ui_signalShow;
 extern SM_HsmState Sm_Ui_active;
 extern uint8_t Ui_dbgSplashOk_;
 static uint32_t lvTick(void){return hostTick;}
@@ -623,6 +624,212 @@ static void testBar_(lv_obj_t *root,lv_display_t *display){
     assert(lv_obj_get_child_count(root)==0);
     lv_refr_now(display);blank();
 }
+static void checkLiveMotion_(UiLiveMotion const *motion){
+    assert(motion->container&&motion->arc.container);
+    assert(lv_obj_get_parent(motion->ledStatus)==motion->header);
+    assert(lv_obj_get_parent(motion->heading)==motion->header);
+    assert(lv_obj_get_style_flex_flow(motion->header,0)==LV_FLEX_FLOW_ROW);
+    assert(lv_obj_check_type(motion->ledStatus,&lv_switch_class));
+    assert(lv_obj_get_width(motion->ledStatus)==37);
+    assert(lv_obj_get_height(motion->ledStatus)==18);
+    assert(!lv_obj_has_flag(motion->ledStatus,LV_OBJ_FLAG_CLICKABLE));
+    assert(xOf_(motion->ledStatus)>=xOf_(motion->heading)
+           +lv_obj_get_width(motion->heading)+8);
+    assert(lv_obj_get_style_flex_flow(motion->container,0)
+           ==LV_FLEX_FLOW_COLUMN);
+    assert(lv_obj_get_style_flex_flow(motion->body,0)==LV_FLEX_FLOW_ROW);
+    assert(lv_obj_get_style_flex_flow(motion->details,0)
+           ==LV_FLEX_FLOW_COLUMN);
+    assert(lv_obj_get_parent(motion->arc.container)==motion->body);
+    assert(lv_obj_get_parent(motion->bar)==motion->details);
+    assert(lv_obj_get_parent(motion->arc.percent)==motion->arc.container);
+    assert(lv_obj_get_child_count(motion->arc.container)==1);
+    assert(lv_obj_get_width(motion->arc.container)==70);
+    assert(lv_obj_get_height(motion->arc.container)==70);
+    assert(xOf_(motion->details)>=xOf_(motion->arc.container)+70+12);
+    assert(lv_obj_get_width(motion->bar)
+           ==lv_obj_get_content_width(motion->details));
+    assert(!lv_obj_has_flag(motion->arc.container,LV_OBJ_FLAG_CLICKABLE));
+    assert(!lv_obj_has_flag(motion->arc.container,
+                            LV_OBJ_FLAG_IGNORE_LAYOUT));
+    assert(lv_arc_get_bg_angle_start(motion->arc.container)==180);
+    assert(lv_arc_get_bg_angle_end(motion->arc.container)==90);
+    assert(lv_arc_get_value(motion->arc.container)
+           ==lv_bar_get_value(motion->bar));
+    assert(!strcmp(lv_label_get_text(motion->arc.percent),
+                   lv_label_get_text(motion->value)));
+    assert(!strcmp(lv_label_get_text(motion->caption),"INDICATOR RUN"));
+    lv_obj_t * const labels[]={motion->heading,motion->caption,
+        motion->value,motion->arc.percent};
+    for(unsigned i=0;i<sizeof labels/sizeof labels[0];++i){
+        lv_obj_t * const label=labels[i];
+        assert(lv_obj_get_style_text_font(label,0)==&lv_font_montserrat_14);
+        lv_point_t size;
+        lv_text_get_size(&size,lv_label_get_text(label),
+                         &lv_font_montserrat_14,0,0,
+                         LV_COORD_MAX,LV_TEXT_FLAG_NONE);
+        assert(size.x<=lv_obj_get_content_width(label));
+        assert(size.y<=lv_obj_get_content_height(label));
+        assert(lv_obj_get_height(label)==17);
+    }
+}
+
+static void checkLiveSignal_(UiLiveSignal const *signal,unsigned active){
+    assert(lv_obj_get_parent(signal->wave)==signal->container);
+    assert(lv_obj_get_style_flex_flow(signal->container,0)
+           ==LV_FLEX_FLOW_COLUMN);
+    assert(lv_obj_check_type(signal->wave,&lv_line_class));
+    assert(lv_line_get_point_count(signal->wave)==101);
+    lv_point_precise_t const *points=lv_line_get_points(signal->wave);
+    assert(points[0].x==0&&points[100].x==200);
+    unsigned const progress=signal->progress;
+    assert(progress<100);
+    assert(points[0].y==points[100].y);
+    assert(points[(125-progress)%100].y==5);
+    assert(points[(175-progress)%100].y==35);
+    for(unsigned i=0;i<101;++i){
+        assert(points[i].x==(int32_t)i*2);
+        assert(points[i].y>=5&&points[i].y<=35);
+        assert(points[i].y+points[(i+50)%100].y==40);
+        if(i>0)assert(abs(points[i].y-points[i-1].y)<=1);
+    }
+    assert(lv_obj_get_child_count(signal->phases)==5);
+    assert(!strcmp(lv_label_get_text(signal->heading),"Signal / Phase"));
+    assert(!strcmp(lv_label_get_text(signal->caption),"MOVE DEMO"));
+    lv_obj_t * const labels[]={signal->heading,signal->caption};
+    for(unsigned i=0;i<2;++i){
+        assert(lv_obj_get_style_text_font(labels[i],0)
+               ==&lv_font_montserrat_14);
+        assert(lv_obj_get_height(labels[i])==17);
+        lv_point_t size;
+        lv_text_get_size(&size,lv_label_get_text(labels[i]),
+                         &lv_font_montserrat_14,0,0,
+                         LV_COORD_MAX,LV_TEXT_FLAG_NONE);
+        assert(size.x<=lv_obj_get_content_width(labels[i]));
+        assert(size.y<=lv_obj_get_content_height(labels[i]));
+    }
+    assert(xOf_(signal->heading)+lv_obj_get_width(signal->heading)
+           <xOf_(signal->caption));
+    assert(xOf_(signal->caption)+lv_obj_get_width(signal->caption)
+           <=xOf_(signal->header)+lv_obj_get_width(signal->header));
+    assert(lv_obj_get_width(signal->phases)==128);
+    for(unsigned i=0;i<5;++i){
+        lv_obj_t * const phase=lv_obj_get_child(signal->phases,(int32_t)i);
+        assert(lv_obj_get_width(phase)==20&&lv_obj_get_height(phase)==4);
+        assert(lv_obj_has_state(phase,LV_STATE_CHECKED)==(i==active));
+        assert((lv_color_to_u32(lv_obj_get_style_bg_color(phase,0))
+                &0xFFFFFFU)==(i==active?0x61DF5AU:0x819480U));
+        assert(xOf_(phase)==xOf_(signal->phases)+(int32_t)i*27);
+    }
+    lv_area_t outer,wave,phases,header;
+    lv_obj_get_coords(signal->container,&outer);
+    lv_obj_get_coords(signal->wave,&wave);
+    lv_obj_get_coords(signal->phases,&phases);
+    lv_obj_get_coords(signal->header,&header);
+    assert(header.y2<wave.y1&&wave.y2<phases.y1);
+    assert(phases.y2<=outer.y2&&header.y1>=outer.y1);
+    assert(wave.x1>=outer.x1&&wave.x2<=outer.x2);
+    assert(abs((wave.x1+wave.x2)-(outer.x1+outer.x2))<=1);
+    assert(abs((phases.x1+phases.x2)-(outer.x1+outer.x2))<=1);
+}
+
+static void testLiveSignal_(lv_obj_t *root,lv_display_t *display){
+    UiLiveSignal signal={0};
+    for(unsigned pass=0;pass<3;++pass){
+        UiLiveSignal_create(&signal,root,lv_pct(100),133);
+        lv_obj_update_layout(root);
+        checkLiveSignal_(&signal,0);
+        lv_obj_t * const wave=signal.wave;
+        lv_point_precise_t const * const points=lv_line_get_points(wave);
+        for(unsigned i=0;i<5;++i){
+            UiLiveSignal_setPhase(&signal,(uint8_t)i);
+            lv_refr_now(display);
+            checkLiveSignal_(&signal,i);
+            assert(signal.wave==wave&&lv_line_get_points(wave)==points);
+            verifyRepaint(display);
+        }
+        lv_point_precise_t reference[101];
+        memcpy(reference,points,sizeof reference);
+        for(unsigned progress=0;progress<100;++progress){
+            UiLiveSignal_setProgress(&signal,(uint8_t)progress);
+            lv_refr_now(display);
+            checkLiveSignal_(&signal,progress/20);
+            assert(signal.progress==progress);
+            assert(lv_line_get_points(wave)==points);
+            for(unsigned i=0;i<101;++i){
+                assert(points[i].x==reference[i].x);
+                assert(points[i].y==reference[(i+progress)%100].y);
+            }
+            verifyRepaint(display);
+        }
+        UiLiveSignal_destroy(&signal);
+        assert(!signal.container&&!signal.wave&&!signal.phases);
+        UiLiveSignal_destroy(&signal);
+        assert(lv_obj_get_child_count(root)==0);
+    }
+    lv_refr_now(display);blank();
+}
+
+static void testUiArcAndMotion_(lv_obj_t *root,lv_display_t *display){
+    lv_obj_t * const sibling=lv_obj_create(root);
+    UiArc arc={0};
+    UiArc_create(&arc,root,lv_pct(50),70);
+    lv_obj_update_layout(root);
+    assert(lv_obj_get_width(arc.container)==120);
+    assert(lv_obj_get_child_count(arc.container)==1);
+    assert(!strcmp(lv_label_get_text(arc.percent),"0%"));
+    UiArc_setValue(&arc,100);
+    assert(lv_arc_get_value(arc.container)==100);
+    assert(!strcmp(lv_label_get_text(arc.percent),"100%"));
+    UiArc_destroy(&arc);
+    assert(!arc.container&&!arc.percent&&!arc.text[0]);
+    UiArc_destroy(&arc);
+    UiLiveMotion motion={0};
+    uint8_t const values[]={0,1,66,100,0};
+    for(unsigned pass=0;pass<3;++pass){
+        UiLiveMotion_create(&motion,root,lv_pct(100),112);
+        lv_obj_update_layout(root);
+        checkLiveMotion_(&motion);
+        assert(lv_bar_get_value(motion.bar)==0);
+        assert(!lv_obj_has_state(motion.ledStatus,LV_STATE_CHECKED));
+        UiLiveMotion_setLedStatus(&motion,true);
+        lv_refr_now(display);
+        assert(lv_obj_has_state(motion.ledStatus,LV_STATE_CHECKED));
+        assert((lv_color_to_u32(lv_obj_get_style_bg_color(
+            motion.ledStatus,LV_PART_INDICATOR))&0xFFFFFFU)==0x004EF6U);
+        verifyRepaint(display);
+        UiLiveMotion_setLedStatus(&motion,false);
+        lv_refr_now(display);
+        assert(!lv_obj_has_state(motion.ledStatus,LV_STATE_CHECKED));
+        assert((lv_color_to_u32(lv_obj_get_style_bg_color(
+            motion.ledStatus,LV_PART_INDICATOR))&0xFFFFFFU)==0x819480U);
+        verifyRepaint(display);
+        lv_obj_t * const arcObj=motion.arc.container;
+        lv_obj_t * const barObj=motion.bar;
+        lv_obj_t * const textObj=motion.value;
+        for(unsigned i=0;i<sizeof values/sizeof values[0];++i){
+            char text[5];
+            snprintf(text,sizeof text,"%u%%",(unsigned)values[i]);
+            UiLiveMotion_setValue(&motion,values[i]);
+            lv_refr_now(display);
+            checkLiveMotion_(&motion);
+            assert(!strcmp(lv_label_get_text(motion.value),text));
+            assert(lv_arc_get_value(motion.arc.container)==values[i]);
+            assert(motion.arc.container==arcObj&&motion.bar==barObj);
+            assert(motion.value==textObj);
+            verifyRepaint(display);
+        }
+        UiLiveMotion_destroy(&motion);
+        assert(!motion.container&&!motion.arc.container&&!motion.bar);
+        assert(!motion.header&&!motion.ledStatus);
+        UiLiveMotion_destroy(&motion);
+        assert(lv_obj_get_child_count(root)==1);
+        assert(lv_obj_get_child(root,0)==sibling);
+    }
+    lv_obj_delete(sibling);
+    lv_refr_now(display);blank();
+}
+
 // Shared const style: two visual props, no layout leakage.
 static void testTextStyle_(lv_obj_t *root,lv_display_t *display){
     assert(lv_style_is_const(&UiStyle_topbarText));
@@ -717,7 +924,7 @@ static void testPageTitleAndBootCount_(lv_obj_t *root,
     assert(lv_obj_get_style_layout(pt.container,0)
            ==LV_LAYOUT_NONE);
     UiBootCount bc={0};
-    UiBootCount_create(&bc,pt.container,106,12);
+    UiBootCount_create(&bc,pt.container,151,17);
     lv_obj_align(bc.container,LV_ALIGN_RIGHT_MID,0,0);
     assert(countObjs_(bc.container)==3);
     assert(countObjs_(pt.container)==5);
@@ -737,9 +944,9 @@ static void testPageTitleAndBootCount_(lv_obj_t *root,
         &0xFFFFFFU)==0xFFFFFFU);
     lv_obj_t * const meta=bc.container;
     lv_obj_get_coords(meta,&ma);
-    assert(ma.x2-ma.x1+1==106&&ma.y2-ma.y1+1==12);
+    assert(ma.x2-ma.x1+1==151&&ma.y2-ma.y1+1==17);
     assert(ma.x2==a.x2);
-    assert(ma.x1-a.x1==130);
+    assert(ma.x1-a.x1==85);
     int32_t const mid=(ma.y1+ma.y2)-(a.y1+a.y2);
     assert(mid>=-1&&mid<=1);
     assert(lv_obj_get_style_flex_flow(meta,0)
@@ -749,24 +956,24 @@ static void testPageTitleAndBootCount_(lv_obj_t *root,
     assert(lv_obj_get_style_pad_left(meta,0)==0);
     assert(lv_obj_get_style_pad_right(meta,0)==0);
     assert(lv_obj_get_style_pad_row(meta,0)==0);
-    assert(lv_obj_get_style_pad_column(meta,0)==1);
+    assert(lv_obj_get_style_pad_column(meta,0)==2);
     lv_obj_t * const boots=lv_obj_get_child(meta,0);
     lv_obj_get_coords(boots,&ba);
-    assert(ba.x2-ba.x1+1==37&&ba.y2-ba.y1+1==12);
+    assert(ba.x2-ba.x1+1==52&&ba.y2-ba.y1+1==17);
     assert(!strcmp(lv_label_get_text(boots),"BOOTS"));
     assert(lv_obj_get_style_text_font(boots,0)
-           ==&lv_font_montserrat_10);
+           ==&lv_font_montserrat_14);
     assert((lv_color_to_u32(
         lv_obj_get_style_text_color(boots,0))
         &0xFFFFFFU)==0xFFFFFFU);
     lv_obj_get_coords(bc.count,&ca);
-    assert(ca.x2-ca.x1+1==68&&ca.y2-ca.y1+1==12);
+    assert(ca.x2-ca.x1+1==97&&ca.y2-ca.y1+1==17);
     assert(lv_obj_get_style_text_font(bc.count,0)
-           ==&lv_font_montserrat_10);
+           ==&lv_font_montserrat_14);
     assert((lv_color_to_u32(
         lv_obj_get_style_text_color(bc.count,0))
         &0xFFFFFFU)==0xFFFFFFU);
-    assert(ca.x1==ba.x2+2); // Inclusive coords: 1px gap.
+    assert(ca.x1==ba.x2+3); // Inclusive coords: 2px gap.
     assert(ta.x2<ma.x1); // Title ends before meta starts.
     assert(lv_label_get_text(bc.count)==bc.countText);
     assert(!strcmp(lv_label_get_text(bc.count),"0"));
@@ -804,12 +1011,19 @@ static void testPageTitleAndBootCount_(lv_obj_t *root,
     }
     verifyRepaint(display);
     static uint16_t before[240*320];
-    // Max-domain width fits its box; font height fits 12.
+    // Caption and max-domain value fit at Montserrat 14 without clipping.
     lv_point_t sz;
     lv_text_get_size(&sz,"4,294,967,295",
-                     &lv_font_montserrat_10,0,0,100,
+                     &lv_font_montserrat_14,0,0,LV_COORD_MAX,
                      LV_TEXT_FLAG_NONE);
-    assert(sz.x<=68&&sz.y<=12);
+    lv_point_t captionSize;
+    lv_text_get_size(&captionSize,"BOOTS",&lv_font_montserrat_14,0,0,
+                     LV_COORD_MAX,LV_TEXT_FLAG_NONE);
+    fprintf(stderr,"BootCount max text: %ldx%ld; caption: %ldx%ld\n",
+            (long)sz.x,(long)sz.y,
+            (long)captionSize.x,(long)captionSize.y);
+    assert(sz.x<=97&&sz.y<=17);
+    assert(captionSize.x<=52&&captionSize.y<=17);
     // Title must fit its box at the compiled font.
     lv_point_t titleSize;
     lv_text_get_size(&titleSize,"SysMonitor",
@@ -824,7 +1038,7 @@ static void testPageTitleAndBootCount_(lv_obj_t *root,
     // Shrink clears old glyphs; geometry stable.
     lv_obj_get_coords(bc.count,&ca);
     lv_point_t small;
-    lv_text_get_size(&small,"1",&lv_font_montserrat_10,0,0,
+    lv_text_get_size(&small,"1",&lv_font_montserrat_14,0,0,
                      LV_COORD_MAX,LV_TEXT_FLAG_NONE);
     assert(small.x>0);
     (void)memcpy(before,framebuffer,sizeof before);
@@ -835,7 +1049,7 @@ static void testPageTitleAndBootCount_(lv_obj_t *root,
     lv_obj_get_coords(bc.count,&ca2);
     assert(ca2.x1==ca.x1&&ca2.y1==ca.y1
            &&ca2.x2==ca.x2&&ca2.y2==ca.y2);
-    assert(rightEdge_(bc.count)<ca.x1+small.x);
+    assert(rightEdge_(bc.count)>=ca.x2-2);
     verifyRepaint(display);
     // setTitle rebinds the same label without rebuilding, and
     // never disturbs the boot-count group.
@@ -866,7 +1080,7 @@ static void testPageTitleAndBootCount_(lv_obj_t *root,
     UiPageTitle_destroy(&pt); // Idempotent when empty.
     for(unsigned i=0;i<10;++i){
         UiPageTitle_create(&pt,root,236,17,title);
-        UiBootCount_create(&bc,pt.container,106,12);
+        UiBootCount_create(&bc,pt.container,151,17);
         UiBootCount_setCount(&bc,i*123456789U);
         UiBootCount_destroy(&bc);
         UiPageTitle_destroy(&pt);
@@ -1590,7 +1804,11 @@ static void checkActiveTopbar(uint16_t const *bg,
     lv_area_t ta={0,0,0,0};
     lv_area_t ma={0,0,0,0};
     lv_area_t ra={0,0,0,0};
+    lv_area_t la={0,0,0,0};
+    lv_area_t sa={0,0,0,0};
     if(expectPageTitle){
+        assert(Ui_sm_.liveMotion.container==NULL);
+        assert(Ui_sm_.liveSignal.container==NULL);
         assert(Ui_sm_.pageTitle.container!=NULL);
         assert(lv_obj_get_parent(Ui_sm_.pageTitle.container)
                ==root);
@@ -1625,14 +1843,36 @@ static void checkActiveTopbar(uint16_t const *bg,
         lv_obj_get_coords(Ui_sm_.resourceMonitor.container,&ra);
     }
     else{
-        assert(Ui_sm_.pageTitle.container==NULL);
+        if(Ui_sm_.pageTitle.container!=NULL){
+            assert(lv_obj_get_parent(Ui_sm_.pageTitle.container)==root);
+            assert(lv_obj_get_child(root,1)==Ui_sm_.pageTitle.container);
+            assert(countObjs_(Ui_sm_.pageTitle.container)==2);
+            assert(!strcmp(lv_label_get_text(
+                Ui_sm_.pageTitle.title),"LiveShow"));
+            lv_obj_get_coords(Ui_sm_.pageTitle.container,&ta);
+            assert(ta.x1==2&&ta.y1==30);
+            assert(lv_obj_get_child_count(root)==4);
+            assert(lv_obj_get_child(root,2)==Ui_sm_.liveMotion.container);
+            checkLiveMotion_(&Ui_sm_.liveMotion);
+            lv_obj_get_coords(Ui_sm_.liveMotion.container,&la);
+            assert(la.x1==ta.x1&&la.y1-ta.y2-1==10);
+            assert(lv_obj_get_child(root,3)==Ui_sm_.liveSignal.container);
+            checkLiveSignal_(&Ui_sm_.liveSignal,
+                              Ui_sm_.liveSignal.progress/20);
+            lv_obj_get_coords(Ui_sm_.liveSignal.container,&sa);
+            assert(sa.x1==la.x1&&sa.y1-la.y2-1==10);
+            assert(sa.y2<320);
+        }else{
+            assert(lv_obj_get_child_count(root)==1);
+            assert(Ui_sm_.liveMotion.container==NULL);
+            assert(Ui_sm_.liveSignal.container==NULL);
+        }
         assert(Ui_sm_.bootCount.container==NULL);
         assert(Ui_sm_.bootCount.count==NULL);
         assert(Ui_sm_.threadMonitor.container==NULL);
         assert(Ui_sm_.threadMonitor.viewport==NULL);
         assert(Ui_sm_.resourceMonitor.container==NULL);
         assert(Ui_sm_.resourceMonitor.viewport==NULL);
-        assert(lv_obj_get_child_count(root)==1);
     }
     char expectedCount[11];
     NVM_PORT_ENTER();
@@ -1661,7 +1901,7 @@ static void checkActiveTopbar(uint16_t const *bg,
         for(int32_t x=0;x<240;++x){
             bool const inTop=x>=a.x1&&x<=a.x2
                               &&y>=a.y1&&y<=a.y2;
-            bool const inTitle=expectPageTitle
+            bool const inTitle=Ui_sm_.pageTitle.container!=NULL
                                &&x>=ta.x1&&x<=ta.x2
                                &&y>=ta.y1&&y<=ta.y2;
             bool const inMonitor=expectPageTitle
@@ -1670,7 +1910,13 @@ static void checkActiveTopbar(uint16_t const *bg,
             bool const inRes=expectPageTitle
                               &&x>=ra.x1&&x<=ra.x2
                               &&y>=ra.y1&&y<=ra.y2;
-            if(inTop||inTitle||inMonitor||inRes)continue;
+            bool const inLive=Ui_sm_.liveMotion.container!=NULL
+                               &&x>=la.x1&&x<=la.x2
+                               &&y>=la.y1&&y<=la.y2;
+            bool const inSignal=Ui_sm_.liveSignal.container!=NULL
+                                 &&x>=sa.x1&&x<=sa.x2
+                                 &&y>=sa.y1&&y<=sa.y2;
+            if(inTop||inTitle||inMonitor||inRes||inLive||inSignal)continue;
             size_t const i=(size_t)y*240U+(size_t)x;
             assert(framebuffer[i]==(bg!=NULL?bg[i]:0U));
         }
@@ -1782,13 +2028,17 @@ int main(int argc,char **argv){
     assert(!lv_obj_get_style_bg_image_src(Ui_sm_.root.container,0));
     assert(Ui_sm_.root.background.data==NULL);
     assert(Ui_sm_.topbar.container==NULL);
-    assert(Ui_sm_.stateTimeout.remaining==0);
-    SST_Evt const * const timeoutEvt=Ui_sm_.stateTimeout.event;
+    assert(Ui_sm_.splashTimeout.remaining==0);
+    assert(Ui_sm_.pageSwitchTimeout.remaining==0);
+    SST_Evt const * const pageEvt=Ui_sm_.pageSwitchTimeout.event;
+    assert(pageEvt->sig==UI_PAGE_SWITCH_TIMEOUT_SIG);
+    assert(Ui_sm_.pageSwitchTimeout.event!=Ui_sm_.splashTimeout.event);
+    SST_Evt const * const timeoutEvt=Ui_sm_.splashTimeout.event;
     assert(timeoutEvt!=NULL);
-    assert(timeoutEvt->sig==UI_STATE_TIMEOUT_SIG);
+    assert(timeoutEvt->sig==SPLASH_TIMEOUT_SIG);
     assert(timeoutEvt->poolId==0U);
     assert(timeoutEvt->refCtr==0U);
-    TimeEvt_arm(&Ui_sm_.stateTimeout,1U,0U);
+    TimeEvt_arm(&Ui_sm_.splashTimeout,1U,0U);
     TimeEvt_tick();
     SST_Evt const *timeout;
     assert(Ui_evtPop(&timeout));
@@ -1831,12 +2081,12 @@ int main(int argc,char **argv){
     }else if(scenario==2){pulse(150);}
     else if(scenario==3){pulse(1);send(BRING_UP_ASSETS_LOADED_SIG);}
     else if(scenario==5){
-        assert(Ui_sm_.stateTimeout.remaining==150);
+        assert(Ui_sm_.splashTimeout.remaining==150);
         send(BRING_UP_ASSETS_LOADED_SIG);pulse(140);
         for(unsigned i=0;i<20;++i){hostTick+=10;TimeEvt_tick();}
         assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_readyShow);
         checkSplash(true); // Splash survives the waiting half.
-        Ui_drain_();assert(Ui_sm_.stateTimeout.remaining==0);
+        Ui_drain_();assert(Ui_sm_.splashTimeout.remaining==0);
     }else{send(BRING_UP_ASSETS_LOADED_SIG);pulse(150);}
     render();
     verifyRepaint(display);
@@ -1846,6 +2096,13 @@ int main(int argc,char **argv){
     uint16_t const * const sysBg=scenario==4?NULL:pixels[0];
     uint16_t const * const liveBg=scenario==4?NULL:pixels[1];
     checkActiveTopbar(sysBg,true);
+    assert(Ui_sm_.cardSlideTimeout.interval==2U*BSP_TICKS_PER_SEC);
+    (void)TimeEvt_disarm(&Ui_sm_.cardSlideTimeout);
+    assert(Ui_sm_.pageSwitchTimeout.remaining==12U*BSP_TICKS_PER_SEC);
+    (void)TimeEvt_disarm(&Ui_sm_.pageSwitchTimeout);
+    send(SPLASH_TIMEOUT_SIG);
+    send(UI_ANIMATION_TRIGGER_TIMEOUT_SIG);
+    assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sysInfo);
     lv_obj_t * const threadCards[]={
         Ui_sm_.threadMonitor.cards[0].container,
         Ui_sm_.threadMonitor.cards[1].container};
@@ -1871,8 +2128,14 @@ int main(int argc,char **argv){
         }
         assert(Ui_sm_.threadMonitor.cards[0].container==threadCards[0]);
         assert(Ui_sm_.threadMonitor.cards[1].container==threadCards[1]);
-        send(UI_THREAD_TIMEOUT_SIG);
+        send(UI_CARD_SLIDE_TIMEOUT_SIG);
         assert(Ui_sm_.threadMonitor.sliding);
+        assert(Ui_sm_.resourceMonitor.sliding);
+        assert(Ui_sm_.resourceIndex==Ui_sm_.threadIndex);
+        unsigned const activeIndex=Ui_sm_.threadIndex;
+        send(UI_CARD_SLIDE_TIMEOUT_SIG);
+        assert(Ui_sm_.threadIndex==activeIndex);
+        assert(Ui_sm_.resourceIndex==activeIndex);
         pulse(12);
         lv_obj_update_layout(Ui_sm_.root.container);
         unsigned const incoming=Ui_sm_.threadSlot;
@@ -1920,7 +2183,7 @@ int main(int argc,char **argv){
             assert((lv_color_to_u32(lv_obj_get_style_bg_color(object,0))
                     &0xFFFFFFU)==(dot==index?0x6FE97BU:0x334155U));
         }
-        send(UI_RESOURCE_TIMEOUT_SIG);
+        send(UI_CARD_SLIDE_TIMEOUT_SIG);
         hostTick+=120;render();
         lv_obj_update_layout(Ui_sm_.root.container);
         unsigned const slot=Ui_sm_.resourceSlot;
@@ -1934,6 +2197,9 @@ int main(int argc,char **argv){
         assert(Ui_sm_.resourceMonitor.cards[1].container==resourceCards[1]);
     }
     assert(Ui_sm_.resourceIndex==0);
+    assert(Ui_sm_.threadIndex==0);
+    TimeEvt_arm(&Ui_sm_.cardSlideTimeout,
+                 2U*BSP_TICKS_PER_SEC,2U*BSP_TICKS_PER_SEC);
     assert(!strcmp(lv_label_get_text(Ui_sm_.topbar.blinkyCount),"50"));
     NvmBlinky_add(1);
     send(UI_LED_ON_SIG);Ui_drain_();
@@ -1944,9 +2210,9 @@ int main(int argc,char **argv){
     assert((lv_color_to_u32(lv_obj_get_style_bg_color(
         Ui_sm_.topbar.led,0))&0xFFFFFFU)==0xD9D9D9U);
     // Independent periodic statistics update, without any LED event.
-    assert(Ui_sm_.statsTimeout.interval==UI_STATS_TICKS);
+    assert(Ui_sm_.statsTimeout.interval==BSP_TICKS_PER_SEC);
     hostIdle+=25;hostTotal+=100;hostFps=27;
-    pulse(UI_STATS_TICKS);
+    pulse(BSP_TICKS_PER_SEC);
     assert(!strcmp(lv_label_get_text(Ui_sm_.topbar.fps),"27FPS"));
     assert(!strcmp(lv_label_get_text(Ui_sm_.topbar.cpu),"75%"));
     expectedCpu="75%";
@@ -1973,13 +2239,61 @@ int main(int argc,char **argv){
     UiBootCount_setCount(&Ui_sm_.bootCount,boots);
     assert(!strcmp(lv_label_get_text(Ui_sm_.bootCount.count),"1"));
     lv_refr_now(display);verifyRepaint(display);
-    pulse(499);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sysInfo);
-    pulse(1);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sysInfo);
-    assert(Ui_sm_.threadIndex==2U); // Two 2.5 s deadlines elapsed.
-    send(UI_STATE_TIMEOUT_SIG);
-    assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_liveShow);
-    assert(Ui_sm_.threadTimeout.remaining==0U);
-    assert(Ui_sm_.resourceTimeout.remaining==0U);
+    TimeEvt_arm(&Ui_sm_.pageSwitchTimeout,12U*BSP_TICKS_PER_SEC,0U);
+    pulse(1199);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sysInfo);
+    assert(Ui_sm_.threadIndex==1U); // Six 2 s deadlines elapsed.
+    assert(Ui_sm_.resourceIndex==Ui_sm_.threadIndex);
+    pulse(1);
+    assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_arcShow);
+    assert(Ui_sm_.pageTitle.container!=NULL);
+    assert(Ui_sm_.cardSlideTimeout.remaining==0U);
+    assert(Ui_sm_.splashTimeout.remaining==0U);
+    assert(Ui_sm_.pageSwitchTimeout.remaining==10U*BSP_TICKS_PER_SEC);
+    assert(Ui_sm_.animationTrigger.interval==BSP_TICKS_PER_SEC/30U);
+    assert(Ui_sm_.animationSwitchTimeout.remaining==5U*BSP_TICKS_PER_SEC);
+    assert(!lv_anim_get(&Ui_sm_.liveMotion,NULL));
+    assert(!lv_anim_get(&Ui_sm_.liveSignal,NULL));
+    assert(Ui_sm_.liveSignal.progress==0);
+    assert(lv_bar_get_value(Ui_sm_.liveMotion.bar)==0);
+    lv_obj_t * const motion=Ui_sm_.liveMotion.container;
+    lv_obj_t * const wave=Ui_sm_.liveSignal.wave;
+    lv_obj_t * const title=Ui_sm_.pageTitle.container;
+    lv_point_precise_t const * const points=
+        lv_line_get_points(Ui_sm_.liveSignal.wave);
+    uint32_t const objects=countObjs_(Ui_sm_.root.container);
+    send(SPLASH_TIMEOUT_SIG);
+    send(UI_CARD_SLIDE_TIMEOUT_SIG);
+    assert(Ui_sm_.liveMotion.progress==0&&Ui_sm_.liveSignal.progress==0);
+    for(unsigned frame=1;frame<=500;++frame){
+        send(UI_ANIMATION_TRIGGER_TIMEOUT_SIG);
+        unsigned const progress=frame*6U%1000U;
+        double const t=(progress<=500?progress:1000-progress)/500.0;
+        int const expected=(int)(100*t*t*(3-2*t)+0.5);
+        assert(Ui_sm_.liveMotion.progress==progress);
+        assert(Ui_sm_.liveSignal.progress==0);
+        assert(lv_bar_get_value(Ui_sm_.liveMotion.bar)==expected);
+        assert(lv_arc_get_value(Ui_sm_.liveMotion.arc.container)==expected);
+        assert(lv_obj_has_state(Ui_sm_.liveMotion.ledStatus,
+                                LV_STATE_CHECKED)==(progress<500));
+        assert(Ui_sm_.liveMotion.container==motion);
+        assert(Ui_sm_.liveSignal.wave==wave);
+        assert(lv_line_get_points(wave)==points);
+        assert(!lv_anim_get(&Ui_sm_.liveMotion,NULL));
+        assert(!lv_anim_get(&Ui_sm_.liveSignal,NULL));
+        assert(countObjs_(Ui_sm_.root.container)==objects);
+        if(frame%125==0){
+            verifyRepaint(display);checkActiveTopbar(liveBg,false);
+            char path[32];
+            snprintf(path,sizeof path,"animation-%03u.rgb565",frame);
+            capture(path);
+        }
+    }
+    // LVGL time alone no longer advances either demonstration.
+    hostTick+=750;lv_anim_refr_now();
+    assert(Ui_sm_.liveMotion.progress==0);
+    assert(Ui_sm_.liveSignal.progress==0);
+    assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_arcShow);
+    assert(Ui_sm_.pageSwitchTimeout.remaining==10U*BSP_TICKS_PER_SEC);
     verifyRepaint(display);checkActiveTopbar(liveBg,false);
     capture("live.rgb565");
     assert(Ui_sm_.topbar.container==persistent); // Pages share it.
@@ -1988,22 +2302,113 @@ int main(int argc,char **argv){
     NVM_PORT_ENTER();
     assert(NvmBlinky_get()->edges==51);
     NVM_PORT_EXIT();
-    pulse(999);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_liveShow);
+    for(unsigned tick=1;tick<=499;++tick){
+        pulse(1);
+        assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_arcShow);
+        assert(Ui_sm_.liveMotion.progress==(tick/3U)*6U%1000U);
+        assert(Ui_sm_.liveSignal.progress==0);
+    }
+    uint16_t const frozenMotion=Ui_sm_.liveMotion.progress;
+    assert(frozenMotion==996);
+    pulse(1);
+    assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_signalShow);
+    assert(Ui_sm_.animationTrigger.interval==BSP_TICKS_PER_SEC/10U);
+    assert(Ui_sm_.animationSwitchTimeout.remaining==5U*BSP_TICKS_PER_SEC);
+    assert(Ui_sm_.pageSwitchTimeout.remaining==5U*BSP_TICKS_PER_SEC);
+    assert(Ui_sm_.liveMotion.container==motion);
+    assert(Ui_sm_.liveSignal.wave==wave);
+    assert(Ui_sm_.pageTitle.container==title);
+    assert(lv_line_get_points(wave)==points);
+    assert(countObjs_(Ui_sm_.root.container)==objects);
+    assert(Ui_sm_.liveMotion.progress==frozenMotion);
+    assert(Ui_sm_.liveSignal.progress==0);
+    assert(Ui_sm_.pageSwitchTimeout.remaining==5U*BSP_TICKS_PER_SEC);
+    for(unsigned frame=1;frame<=50;++frame){
+        send(UI_ANIMATION_TRIGGER_TIMEOUT_SIG);
+        assert(Ui_sm_.liveSignal.progress==frame*2U%100U);
+        assert(Ui_sm_.liveMotion.progress==frozenMotion);
+        assert(lv_line_get_points(wave)==points);
+        assert(countObjs_(Ui_sm_.root.container)==objects);
+        verifyRepaint(display);checkActiveTopbar(liveBg,false);
+    }
+    for(unsigned tick=1;tick<=499;++tick){
+        pulse(1);
+        assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_signalShow);
+        assert(Ui_sm_.liveSignal.progress==(tick/10U)*2U%100U);
+        assert(Ui_sm_.liveMotion.progress==frozenMotion);
+    }
     pulse(1);assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sysInfo);
+    assert(!lv_anim_get(&Ui_sm_.liveMotion,NULL));
+    assert(!lv_anim_get(&Ui_sm_.liveSignal,NULL));
+    assert(!Ui_sm_.animationTrigger.remaining);
+    assert(!Ui_sm_.animationSwitchTimeout.remaining);
+    send(UI_ANIMATION_TRIGGER_TIMEOUT_SIG); // Already queued at exit.
+    send(UI_ANIMATION_SWITCH_TIMEOUT_SIG);
+    assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sysInfo);
+    assert(!Ui_sm_.liveSignal.wave&&!Ui_sm_.liveMotion.bar);
     verifyRepaint(display);checkActiveTopbar(sysBg,true);
     for(unsigned i=0;i<3;++i){
-        send(UI_STATE_TIMEOUT_SIG);pulse(1000);
+        send(UI_PAGE_SWITCH_TIMEOUT_SIG);
+        assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_arcShow);
+        assert(Ui_sm_.liveSignal.progress==0);
+        assert(Ui_sm_.liveMotion.progress==0);
+        assert(lv_bar_get_value(Ui_sm_.liveMotion.bar)==0);
+        if(i==0){
+            pulse(10);send(UI_PAGE_SWITCH_TIMEOUT_SIG);
+        }
+        else if(i==1){
+            pulse(510);
+            assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_signalShow);
+            uint32_t const deadline=Ui_sm_.pageSwitchTimeout.remaining;
+            uint8_t const signal=Ui_sm_.liveSignal.progress;
+            lv_obj_t * const pane=Ui_sm_.liveMotion.container;
+            send(UI_ANIMATION_SWITCH_TIMEOUT_SIG);
+            assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_arcShow);
+            assert(Ui_sm_.animationTrigger.interval==3);
+            assert(Ui_sm_.liveMotion.progress==0);
+            assert(Ui_sm_.liveSignal.progress==signal);
+            assert(Ui_sm_.pageSwitchTimeout.remaining==deadline);
+            // Shared triggers belong to whichever child consumes them.
+            send(UI_ANIMATION_TRIGGER_TIMEOUT_SIG);
+            assert(Ui_sm_.liveMotion.progress==6);
+            assert(Ui_sm_.liveSignal.progress==signal);
+            send(UI_ANIMATION_SWITCH_TIMEOUT_SIG);
+            assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_signalShow);
+            assert(Ui_sm_.animationTrigger.interval==10);
+            assert(Ui_sm_.liveMotion.progress==6);
+            assert(Ui_sm_.liveSignal.progress==0);
+            assert(Ui_sm_.liveMotion.container==pane);
+            assert(Ui_sm_.pageSwitchTimeout.remaining==deadline);
+            send(UI_PAGE_SWITCH_TIMEOUT_SIG);
+        }
+        else{
+            // Fixture extends the parent deadline to observe automatic
+            // Signal -> Arc; production still leaves the page at 10 s.
+            TimeEvt_arm(&Ui_sm_.pageSwitchTimeout,1500,0);
+            pulse(1000);
+            assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_arcShow);
+            assert(Ui_sm_.animationTrigger.interval==3);
+            assert(Ui_sm_.pageSwitchTimeout.remaining==500);
+            pulse(500);
+        }
+        assert(!Ui_sm_.animationTrigger.remaining);
+        assert(!Ui_sm_.animationSwitchTimeout.remaining);
+        assert(!lv_anim_get(&Ui_sm_.liveMotion,NULL));
+        assert(!lv_anim_get(&Ui_sm_.liveSignal,NULL));
+        assert(Ui_sm_.sm_hsm_.curr==&Sm_Ui_sysInfo);
     }
     verifyRepaint(display);checkActiveTopbar(sysBg,true);
     assert(Ui_sm_.topbar.container==persistent);
     // No production transition exits Active yet; invoke the page
     // action handlers directly to cover teardown. Direct entry
     // does not enter SysInfo.
-    send(UI_THREAD_TIMEOUT_SIG);
-    send(UI_RESOURCE_TIMEOUT_SIG);
+    send(UI_CARD_SLIDE_TIMEOUT_SIG);
     pulse(10);
     assert(Ui_sm_.threadMonitor.sliding);
     assert(Ui_sm_.resourceMonitor.sliding);
+    // Fixture-only direct exit leaves curr at SysInfo: stop its parent's
+    // stats producer before deleting cards, regardless of timer phase.
+    (void)TimeEvt_disarm(&Ui_sm_.statsTimeout);
     Sm_Ui_sysInfo.exit_(&Ui_sm_.sm_hsm_);
     pulse(30); // A cancelled slide must not access deleted page objects.
     // Isolated LiveShow teardown: its own exit must clear the bg
@@ -2011,6 +2416,9 @@ int main(int argc,char **argv){
     Sm_Ui_liveShow.entry_(&Ui_sm_.sm_hsm_);
     lv_refr_now(display);checkActiveTopbar(liveBg,false);
     Sm_Ui_liveShow.exit_(&Ui_sm_.sm_hsm_);
+    assert(!lv_anim_get(&Ui_sm_.liveMotion,NULL));
+    assert(!lv_anim_get(&Ui_sm_.liveSignal,NULL));
+    assert(Ui_sm_.pageTitle.container==NULL);
     assert(!lv_obj_get_style_bg_image_src(Ui_sm_.root.container,0));
     lv_refr_now(display);checkActiveTopbar(NULL,false);
     // No production exit path out of Active: the bar is constant.
@@ -2018,7 +2426,6 @@ int main(int argc,char **argv){
     assert(Ui_sm_.topbar.container==persistent);
     // TEST FIXTURE teardown only -- the whole UI test is ending,
     // this is not a production page exit.
-    (void)TimeEvt_disarm(&Ui_sm_.statsTimeout);
     UiTopbar_destroy(&Ui_sm_.topbar);
     assert(!Ui_sm_.topbar.container&&!Ui_sm_.topbar.blinkyCount);
     assert(!Ui_sm_.pageTitle.container);
@@ -2209,6 +2616,8 @@ int main(int argc,char **argv){
     testLabelPosition_(root,display);
     testBar_(root,display);
     testArc_(root,display);
+    testUiArcAndMotion_(root,display);
+    testLiveSignal_(root,display);
     testTextStyle_(root,display);
     testPageTitleAndBootCount_(root,display);
     testThreadCard_(root,display);

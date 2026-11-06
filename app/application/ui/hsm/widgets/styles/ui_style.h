@@ -29,5 +29,10 @@ extern lv_style_t const UiStyle_dotActive;
 extern lv_style_t const UiStyle_resourceCardText;
 extern lv_style_t const UiStyle_arcTrack;
 extern lv_style_t const UiStyle_arcIndicator;
+extern lv_style_t const UiStyle_liveText;
+extern lv_style_t const UiStyle_signalText;
+extern lv_style_t const UiStyle_signalWave;
+extern lv_style_t const UiStyle_signalPhase;
+extern lv_style_t const UiStyle_signalPhaseActive;
 
 #endif // UI_STYLE_H_

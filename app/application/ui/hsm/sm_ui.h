@@ -19,6 +19,8 @@
 #include "widgets/boot_count/boot_count.h"
 #include "widgets/thread_monitor/thread_monitor.h"
 #include "widgets/resource_monitor/resource_monitor.h"
+#include "widgets/live_motion/live_motion.h"
+#include "widgets/live_signal/live_signal.h"
 
 //============================================================================
 //=== UI state machine
@@ -34,12 +36,6 @@
 // Topbar plus the per-page content (SysInfo mounts a PageTitle
 // with its BootCount group and ThreadMonitor) are the mounted content.
 
-// TimeEvt ticks follow the application's fixed 100 Hz timebase.
-#define UI_SPLASH_TICKS 150U
-#define UI_SYS_INFO_TICKS    500U
-#define UI_LIVE_SHOW_TICKS   1000U
-#define UI_STATS_TICKS       100U
-#define UI_THREAD_DWELL_TICKS 250U
 #define UI_THREAD_COUNT        5U
 #define UI_RESOURCE_COUNT      5U
 
@@ -79,10 +75,12 @@ typedef struct {
     SM_Hsm sm_hsm_;
     Sm_Ui_DisplayOperations const *display;
     // Registered before scheduling; states directly arm/disarm their nodes.
-    TimeEvt stateTimeout;
+    TimeEvt splashTimeout;
+    TimeEvt pageSwitchTimeout;
     TimeEvt statsTimeout;
-    TimeEvt threadTimeout;
-    TimeEvt resourceTimeout;
+    TimeEvt cardSlideTimeout;
+    TimeEvt animationTrigger;
+    TimeEvt animationSwitchTimeout;
     unsigned resourceIndex;
     unsigned resourceSlot;
     char resourceSize[2][12];
@@ -105,8 +103,7 @@ typedef struct {
     // Passive Topbar, alive for the whole Active superstate; Sys and
     // Live share it; LED events refresh the state and NVM edge count.
     UiTopbar topbar;
-    // SysInfo-only page title; created on SysInfo entry, destroyed
-    // on exit -- NOT shared across pages.
+    // Page-owned title; each page creates on entry and destroys on exit.
     UiPageTitle pageTitle;
     // SysInfo-only boot-count group, composed under pageTitle by
     // the page helper; reads the restored count on page entry.
@@ -115,6 +112,9 @@ typedef struct {
     UiThreadMonitor threadMonitor;
     // SysInfo-owned resource watermarks and sliding pagination.
     UiResourceMonitor resourceMonitor;
+    // LiveShow-owned passive arc/bar composition.
+    UiLiveMotion liveMotion;
+    UiLiveSignal liveSignal;
 } Sm_Ui;
 
 void Sm_Ui_bindDisplay(Sm_Ui * const me,

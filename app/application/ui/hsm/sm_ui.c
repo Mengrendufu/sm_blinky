@@ -17,6 +17,7 @@
 #include "instance/nvm_blinky.h"
 #include "instance/nvm_boot.h"
 #include "nvm_port.h"
+#include "bsp.h"
 
 SM_DEFINE_MODULE("sm_ui")
 
@@ -116,13 +117,37 @@ SM_HsmState SM_HSM_ROM Sm_Ui_sysInfo = {
 // LiveShow mounts the slot-1 page background; keep the page deadline.
 static void Sm_Ui_liveShow_entry_(SM_Hsm * const me) SM_HSM_RETT;
 static void Sm_Ui_liveShow_exit_(SM_Hsm * const me) SM_HSM_RETT;
+static SM_StatePtr Sm_Ui_liveShow_initial_(SM_Hsm * const me) SM_HSM_RETT;
 static SM_RetState Sm_Ui_liveShow_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT;
 SM_HsmState SM_HSM_ROM Sm_Ui_liveShow = {
     (SM_StatePtr)&Sm_Ui_active,           // super
-    (SM_InitHandler)NULL,                 // init_
+    (SM_InitHandler)&Sm_Ui_liveShow_initial_, // init_
     (SM_ActionHandler)&Sm_Ui_liveShow_entry_, // entry_
     (SM_ActionHandler)&Sm_Ui_liveShow_exit_,  // exit_
     (SM_StateHandler)&Sm_Ui_liveShow_         // handler
+};
+
+// The parent owns both panes; children rearm the shared animation timers.
+static void Sm_Ui_arcShow_entry_(SM_Hsm * const me) SM_HSM_RETT;
+static void Sm_Ui_arcShow_exit_(SM_Hsm * const me) SM_HSM_RETT;
+static SM_RetState Sm_Ui_arcShow_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT;
+SM_HsmState SM_HSM_ROM Sm_Ui_arcShow = {
+    (SM_StatePtr)&Sm_Ui_liveShow,          // super
+    (SM_InitHandler)NULL,                 // init_
+    (SM_ActionHandler)&Sm_Ui_arcShow_entry_, // entry_
+    (SM_ActionHandler)&Sm_Ui_arcShow_exit_,  // exit_
+    (SM_StateHandler)&Sm_Ui_arcShow_         // handler
+};
+
+static void Sm_Ui_signalShow_entry_(SM_Hsm * const me) SM_HSM_RETT;
+static void Sm_Ui_signalShow_exit_(SM_Hsm * const me) SM_HSM_RETT;
+static SM_RetState Sm_Ui_signalShow_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT;
+SM_HsmState SM_HSM_ROM Sm_Ui_signalShow = {
+    (SM_StatePtr)&Sm_Ui_liveShow,          // super
+    (SM_InitHandler)NULL,                 // init_
+    (SM_ActionHandler)&Sm_Ui_signalShow_entry_, // entry_
+    (SM_ActionHandler)&Sm_Ui_signalShow_exit_,  // exit_
+    (SM_StateHandler)&Sm_Ui_signalShow_         // handler
 };
 
 void Sm_Ui_bindDisplay(Sm_Ui * const me,
@@ -143,17 +168,23 @@ static void Sm_Ui_deliverTimeout_(void *context, void const *evt) {
 }
 
 void Sm_Ui_ctor(Sm_Ui * const me) {
-    static SST_Evt const stateTimeoutEvt = {
-        .sig = UI_STATE_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
+    static SST_Evt const splashTimeoutEvt = {
+        .sig = SPLASH_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
+    };
+    static SST_Evt const pageSwitchTimeoutEvt = {
+        .sig = UI_PAGE_SWITCH_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
     };
     static SST_Evt const statsTimeoutEvt = {
         .sig = UI_STATS_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
     };
-    static SST_Evt const threadTimeoutEvt = {
-        .sig = UI_THREAD_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
+    static SST_Evt const cardSlideTimeoutEvt = {
+        .sig = UI_CARD_SLIDE_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
     };
-    static SST_Evt const resourceTimeoutEvt = {
-        .sig = UI_RESOURCE_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
+    static SST_Evt const animationTriggerEvt = {
+        .sig = UI_ANIMATION_TRIGGER_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
+    };
+    static SST_Evt const animationSwitchTimeoutEvt = {
+        .sig = UI_ANIMATION_SWITCH_TIMEOUT_SIG, .poolId = 0U, .refCtr = 0U
     };
     static TimeEvt_PostOperations const delivery = {
         .context = NULL, .post = Sm_Ui_deliverTimeout_
@@ -163,10 +194,15 @@ void Sm_Ui_ctor(Sm_Ui * const me) {
     me->pageTitle = (UiPageTitle){0};
     me->bootCount = (UiBootCount){0};
     me->resourceMonitor = (UiResourceMonitor){0};
-    TimeEvt_ctor(&me->stateTimeout, &stateTimeoutEvt, &delivery);
+    me->liveMotion = (UiLiveMotion){0};
+    me->liveSignal = (UiLiveSignal){0};
+    TimeEvt_ctor(&me->splashTimeout, &splashTimeoutEvt, &delivery);
+    TimeEvt_ctor(&me->pageSwitchTimeout, &pageSwitchTimeoutEvt, &delivery);
     TimeEvt_ctor(&me->statsTimeout, &statsTimeoutEvt, &delivery);
-    TimeEvt_ctor(&me->threadTimeout, &threadTimeoutEvt, &delivery);
-    TimeEvt_ctor(&me->resourceTimeout, &resourceTimeoutEvt, &delivery);
+    TimeEvt_ctor(&me->cardSlideTimeout, &cardSlideTimeoutEvt, &delivery);
+    TimeEvt_ctor(&me->animationTrigger, &animationTriggerEvt, &delivery);
+    TimeEvt_ctor(&me->animationSwitchTimeout,
+                  &animationSwitchTimeoutEvt, &delivery);
 }
 //............................................................................
 void Sm_Ui_init(Sm_Ui * const me) {
@@ -243,12 +279,13 @@ static void Sm_Ui_splashing_entry_(SM_Hsm * const me) SM_HSM_RETT {
     self->display->setBacklight(self->display->context, true);
     bool const shown = UiSplash_show(&self->root, Asset_splash());
     Ui_dbgSplashOk_ = shown ? 1U : 0U;
-    TimeEvt_arm(&self->stateTimeout, shown ? UI_SPLASH_TICKS : 1U, 0U);
+    TimeEvt_arm(&self->splashTimeout,
+                 shown ? 3U * BSP_TICKS_PER_SEC / 2U : 1U, 0U);
 }
 
 static void Sm_Ui_splashing_exit_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
-    (void)TimeEvt_disarm(&self->stateTimeout);
+    (void)TimeEvt_disarm(&self->splashTimeout);
     UiSplash_hide(&self->root);
 }
 
@@ -257,7 +294,7 @@ static SM_RetState Sm_Ui_splashing_(SM_Hsm * const me, SST_Evt const * const e) 
     SST_Evt const * const evt = e;
 
     switch (evt->sig) {
-        case UI_STATE_TIMEOUT_SIG:
+        case SPLASH_TIMEOUT_SIG:
             return _SM_TRAN(&Sm_Ui_readyShow);
         case BRING_UP_ASSETS_LOADED_SIG:
             return _SM_TRAN(&Sm_Ui_readyShow);
@@ -271,7 +308,7 @@ static SM_RetState Sm_Ui_readyShow_(SM_Hsm * const me, SST_Evt const * const e) 
     SST_Evt const * const evt = e;
 
     switch (evt->sig) {
-        case UI_STATE_TIMEOUT_SIG:
+        case SPLASH_TIMEOUT_SIG:
             return _SM_TRAN(&Sm_Ui_active);
         case BRING_UP_ASSETS_LOADED_SIG:
             return _SM_TRAN(&Sm_Ui_active);
@@ -294,7 +331,8 @@ static void Sm_Ui_active_entry_(SM_Hsm * const me) SM_HSM_RETT {
                                  &self->cpuIdle, &self->cpuTotal);
     uint32_t const fps = self->display->readFps(self->display->context);
     UiTopbar_setFps(&self->topbar, (uint16_t)(fps > 999U ? 999U : fps));
-    TimeEvt_arm(&self->statsTimeout, UI_STATS_TICKS, UI_STATS_TICKS);
+    TimeEvt_arm(&self->statsTimeout,
+                 BSP_TICKS_PER_SEC, BSP_TICKS_PER_SEC);
 }
 
 static SM_RetState Sm_Ui_active_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
@@ -433,18 +471,15 @@ static void Sm_Ui_sysInfo_entry_(SM_Hsm * const me) SM_HSM_RETT {
     self->resourceSlot = 0U;
     Sm_Ui_bindResource_(self, 0U, 0U);
     Sm_Ui_bindResource_(self, 1U, 1U);
-    TimeEvt_arm(&self->threadTimeout,
-                 UI_THREAD_DWELL_TICKS, UI_THREAD_DWELL_TICKS);
-    TimeEvt_arm(&self->resourceTimeout,
-                 UI_THREAD_DWELL_TICKS, UI_THREAD_DWELL_TICKS);
-    // TimeEvt_arm(&self->stateTimeout, UI_SYS_INFO_TICKS, 0U);
+    TimeEvt_arm(&self->cardSlideTimeout,
+                 2U * BSP_TICKS_PER_SEC, 2U * BSP_TICKS_PER_SEC);
+    TimeEvt_arm(&self->pageSwitchTimeout, 12U * BSP_TICKS_PER_SEC, 0U);
 }
 
 static void Sm_Ui_sysInfo_exit_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
-    (void)TimeEvt_disarm(&self->stateTimeout);
-    (void)TimeEvt_disarm(&self->threadTimeout);
-    (void)TimeEvt_disarm(&self->resourceTimeout);
+    (void)TimeEvt_disarm(&self->pageSwitchTimeout);
+    (void)TimeEvt_disarm(&self->cardSlideTimeout);
     UiSysInfo_hide(&self->root, &self->pageTitle,
                    &self->bootCount, &self->threadMonitor,
                    &self->resourceMonitor);
@@ -458,36 +493,32 @@ static SM_RetState Sm_Ui_sysInfo_(SM_Hsm * const me, SST_Evt const * const e) SM
             Sm_Ui_bindResource_(self, self->resourceSlot,
                                 self->resourceIndex);
             return _SM_SUPER();
-        case UI_RESOURCE_TIMEOUT_SIG: {
-            if (self->resourceMonitor.sliding) {
-                return _SM_HANDLED();
+        case UI_CARD_SLIDE_TIMEOUT_SIG: {
+            if (!self->resourceMonitor.sliding) {
+                unsigned const next = self->resourceSlot ^ 1U;
+                self->resourceIndex =
+                    (self->resourceIndex + 1U) % UI_RESOURCE_COUNT;
+                Sm_Ui_bindResource_(self, next, self->resourceIndex);
+                UiResourceMonitor_slide(&self->resourceMonitor,
+                    (uint8_t)self->resourceSlot, (uint8_t)next);
+                self->resourceSlot = next;
+                UiDots_setActive(&self->resourceMonitor.dots,
+                                  (uint8_t)self->resourceIndex);
             }
-            unsigned const next = self->resourceSlot ^ 1U;
-            self->resourceIndex =
-                (self->resourceIndex + 1U) % UI_RESOURCE_COUNT;
-            Sm_Ui_bindResource_(self, next, self->resourceIndex);
-            UiResourceMonitor_slide(&self->resourceMonitor,
-                (uint8_t)self->resourceSlot, (uint8_t)next);
-            self->resourceSlot = next;
-            UiDots_setActive(&self->resourceMonitor.dots,
-                              (uint8_t)self->resourceIndex);
+            if (!self->threadMonitor.sliding) {
+                unsigned const next = self->threadSlot ^ 1U;
+                self->threadIndex =
+                    (self->threadIndex + 1U) % UI_THREAD_COUNT;
+                Sm_Ui_bindThread_(self, next, self->threadIndex);
+                UiThreadMonitor_slide(&self->threadMonitor,
+                    (uint8_t)self->threadSlot, (uint8_t)next);
+                self->threadSlot = next;
+                UiDots_setActive(&self->threadMonitor.dots,
+                                  (uint8_t)self->threadIndex);
+            }
             return _SM_HANDLED();
         }
-        case UI_THREAD_TIMEOUT_SIG: {
-            if (self->threadMonitor.sliding) {
-                return _SM_HANDLED();
-            }
-            unsigned const next = self->threadSlot ^ 1U;
-            self->threadIndex = (self->threadIndex + 1U) % UI_THREAD_COUNT;
-            Sm_Ui_bindThread_(self, next, self->threadIndex);
-            UiThreadMonitor_slide(&self->threadMonitor,
-                (uint8_t)self->threadSlot, (uint8_t)next);
-            self->threadSlot = next;
-            UiDots_setActive(&self->threadMonitor.dots,
-                              (uint8_t)self->threadIndex);
-            return _SM_HANDLED();
-        }
-        case UI_STATE_TIMEOUT_SIG:
+        case UI_PAGE_SWITCH_TIMEOUT_SIG:
             return _SM_TRAN(&Sm_Ui_liveShow);
         default:
             return _SM_SUPER();
@@ -498,20 +529,97 @@ static void Sm_Ui_liveShow_entry_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
     // Page-owned background; a missing slot leaves the root black.
     UiRoot_setBackground(&self->root, Asset_slot(Asset_get(), 1U));
-    TimeEvt_arm(&self->stateTimeout, UI_LIVE_SHOW_TICKS, 0U);
+    UiPageTitle_create(&self->pageTitle, self->root.container,
+                       lv_pct(100), 17, "LiveShow");
+    lv_obj_set_style_margin_top(self->pageTitle.container, 1, LV_PART_MAIN);
+    UiLiveMotion_create(&self->liveMotion, self->root.container,
+                         lv_pct(100), 112);
+    UiLiveSignal_create(&self->liveSignal, self->root.container,
+                         lv_pct(100), 133);
+    TimeEvt_arm(&self->pageSwitchTimeout, 10U * BSP_TICKS_PER_SEC, 0U);
+}
+
+static SM_StatePtr Sm_Ui_liveShow_initial_(SM_Hsm * const me) SM_HSM_RETT {
+    (void)me;
+    return _SM_INIT(&Sm_Ui_arcShow);
 }
 
 static void Sm_Ui_liveShow_exit_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
-    (void)TimeEvt_disarm(&self->stateTimeout);
+    (void)TimeEvt_disarm(&self->pageSwitchTimeout);
+    UiLiveSignal_destroy(&self->liveSignal);
+    UiLiveMotion_destroy(&self->liveMotion);
+    UiPageTitle_destroy(&self->pageTitle);
     UiRoot_setBackground(&self->root, NULL);
 }
 
 static SM_RetState Sm_Ui_liveShow_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
-    (void)me;
     switch (e->sig) {
-        case UI_STATE_TIMEOUT_SIG:
+        case UI_PAGE_SWITCH_TIMEOUT_SIG:
             return _SM_TRAN(&Sm_Ui_sysInfo);
+        default:
+            return _SM_SUPER();
+    }
+}
+
+static void Sm_Ui_arcShow_entry_(SM_Hsm * const me) SM_HSM_RETT {
+    Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
+    UiLiveMotion_setProgress(&self->liveMotion, 0);
+    // At 100 Hz, 3 ticks gives 33 1/3 Hz, not exactly 30 Hz.
+    TimeEvt_arm(&self->animationTrigger,
+                 BSP_TICKS_PER_SEC / 30U, BSP_TICKS_PER_SEC / 30U);
+    TimeEvt_arm(&self->animationSwitchTimeout,
+                 5U * BSP_TICKS_PER_SEC, 0U);
+}
+
+static void Sm_Ui_arcShow_exit_(SM_Hsm * const me) SM_HSM_RETT {
+    Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
+    (void)TimeEvt_disarm(&self->animationTrigger);
+    (void)TimeEvt_disarm(&self->animationSwitchTimeout);
+}
+
+static SM_RetState Sm_Ui_arcShow_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
+    Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
+    switch (e->sig) {
+        case UI_ANIMATION_SWITCH_TIMEOUT_SIG:
+            return _SM_TRAN(&Sm_Ui_signalShow);
+        case UI_ANIMATION_TRIGGER_TIMEOUT_SIG:
+            UiLiveMotion_setProgress(&self->liveMotion,
+                (uint16_t)((self->liveMotion.progress
+                    + 1000U * (BSP_TICKS_PER_SEC / 30U)
+                      / (5U * BSP_TICKS_PER_SEC)) % 1000U));
+            return _SM_HANDLED();
+        default:
+            return _SM_SUPER();
+    }
+}
+
+static void Sm_Ui_signalShow_entry_(SM_Hsm * const me) SM_HSM_RETT {
+    Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
+    UiLiveSignal_setProgress(&self->liveSignal, 0);
+    TimeEvt_arm(&self->animationTrigger,
+                 BSP_TICKS_PER_SEC / 10U, BSP_TICKS_PER_SEC / 10U);
+    TimeEvt_arm(&self->animationSwitchTimeout,
+                 5U * BSP_TICKS_PER_SEC, 0U);
+}
+
+static void Sm_Ui_signalShow_exit_(SM_Hsm * const me) SM_HSM_RETT {
+    Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
+    (void)TimeEvt_disarm(&self->animationTrigger);
+    (void)TimeEvt_disarm(&self->animationSwitchTimeout);
+}
+
+static SM_RetState Sm_Ui_signalShow_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {
+    Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
+    switch (e->sig) {
+        case UI_ANIMATION_SWITCH_TIMEOUT_SIG:
+            return _SM_TRAN(&Sm_Ui_arcShow);
+        case UI_ANIMATION_TRIGGER_TIMEOUT_SIG:
+            UiLiveSignal_setProgress(&self->liveSignal,
+                (uint8_t)((self->liveSignal.progress
+                    + 100U * (BSP_TICKS_PER_SEC / 10U)
+                      / (5U * BSP_TICKS_PER_SEC)) % 100U));
+            return _SM_HANDLED();
         default:
             return _SM_SUPER();
     }

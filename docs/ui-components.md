@@ -19,7 +19,7 @@ UiRoot 始终取屏幕尺寸；UiDots 的自然尺寸仍由点数决定。
 原背景源图保存在 bg/figma；slot0/1 已由 SysInfo/LiveShow 挂载。
 
 UI 线程继续负责收件、派发、事件回收和 LVGL heartbeat/flush。
-Sm_Ui 保留启动就绪事件流转，以及 SysInfo 5 s、LiveShow 10 s 的
+Sm_Ui 保留启动就绪事件流转，以及 SysInfo 12 s、LiveShow 10 s 的
 切页骨架。splashing 入口把 Splash 像素挂成根容器背景、出口还原
 为黑。Active 入口在根容器下挂被动 Topbar，整个 demo 常驻，
 SysInfo / LiveShow 共用同一个实例。两页入口各自把
@@ -31,7 +31,8 @@ slot0 / slot1 挂成根容器整屏背景，出口清掉，缺槽回退黑色。
 UI 线程 → Sm_Ui HSM → UiSplash → UiRoot → LVGL
                   → UiTopbar（Active entry 创建一次，常驻）
                   → UiSysInfo → UiRoot（背景+页标题+ThreadMonitor）
-                  → stateTimeout（启动停留和页面切换）
+                  → splashTimeout（SPLASH_TIMEOUT_SIG，仅启动停留）
+                  → pageSwitchTimeout（UI_PAGE_SWITCH_TIMEOUT_SIG，切页）
 ```
 
 目录分两类助手：hsm/helpers 放 HSM 持有的无状态页面操作
@@ -146,11 +147,13 @@ widgets/boot_count/boot_count.c/.h 是独立的计数分组组件
 LVGL 对象——236x17 普通容器（非 flex）+ 左侧 81x17 标题
 标签（Montserrat 14，编译字体实测 81 px 宽，Figma 标注
 79，组边界不变，借用调用方字符串、CLIP）；BootCount 是
-3 个 LVGL 对象——106x12 flex 分组
-（SPACE_EVENLY/CENTER，列距 1）装固定 "BOOTS" 标签和
-68x12 计数标签（Montserrat 10，借用实例内 countText）。
+3 个 LVGL 对象——151x17 flex 分组
+（SPACE_EVENLY/CENTER，列距 2）装 52x17 的 "BOOTS" 标签和
+97x17 计数标签（Montserrat 14，借用实例内 countText）。
+编译字体实测 BOOTS 需 52 px，比 Figma 补宽 1 px；
+uint32 上限需 97 px，比 Figma 的 95 px 补宽 2 px。
 helper 把 BootCount 挂进 PageTitle 容器并右对齐，组合
-渲染与旧单体一致（共 5 个对象）。接口
+共 5 个对象；文字框及组高均为 17，避免大字体裁剪。接口
 UiPageTitle_create/destroy/setTitle 与
 UiBootCount_create/destroy/setCount；setCount 把 uint32
 格式成带千分位逗号的十进制
@@ -211,7 +214,7 @@ HSM 负责格式化、绑定与翻页，Card/Monitor 保持被动。
   未知或不适用时队列 Bar 降低透明度，不把 0 当成真实耗尽值。
 
 SysInfo 进入时绑定首卡与备用卡，每秒刷新可见卡；
-每 250 个 100 Hz tick（2.5 s）启动一次 240 ms 水平滑动，
+每 2 s 启动一次 240 ms 水平滑动，
 旧卡向左退出，新卡从右进入；复用两个实例并同步五点高亮。
 Topbar、标题及分页点不参与动画，viewport 裁剪卡片内容。
 动画中忽略重复翻页事件，避免覆盖仍在显示的槽位数据。
@@ -270,9 +273,11 @@ indicatorContainer 为 viewport 的兄弟节点，
 在 ThreadMonitor 之后创建、横向由 Root padding 定位）：挂载后外框
 (2,174) 236x144，viewport (2,200) 236x118，卡片 x 2/238
 y 200，圆弧 (70,238)，五点组 (93,287) 54x6。
-已接真实采样、每秒刷新、2.5 s 轮播及 240 ms 水平滑动。
+已接真实采样、每秒刷新、2 s 轮播及 240 ms 水平滑动。
 两张卡复用，旧卡向左退出、新卡从右进入，独立五点同步高亮。
-退出页面停掉资源定时器，销毁 Monitor 时先取消动画；
+上下槽共用 cardSlideTimeout，周期为 2U * BSP_TICKS_PER_SEC，
+投递 UI_CARD_SLIDE_TIMEOUT_SIG，同时推进两组卡片。
+退出页面停掉共用定时器，销毁 Monitor 时先取消动画；
 动画中不接受重复翻页，不移动标题、Topbar 或圆点。
 UiResourceCard_setHeader/setGauge 仅绑定调用方字符串和百分比，
 字符串由 HSM 的双槽缓冲持有，Card 不采样、不计算比例。
@@ -366,6 +371,66 @@ HAL_DMA_Start_IT 内部虽关闭通道，但已经晚于驱动修改宽度的动
 都与发送前像素完全一致。状态栏横带规避及临时 GRAM/RAM 探针移除。
 正常版本重新编译烧录后，固件及三张 SRAM 资产逐字节读回匹配，
 状态采样确认 Sys/Live 流转；用户确认恢复 label 局部刷新后无花屏。
+
+## LiveShow 圆弧和进度条
+
+UiArc 是公共 Arc_create helper 之上的被动百分比组件：
+UiArc_create / UiArc_setValue / UiArc_destroy。
+取值契约为 0..100；setter 同步更新圆弧和内部百分比文字，
+不静默截断超范围值。根对象就是 lv_arc，只有一个居中的 Label
+子对象，不再包一层布局容器。270 度背景弧、10 px 线宽；
+create 初始值为 0，外框宽高支持像素或 lv_pct()。
+实例持有文字缓冲，活动期间不能复制/移动或外部删除子树。
+
+UiLiveMotion 是 LiveShow 上栏的 Flex 组合：
+
+```text
+COLUMN（间距 7）
+├── ROW（LIVE ACTIVITY、LED status 开关）
+└── ROW（高 70）
+    ├── UiArc（70x70）
+    └── COLUMN（flex_grow）
+        ├── INDICATOR RUN
+        ├── 百分比
+        └── Bar（宽 100%、高 6）
+```
+
+UiLiveMotion_setValue 将同一演示值传给 UiArc、数值标签和 Bar，
+不采样硬件、不隐式启动动画。Bar 复用 Bar_create。
+Motion 子状态以 TimeEvt 调用 setProgress，
+统一驱动 Arc、Bar、文字和演示开关，不创建 lv_anim。
+Motion 外框在 Root 下按 COLUMN 自然排列，宽 100%、高 112，
+不设置绝对坐标。LiveShow entry 创建，exit 销毁；Topbar 常驻。
+LED status 为被动 lv_switch，37x18，蓝色开启轨道、白色滑块。
+UiLiveMotion_setLedStatus 只设置显示状态，不回调、不控制硬件；
+create 默认关闭，LiveShow 按演示前后半周期切换，不绑定 LED 事件。
+下栏 Frame 13 由 UiLiveSignal 创建，宽 100%、高 133。
+内部 COLUMN 使用 SPACE_BETWEEN，依次为标题行、正弦线、相位条；
+标题行横排 Signal / Phase 与 MOVE DEMO，使用 Montserrat 14，
+文字框高 17。波形为 lv_line，101 个 const 参考点留在 Flash，
+按正弦公式每 2 px 采样并取整，约 200x30 的一个周期；
+实例持有可写的 101 点缓冲供 Line 借用，不能移动活动实例。
+LVGL 整数线宽取 2，近似 Figma 的 1.5，不新增图片或 Chart。
+五段相位条每段 20x4、间距 7，总宽 128；默认高亮第零段。
+UiLiveSignal_setPhase 只选择 0..4 高亮，不移动波形或启动动画。
+UiLiveSignal_setProgress 接收 0..99 的周期进度，同步平移波形
+并更新五段相位。复用实例点表，不每帧申请内存或计算三角函数。
+Signal 子状态以 100 ms 周期 TimeEvt 每次推进 2%。
+UiLiveMotion_setProgress 接收 0..999 千分比周期进度，
+同步更新 smoothstep 往返值与开关。
+LiveShow 父状态创建两栏，初始进入 arcShow，5 秒后转 signalShow，
+两者按 QM 双向切换，整页仍在 10 秒后离开。
+两个子状态共用节拍与切换超时，entry 按当前状态 arm、exit disarm；
+另一栏保留最后画面。切阶段不隐藏、删除或重建控件。
+每帧复用对象、文字和点表；组件不拥有 lv_anim、lv_timer、TimeEvt，
+只暴露被动 setter。两栏进度均按 5 秒一轮的速度推进，
+Motion 实际 33 1/3 Hz（3 tick），Signal 为 10 Hz。
+进入对应子状态从零开始，计时和阶段决策属于 HSM。
+LiveShow entry 创建、exit 销毁，不影响常驻 Topbar。
+按 2026-11-06 最新 Figma，上栏标题、圆弧百分比、右侧说明和数值
+使用 Montserrat 14，文字框高 17；左右 padding 为 10，给长说明
+留出空间。页标题与 Topbar 本来就是 14，保持现状。
+下栏标签已按最新设计从 Montserrat 10 同步为 14。
 
 ## 原生局部刷新
 
