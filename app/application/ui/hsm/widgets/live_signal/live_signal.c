@@ -34,12 +34,10 @@ static lv_point_precise_t const UiLiveSignal_points_[] = {
 
 static lv_obj_t *UiLiveSignal_label_(lv_obj_t *parent,
                                     char const *text) {
-    lv_obj_t * const label = Label_create(parent,
+    return Label_create(parent,
         &(LabelConfig){
-            .width = LV_SIZE_CONTENT, .height = 17,
+            .style = &UiStyle_signalLabel,
             .longMode = LV_LABEL_LONG_MODE_CLIP, .text = text});
-    lv_obj_add_style(label, &UiStyle_signalText, LV_PART_MAIN);
-    return label;
 }
 
 void UiLiveSignal_create(UiLiveSignal *me, lv_obj_t *parent,
@@ -66,7 +64,6 @@ void UiLiveSignal_create(UiLiveSignal *me, lv_obj_t *parent,
     lv_obj_remove_style_all(me->wave);
     lv_obj_remove_flag(me->wave,
         LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_size(me->wave, 202, 40);
     lv_obj_add_style(me->wave, &UiStyle_signalWave, LV_PART_MAIN);
     me->phases = FlexContainer_create(me->container,
         &(UiFlexConfig){
@@ -77,7 +74,6 @@ void UiLiveSignal_create(UiLiveSignal *me, lv_obj_t *parent,
     for (unsigned i = 0; i < 5; ++i) {
         lv_obj_t * const phase = lv_obj_create(me->phases);
         lv_obj_remove_style_all(phase);
-        lv_obj_set_size(phase, 20, 4);
         lv_obj_remove_flag(phase,
             LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_style(phase, &UiStyle_signalPhase, LV_PART_MAIN);

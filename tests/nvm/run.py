@@ -7,15 +7,16 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 work = Path(tempfile.mkdtemp(prefix="nvm-io-test-"))
 includes = ["project_common/flash", "project_common/assets",
-            "tests/ui_components/ports", "app/application/nvm", "app/ports",
+            "tests/ui_components/ports", "app/application/aos/flash/nvm",
+            "app/application/nvm", "app/ports",
             "3rd_party/sm_nvs/include", "3rd_party/sm_nvs/src",
             "3rd_party/sm_hsm/include"]
 command = ["gcc", "-std=c11", "-Wall", "-Wextra", "-Werror",
            "-fsanitize=address,undefined", "-fno-pie", "-no-pie"]
 for folder in includes:
     command += ["-I", str(ROOT / folder)]
-sources = ["app/application/nvm/nvm_manager.c",
-           "app/application/nvm/nvm_meta.c",
+sources = ["app/application/aos/flash/nvm/nvm_manager.c",
+           "3rd_party/sm_nvs/src/nvm_meta.c",
            "app/application/nvm/instance/nvm_boot.c",
            "app/application/nvm/instance/nvm_blinky.c"]
 command += [str(ROOT / source) for source in [

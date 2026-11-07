@@ -20,26 +20,21 @@ static void UiThreadCard_createResource_(UiThreadCardResource *row,
                                          lv_obj_t *parent) {
     row->container = lv_obj_create(parent);
     lv_obj_remove_style_all(row->container);
-    lv_obj_set_size(row->container, lv_pct(100), 23);
+    lv_obj_add_style(row->container, &UiStyle_threadResourceRow,
+                      LV_PART_MAIN);
     lv_obj_remove_flag(row->container, LV_OBJ_FLAG_SCROLLABLE
                                        | LV_OBJ_FLAG_CLICKABLE
                                        | LV_OBJ_FLAG_OVERFLOW_VISIBLE);
     row->value = Label_create(row->container,
         &(LabelConfig){
-            .width = lv_pct(75), .height = 17,
+            .style = &UiStyle_threadValue,
             .longMode = LV_LABEL_LONG_MODE_CLIP,
-            .textAlign = LV_TEXT_ALIGN_LEFT,
             .text = ""});
-    lv_obj_add_style(row->value, &UiStyle_threadCardText, LV_PART_MAIN);
-    lv_obj_align(row->value, LV_ALIGN_TOP_LEFT, 0, 0);
     row->unit = Label_create(row->container,
         &(LabelConfig){
-            .width = lv_pct(25), .height = 17,
+            .style = &UiStyle_threadUnit,
             .longMode = LV_LABEL_LONG_MODE_CLIP,
-            .textAlign = LV_TEXT_ALIGN_RIGHT,
             .text = ""});
-    lv_obj_add_style(row->unit, &UiStyle_threadCardText, LV_PART_MAIN);
-    lv_obj_align(row->unit, LV_ALIGN_TOP_RIGHT, 0, 0);
     row->bar = Bar_create(row->container,
         &(BarConfig){
             .width = lv_pct(100), .height = 6,
@@ -77,26 +72,20 @@ void UiThreadCard_create(UiThreadCard *me, lv_obj_t *parent,
 
     me->header = lv_obj_create(box);
     lv_obj_remove_style_all(me->header);
-    lv_obj_set_size(me->header, lv_pct(100), 17);
+    lv_obj_add_style(me->header, &UiStyle_threadHeader, LV_PART_MAIN);
     lv_obj_remove_flag(me->header, LV_OBJ_FLAG_SCROLLABLE
                                    | LV_OBJ_FLAG_CLICKABLE
                                    | LV_OBJ_FLAG_OVERFLOW_VISIBLE);
     me->threadName = Label_create(me->header,
         &(LabelConfig){
-            .width = lv_pct(75), .height = 17,
+            .style = &UiStyle_threadName,
             .longMode = LV_LABEL_LONG_MODE_CLIP,
-            .textAlign = LV_TEXT_ALIGN_LEFT,
             .text = ""});
-    lv_obj_add_style(me->threadName, &UiStyle_threadCardText, LV_PART_MAIN);
-    lv_obj_align(me->threadName, LV_ALIGN_LEFT_MID, 0, 0);
     me->priority = Label_create(me->header,
         &(LabelConfig){
-            .width = lv_pct(25), .height = 17,
+            .style = &UiStyle_threadPriority,
             .longMode = LV_LABEL_LONG_MODE_CLIP,
-            .textAlign = LV_TEXT_ALIGN_RIGHT,
             .text = ""});
-    lv_obj_add_style(me->priority, &UiStyle_threadCardText, LV_PART_MAIN);
-    lv_obj_align(me->priority, LV_ALIGN_RIGHT_MID, 0, 0);
     for(unsigned i = 0; i < UI_THREAD_CARD_RESOURCE_COUNT; ++i) {
         UiThreadCard_createResource_(&me->resources[i], box);
     }

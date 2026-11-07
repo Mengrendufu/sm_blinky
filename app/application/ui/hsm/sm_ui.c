@@ -12,6 +12,7 @@
 #include "sm_ui.h"
 #include "helpers/ui_splash.h"
 #include "helpers/ui_sys_info.h"
+#include "helpers/ui_live_show.h"
 #include "ui_evt.h"
 #include "asset.h"
 #include "instance/nvm_blinky.h"
@@ -527,15 +528,9 @@ static SM_RetState Sm_Ui_sysInfo_(SM_Hsm * const me, SST_Evt const * const e) SM
 
 static void Sm_Ui_liveShow_entry_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
-    // Page-owned background; a missing slot leaves the root black.
-    UiRoot_setBackground(&self->root, Asset_slot(Asset_get(), 1U));
-    UiPageTitle_create(&self->pageTitle, self->root.container,
-                       lv_pct(100), 17, "LiveShow");
-    lv_obj_set_style_margin_top(self->pageTitle.container, 1, LV_PART_MAIN);
-    UiLiveMotion_create(&self->liveMotion, self->root.container,
-                         lv_pct(100), 112);
-    UiLiveSignal_create(&self->liveSignal, self->root.container,
-                         lv_pct(100), 133);
+    UiLiveShow_build(&self->root, &self->pageTitle,
+                     &self->liveMotion, &self->liveSignal,
+                     Asset_slot(Asset_get(), 1U));
     TimeEvt_arm(&self->pageSwitchTimeout, 10U * BSP_TICKS_PER_SEC, 0U);
 }
 
@@ -547,10 +542,8 @@ static SM_StatePtr Sm_Ui_liveShow_initial_(SM_Hsm * const me) SM_HSM_RETT {
 static void Sm_Ui_liveShow_exit_(SM_Hsm * const me) SM_HSM_RETT {
     Sm_Ui * const self = container_of(me, Sm_Ui, sm_hsm_);
     (void)TimeEvt_disarm(&self->pageSwitchTimeout);
-    UiLiveSignal_destroy(&self->liveSignal);
-    UiLiveMotion_destroy(&self->liveMotion);
-    UiPageTitle_destroy(&self->pageTitle);
-    UiRoot_setBackground(&self->root, NULL);
+    UiLiveShow_hide(&self->root, &self->pageTitle,
+                    &self->liveMotion, &self->liveSignal);
 }
 
 static SM_RetState Sm_Ui_liveShow_(SM_Hsm * const me, SST_Evt const * const e) SM_HSM_RETT {

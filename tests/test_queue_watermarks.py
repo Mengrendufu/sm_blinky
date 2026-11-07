@@ -18,11 +18,22 @@ for folder in [
 ]:
     command += ["-I", str(ROOT / folder)]
 command += [
-    str(ROOT / "tests/test_queue_watermarks.c"), "-o", str(work / "test"),
+    str(ROOT / "tests/test_queue_watermarks.c"),
+    str(ROOT / "app/ports/static_pool/sst_evt_pool.c"),
+    str(ROOT / "3rd_party/common_c/src/static_pool/static_pool.c"),
+    "-o", str(work / "test"),
 ]
 subprocess.run(command, check=True)
 result = subprocess.run([str(work / "test")], check=True,
-                        capture_output=True, text=True)
-(work / "result.txt").write_text(result.stdout + result.stderr)
+                        capture_output=True, text=True, cwd=work)
+report = result.stdout + result.stderr
 print(result.stdout, end="")
+for mode in (1, 2):
+    result = subprocess.run([str(work / "test"), str(mode)],
+                            capture_output=True, text=True, cwd=work)
+    assert result.returncode != 0 and "ASSERT sst_port:311" in result.stderr
+    message = f"PASS ISR invariant: {'pool ID' if mode == 1 else 'refCtr'}\n"
+    report += message + result.stderr
+    print(message, end="")
+(work / "result.txt").write_text(report)
 print(f"Report: {work / 'result.txt'}")

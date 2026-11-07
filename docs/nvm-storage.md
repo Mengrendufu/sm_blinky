@@ -2,13 +2,17 @@
 
 ## 当前实现
 
-正式实现位于 app/application/nvm：框架文件置于根目录，
-具体数据块置于 instance/，模块说明见该目录 README.md。
+公共 nvm_manager.h、nvm_meta.h 和 nvm_meta.c 位于 sm_nvs，
+分别归 include/ 和 src/；接口签名与对象结构保持原样。
+app/application/aos/flash/nvm 保留具体 nvm_manager.c、
+nvm_conf.h；共享数据块独立位于 app/application/nvm/instance/。
+数据块不作为 Flash AO 私有成员，注册只建立 Meta 引用关系。
+公开接口及访问规则不变，平台适配仍在 app/ports/。
 draft 层及旧 nvm.c/.h 已移除；下文旧静态映射部分仅为历史记录，
 不是当前 API。
 
 - Sm_Flash 内嵌 NvmManager；Flash_ctor 装配 manager 及
-  NvmBoot/NvmBlinky 私有实例，manager 不依赖具体数据类型。
+  NvmBoot/NvmBlinky 共享数据块，manager 不依赖具体数据类型。
 - NvmMeta 绑定每块的双份后备 RAM，前半为活块、后半暂存 IO；
   取消旧的共享联合体和逐项保存结果表。
 - NVM_BOOT_ID=1、NVM_BLINKY_ID=2 保持不变，当前记录均为 4 B。

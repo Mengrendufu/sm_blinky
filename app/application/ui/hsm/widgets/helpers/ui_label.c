@@ -21,13 +21,21 @@ lv_obj_t *Label_create(lv_obj_t *parent, LabelConfig const *config) {
                || config->textAlign == LV_TEXT_ALIGN_LEFT
                || config->textAlign == LV_TEXT_ALIGN_CENTER
                || config->textAlign == LV_TEXT_ALIGN_RIGHT);
+    SM_REQUIRE(config->style == NULL
+               || (config->width == 0 && config->height == 0
+                   && config->textAlign == LV_TEXT_ALIGN_AUTO));
 
     lv_obj_t * const label = lv_label_create(parent);
     lv_obj_remove_style_all(label);
     lv_label_set_long_mode(label, config->longMode);
-    lv_obj_set_size(label, config->width, config->height);
-    lv_obj_set_style_text_align(label, config->textAlign,
-                                LV_PART_MAIN);
+    if (config->style != NULL) {
+        lv_obj_add_style(label, config->style, LV_PART_MAIN);
+    }
+    else {
+        lv_obj_set_size(label, config->width, config->height);
+        lv_obj_set_style_text_align(label, config->textAlign,
+                                    LV_PART_MAIN);
+    }
     if (config->ignoreLayout != NULL) {
         lv_obj_add_flag(label, LV_OBJ_FLAG_IGNORE_LAYOUT);
         lv_obj_align(label, LV_ALIGN_TOP_LEFT,

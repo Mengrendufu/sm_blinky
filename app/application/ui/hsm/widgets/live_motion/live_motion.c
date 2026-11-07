@@ -17,12 +17,10 @@
 SM_DEFINE_MODULE("live_motion")
 
 static lv_obj_t *UiLiveMotion_label_(lv_obj_t *parent, char const *text) {
-    lv_obj_t * const label = Label_create(parent,
+    return Label_create(parent,
         &(LabelConfig){
-            .width = lv_pct(100), .height = 17,
+            .style = &UiStyle_liveLabel,
             .longMode = LV_LABEL_LONG_MODE_CLIP, .text = text});
-    lv_obj_add_style(label, &UiStyle_liveText, LV_PART_MAIN);
-    return label;
 }
 
 void UiLiveMotion_create(UiLiveMotion *me, lv_obj_t *parent,
@@ -48,25 +46,14 @@ void UiLiveMotion_create(UiLiveMotion *me, lv_obj_t *parent,
     lv_obj_set_width(me->heading, LV_SIZE_CONTENT);
     me->ledStatus = lv_switch_create(me->header);
     lv_obj_remove_style_all(me->ledStatus);
-    lv_obj_set_size(me->ledStatus, 37, 18);
     lv_obj_remove_flag(me->ledStatus,
         LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_radius(me->ledStatus, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(me->ledStatus, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(me->ledStatus, lv_color_hex(0x819480U),
-                              LV_PART_MAIN);
-    lv_obj_set_style_bg_color(me->ledStatus, lv_color_hex(0x819480U),
-                              LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(me->ledStatus, lv_color_hex(0x004EF6U),
-                              LV_PART_INDICATOR | LV_STATE_CHECKED);
-    lv_obj_set_style_bg_opa(me->ledStatus, LV_OPA_COVER, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(me->ledStatus, LV_RADIUS_CIRCLE,
-                            LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(me->ledStatus, lv_color_white(), LV_PART_KNOB);
-    lv_obj_set_style_bg_opa(me->ledStatus, LV_OPA_COVER, LV_PART_KNOB);
-    lv_obj_set_style_radius(me->ledStatus, LV_RADIUS_CIRCLE, LV_PART_KNOB);
-    lv_obj_set_style_pad_all(me->ledStatus, -2, LV_PART_KNOB);
-    lv_obj_set_style_anim_duration(me->ledStatus, 0, LV_PART_MAIN);
+    lv_obj_add_style(me->ledStatus, &UiStyle_switchTrack, LV_PART_MAIN);
+    lv_obj_add_style(me->ledStatus, &UiStyle_switchIndicator,
+                      LV_PART_INDICATOR);
+    lv_obj_add_style(me->ledStatus, &UiStyle_switchChecked,
+                      LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_add_style(me->ledStatus, &UiStyle_switchKnob, LV_PART_KNOB);
     me->body = FlexContainer_create(me->container,
         &(UiFlexConfig){
             .width = lv_pct(100), .height = 70, .flow = LV_FLEX_FLOW_ROW,

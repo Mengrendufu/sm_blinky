@@ -1,7 +1,7 @@
 #ifndef NVM_BOOT_H_
 #define NVM_BOOT_H_
 
-#include "../nvm_manager.h"
+#include "nvm_manager.h"
 #include <stdint.h>
 
 // Conventional persisted ID; the instance mounts itself at this slot.

@@ -65,14 +65,15 @@ set(SRC_ALL
     ${APP_ROOT}/application/ui/hsm/widgets/resource_monitor/resource_card.c
     ${APP_ROOT}/application/ui/hsm/helpers/ui_splash.c
     ${APP_ROOT}/application/ui/hsm/helpers/ui_sys_info.c
+    ${APP_ROOT}/application/ui/hsm/helpers/ui_live_show.c
     ${APP_ROOT}/application/ui/hsm/widgets/helpers/ui_flex.c
     ${APP_ROOT}/application/ui/hsm/widgets/helpers/ui_label.c
     ${APP_ROOT}/application/ui/hsm/widgets/helpers/ui_bar.c
     ${APP_ROOT}/application/ui/hsm/widgets/helpers/ui_arc.c
     ${APP_ROOT}/application/ui/hsm/widgets/styles/ui_style.c
     ${APP_ROOT}/application/ui/hsm/sm_ui.c
-    ${APP_ROOT}/application/nvm/nvm_manager.c
-    ${APP_ROOT}/application/nvm/nvm_meta.c
+    ${APP_ROOT}/application/aos/flash/nvm/nvm_manager.c
+    ${REPO_ROOT}/3rd_party/sm_nvs/src/nvm_meta.c
     ${APP_ROOT}/application/nvm/instance/nvm_boot.c
     ${APP_ROOT}/application/nvm/instance/nvm_blinky.c
     ${APP_ROOT}/application/aos/flash

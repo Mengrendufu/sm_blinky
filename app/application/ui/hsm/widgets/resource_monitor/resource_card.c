@@ -17,25 +17,22 @@
 SM_DEFINE_MODULE("resource_card")
 
 static lv_obj_t *UiResourceCard_container_(lv_obj_t *parent,
-                                           int32_t width,
-                                           int32_t height) {
+                                           lv_style_t const *style) {
     lv_obj_t * const box = lv_obj_create(parent);
     lv_obj_remove_style_all(box);
-    lv_obj_set_size(box, width, height);
+    lv_obj_add_style(box, style, LV_PART_MAIN);
     lv_obj_remove_flag(box, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     return box;
 }
 
-static lv_obj_t *UiResourceCard_label_(lv_obj_t *parent, int32_t width,
-                                       char const *text,
-                                       lv_text_align_t align) {
-    lv_obj_t * const label = Label_create(parent,
+static lv_obj_t *UiResourceCard_label_(lv_obj_t *parent,
+                                       lv_style_t const *style,
+                                       char const *text) {
+    return Label_create(parent,
         &(LabelConfig){
-            .width = width, .height = 17,
+            .style = style,
             .longMode = LV_LABEL_LONG_MODE_CLIP,
-            .textAlign = align, .text = text});
-    lv_obj_add_style(label, &UiStyle_resourceCardText, LV_PART_MAIN);
-    return label;
+            .text = text});
 }
 
 void UiResourceCard_create(UiResourceCard *me, lv_obj_t *parent,
@@ -63,19 +60,18 @@ void UiResourceCard_create(UiResourceCard *me, lv_obj_t *parent,
             .trackPlace = LV_FLEX_ALIGN_START,
             .padTop = 1, .padBottom = 1, .padRow = 4});
     lv_obj_remove_flag(me->container, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
-    me->header = UiResourceCard_container_(me->container, lv_pct(100), 27);
-    me->name = UiResourceCard_label_(me->header, 174, "--",
-                                     LV_TEXT_ALIGN_LEFT);
-    lv_obj_align(me->name, LV_ALIGN_TOP_LEFT, 2, 0);
-    me->sizeGroup = UiResourceCard_container_(me->header, 43, 17);
-    lv_obj_align(me->sizeGroup, LV_ALIGN_TOP_RIGHT, -2, 0);
-    me->size = UiResourceCard_label_(me->sizeGroup, 32, "--",
-                                     LV_TEXT_ALIGN_RIGHT);
-    me->unit = UiResourceCard_label_(me->sizeGroup, 11, "B",
-                                     LV_TEXT_ALIGN_RIGHT);
-    lv_obj_align(me->unit, LV_ALIGN_TOP_RIGHT, 0, 0);
+    me->header = UiResourceCard_container_(me->container,
+                                           &UiStyle_resourceHeader);
+    me->name = UiResourceCard_label_(me->header, &UiStyle_resourceName, "--");
+    me->sizeGroup = UiResourceCard_container_(me->header,
+                                              &UiStyle_resourceSizeGroup);
+    me->size = UiResourceCard_label_(me->sizeGroup,
+                                     &UiStyle_resourceSize, "--");
+    me->unit = UiResourceCard_label_(me->sizeGroup,
+                                     &UiStyle_resourceUnit, "B");
 
-    me->gauge = UiResourceCard_container_(me->container, 102, 35);
+    me->gauge = UiResourceCard_container_(me->container,
+                                          &UiStyle_resourceGauge);
     // Figma uses a full ellipse box for a short upper arc. Only this
     // wrapper permits overflow; the card and viewport still clip.
     lv_obj_add_flag(me->gauge, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
@@ -88,17 +84,15 @@ void UiResourceCard_create(UiResourceCard *me, lv_obj_t *parent,
     lv_obj_add_style(me->arc, &UiStyle_arcTrack, LV_PART_MAIN);
     lv_obj_add_style(me->arc, &UiStyle_arcIndicator,
                       LV_PART_INDICATOR);
-    me->percent = UiResourceCard_label_(me->gauge, 36, "--%",
-                                        LV_TEXT_ALIGN_CENTER);
-    lv_obj_set_pos(me->percent, 33, 21);
+    me->percent = UiResourceCard_label_(me->gauge,
+                                        &UiStyle_resourcePercent, "--%");
 
-    me->range = UiResourceCard_container_(me->container, lv_pct(100), 17);
-    me->minimum = UiResourceCard_label_(me->range, 48, "E",
-                                        LV_TEXT_ALIGN_LEFT);
-    lv_obj_align(me->minimum, LV_ALIGN_TOP_MID, -28, 0);
-    me->maximum = UiResourceCard_label_(me->range, 48, "--",
-                                        LV_TEXT_ALIGN_RIGHT);
-    lv_obj_align(me->maximum, LV_ALIGN_TOP_MID, 42, 0);
+    me->range = UiResourceCard_container_(me->container,
+                                          &UiStyle_resourceRange);
+    me->minimum = UiResourceCard_label_(me->range,
+                                        &UiStyle_resourceMinimum, "E");
+    me->maximum = UiResourceCard_label_(me->range,
+                                        &UiStyle_resourceMaximum, "--");
 }
 
 void UiResourceCard_destroy(UiResourceCard *me) {

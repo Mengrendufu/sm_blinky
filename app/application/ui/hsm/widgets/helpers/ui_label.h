@@ -15,9 +15,10 @@
 
 // Shared label creation for HSM widgets: one real lv_label child of
 // the given parent, style-free, with the configured size, long mode
-// and static text. Appearance (font/color) is NOT part of this
-// config: attach a shared const style (hsm/widgets/styles/ui_style.h) after
-// creation with lv_obj_add_style if needed.
+// and static text. Alternatively, style supplies shared geometry and
+// appearance; leave width/height zero and textAlign AUTO in that mode.
+// The style must outlive the label. Without it, appearance can be attached
+// after creation with lv_obj_add_style.
 //
 // The config is borrowed for the duration of the call only; nothing
 // is retained, so automatic storage and compound literals are fine.
@@ -62,6 +63,7 @@ typedef struct {
     lv_text_align_t textAlign;
     char const *text;
     LabelIgnoreLayout const *ignoreLayout;
+    lv_style_t const *style;
 } LabelConfig;
 
 lv_obj_t *Label_create(lv_obj_t *parent, LabelConfig const *config);

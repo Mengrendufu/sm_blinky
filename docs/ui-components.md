@@ -167,8 +167,16 @@ thread_card.c/.h。UiThreadCard_create/destroy 管一个
 卡片内有 232x17 普通标题容器，复用 Label_create 创建两个标签：
 左侧线程名 174x17、右侧优先级文字 58x17，分别内部 LEFT_MID /
 RIGHT_MID 对齐，文字也分别左/右对齐；长文字 CLIP，不相互覆盖。
-字体和颜色来自 UiStyle_threadCardText（Montserrat 14、白色），
-不放到 helper；此处宽度分配是实现选择，不是新增 Figma 测量。
+固定尺寸、对齐、字体和颜色来自 styles/ui_style.c 的
+UiStyle_thread* 常量样式（Montserrat 14、白色），实例共享引用；
+此处宽度分配是实现选择，不是新增 Figma 测量。
+资源卡片的固定标签和内框、LiveShow 标签和开关也从同一文件
+引用常量样式，不再为每个实例保存重复的局部属性表。
+LabelConfig.style 非空时由该样式提供尺寸、对齐和外观；
+width/height 须为 0、textAlign 须为 AUTO，不再创建局部样式。
+未传 style 的旧配置保持原有行为。调用方仍须保证共享样式
+和借用文字的存储期；卡片动画的动态位置与外框尺寸仍独立。
+默认主题、24 KB LVGL 池和页面生命周期均保持不变。
 默认文字为空，UiThreadCard_setHeader 借用两份调用方字符串，
 不解析优先级、不采样；字符串须保持有效，原地修改后须再次调用。
 卡片自身采用 COLUMN Flex、行距 10：标题行 y=0、高 17，
@@ -426,7 +434,11 @@ LiveShow 父状态创建两栏，初始进入 arcShow，5 秒后转 signalShow�
 只暴露被动 setter。两栏进度均按 5 秒一轮的速度推进，
 Motion 实际 33 1/3 Hz（3 tick），Signal 为 10 Hz。
 进入对应子状态从零开始，计时和阶段决策属于 HSM。
-LiveShow entry 创建、exit 销毁，不影响常驻 Topbar。
+helpers/ui_live_show.c/.h 提供 UiLiveShow_build/hide，与 SysInfo
+helper 对称。build 挂背景、标题、Motion 和 Signal；hide 逆序
+销毁页面控件并清背景，不删除 Root、常驻 Topbar 或兄弟对象。
+HSM 的 LiveShow entry/exit 调用该 helper；子状态切换、TimeEvt
+启停与进度推进仍留在 HSM，不放进页面 helper。
 按 2026-11-06 最新 Figma，上栏标题、圆弧百分比、右侧说明和数值
 使用 Montserrat 14，文字框高 17；左右 padding 为 10，给长说明
 留出空间。页标题与 Topbar 本来就是 14，保持现状。

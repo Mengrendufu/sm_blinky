@@ -12,7 +12,10 @@
 #include "widgets/helpers/ui_bar.h"
 #include "widgets/helpers/ui_arc.h"
 #include "helpers/ui_sys_info.h"
+#include "helpers/ui_live_show.h"
 #include "widgets/styles/ui_style.h"
+#include "src/core/lv_obj_private.h"
+#include "src/core/lv_obj_style_private.h"
 #include "widgets/page_title/page_title.h"
 #include "widgets/boot_count/boot_count.h"
 #include "widgets/thread_monitor/thread_monitor.h"
@@ -624,7 +627,21 @@ static void testBar_(lv_obj_t *root,lv_display_t *display){
     assert(lv_obj_get_child_count(root)==0);
     lv_refr_now(display);blank();
 }
+static void checkSharedStyle_(lv_obj_t *obj,lv_style_t const *style){
+    assert(obj->style_cnt==1);
+    assert(obj->styles[0].style==style);
+    assert(!obj->styles[0].is_local);
+    assert(lv_style_is_const(style));
+}
 static void checkLiveMotion_(UiLiveMotion const *motion){
+    checkSharedStyle_(motion->caption,&UiStyle_liveLabel);
+    checkSharedStyle_(motion->value,&UiStyle_liveLabel);
+    checkSharedStyle_(motion->arc.percent,&UiStyle_livePercent);
+    assert(motion->ledStatus->style_cnt==4);
+    for(unsigned i=0;i<4;++i){
+        assert(!motion->ledStatus->styles[i].is_local);
+        assert(lv_style_is_const(motion->ledStatus->styles[i].style));
+    }
     assert(motion->container&&motion->arc.container);
     assert(lv_obj_get_parent(motion->ledStatus)==motion->header);
     assert(lv_obj_get_parent(motion->heading)==motion->header);
@@ -675,6 +692,9 @@ static void checkLiveMotion_(UiLiveMotion const *motion){
 }
 
 static void checkLiveSignal_(UiLiveSignal const *signal,unsigned active){
+    checkSharedStyle_(signal->heading,&UiStyle_signalLabel);
+    checkSharedStyle_(signal->caption,&UiStyle_signalLabel);
+    checkSharedStyle_(signal->wave,&UiStyle_signalWave);
     assert(lv_obj_get_parent(signal->wave)==signal->container);
     assert(lv_obj_get_style_flex_flow(signal->container,0)
            ==LV_FLEX_FLOW_COLUMN);
@@ -1092,6 +1112,15 @@ static void testPageTitleAndBootCount_(lv_obj_t *root,
     lv_refr_now(display);blank();
 }
 static void checkThreadCardResources_(UiThreadCard const *card){
+    checkSharedStyle_(card->header,&UiStyle_threadHeader);
+    checkSharedStyle_(card->threadName,&UiStyle_threadName);
+    checkSharedStyle_(card->priority,&UiStyle_threadPriority);
+    for(unsigned i=0;i<UI_THREAD_CARD_RESOURCE_COUNT;++i){
+        checkSharedStyle_(card->resources[i].container,
+                           &UiStyle_threadResourceRow);
+        checkSharedStyle_(card->resources[i].value,&UiStyle_threadValue);
+        checkSharedStyle_(card->resources[i].unit,&UiStyle_threadUnit);
+    }
     for(unsigned i=0;i<UI_THREAD_CARD_RESOURCE_COUNT;++i){
         UiThreadCardResource const *row=&card->resources[i];
         assert(lv_obj_get_parent(row->container)==card->container);
@@ -1474,6 +1503,16 @@ static void testThreadMonitor_(lv_obj_t *root,lv_display_t *display){
     lv_refr_now(display);blank();
 }
 static void checkResourceCard_(UiResourceCard const *card){
+    checkSharedStyle_(card->header,&UiStyle_resourceHeader);
+    checkSharedStyle_(card->sizeGroup,&UiStyle_resourceSizeGroup);
+    checkSharedStyle_(card->gauge,&UiStyle_resourceGauge);
+    checkSharedStyle_(card->range,&UiStyle_resourceRange);
+    checkSharedStyle_(card->name,&UiStyle_resourceName);
+    checkSharedStyle_(card->size,&UiStyle_resourceSize);
+    checkSharedStyle_(card->unit,&UiStyle_resourceUnit);
+    checkSharedStyle_(card->percent,&UiStyle_resourcePercent);
+    checkSharedStyle_(card->minimum,&UiStyle_resourceMinimum);
+    checkSharedStyle_(card->maximum,&UiStyle_resourceMaximum);
     int32_t const x=xOf_(card->container);
     int32_t const y=yOf_(card->container);
     assert(lv_obj_get_width(card->container)==236);
@@ -1990,6 +2029,70 @@ static void testUiSysInfo_(UiRoot *root,lv_display_t *display){
     lv_obj_set_style_pad_row(rc,0,LV_PART_MAIN);
     lv_refr_now(display);blank();
 }
+static void testUiLiveShow_(UiRoot *root,lv_display_t *display){
+    lv_obj_t * const rc=root->container;
+    lv_obj_set_flex_flow(rc,LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(rc,LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START,LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_all(rc,2,LV_PART_MAIN);
+    lv_obj_set_style_pad_row(rc,10,LV_PART_MAIN);
+    UiTopbar bar={0};
+    UiTopbar_create(&bar,rc,lv_pct(100),17);
+    lv_obj_t * const barbox=bar.container;
+    lv_obj_t * const sibling=lv_obj_create(rc);
+    lv_obj_add_flag(sibling,LV_OBJ_FLAG_HIDDEN);
+    UiPageTitle title={0};
+    UiLiveMotion motion={0};
+    UiLiveSignal signal={0};
+    uint16_t const animations=lv_anim_count_running();
+    void const * const backgrounds[]={pixels[1],NULL,pixels[0]};
+    for(unsigned i=0;i<3;++i){
+        UiLiveShow_build(root,&title,&motion,&signal,backgrounds[i]);
+        assert(root->background.data==backgrounds[i]);
+        assert(lv_obj_get_child_count(rc)==5);
+        assert(lv_obj_get_parent(title.container)==rc);
+        assert(lv_obj_get_parent(motion.container)==rc);
+        assert(lv_obj_get_parent(signal.container)==rc);
+        assert(!strcmp(lv_label_get_text(title.title),"LiveShow"));
+        assert(motion.progress==0&&signal.progress==0);
+        lv_obj_update_layout(rc);
+        checkTopbarLayout_(&bar);
+        checkLiveMotion_(&motion);
+        checkLiveSignal_(&signal,0);
+        assert(yOf_(title.container)==30);
+        assert(yOf_(motion.container)==57);
+        assert(yOf_(signal.container)==179);
+        assert(lv_obj_get_height(motion.container)==112);
+        assert(lv_obj_get_height(signal.container)==133);
+        hostTick+=750;lv_anim_refr_now();
+        assert(motion.progress==0&&signal.progress==0);
+        assert(lv_anim_count_running()==animations);
+        UiLiveMotion_setProgress(&motion,250);
+        UiLiveSignal_setProgress(&signal,50);
+        verifyRepaint(display);
+        UiLiveShow_hide(root,&title,&motion,&signal);
+        assert(!title.container&&!title.title);
+        assert(!motion.container&&!motion.bar&&!motion.arc.container);
+        assert(!signal.container&&!signal.wave&&!signal.phases);
+        assert(lv_obj_get_child_count(rc)==2);
+        assert(root->container==rc&&bar.container==barbox);
+        assert(lv_obj_get_parent(barbox)==rc);
+        assert(lv_obj_get_parent(sibling)==rc);
+        assert(!lv_obj_get_style_bg_image_src(rc,0));
+        assert(root->background.data==NULL);
+        UiLiveShow_hide(root,&title,&motion,&signal);
+        assert(lv_obj_get_child_count(rc)==2);
+        assert(lv_anim_count_running()==animations);
+        verifyRepaint(display);
+    }
+    UiTopbar_destroy(&bar);
+    lv_obj_delete(sibling);
+    assert(root->container==rc&&lv_obj_get_child_count(rc)==0);
+    lv_obj_set_layout(rc,LV_LAYOUT_NONE);
+    lv_obj_set_style_pad_all(rc,0,LV_PART_MAIN);
+    lv_obj_set_style_pad_row(rc,0,LV_PART_MAIN);
+    lv_refr_now(display);blank();
+}
 int main(int argc,char **argv){
     assert(argc==2);scenario=(unsigned)atoi(argv[1]);
     static NvmManager manager;
@@ -2466,6 +2569,7 @@ int main(int argc,char **argv){
     lv_refr_now(display);blank();
     assert(root==Ui_sm_.root.container);
     testUiSysInfo_(&Ui_sm_.root,display);
+    testUiLiveShow_(&Ui_sm_.root,display);
     // Passive Topbar component under the persistent root.
     lv_obj_t * const sibling=lv_obj_create(root);
     lv_obj_set_size(sibling,10,10);

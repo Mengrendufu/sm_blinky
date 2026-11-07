@@ -906,7 +906,9 @@ Blinky 每 20 个半秒节拍分别请求保存启动次数和 LED 累计值。
 SST GC 回收；没有逐项静态事件或 pending 标记。队列固定十个槽位，
 事件池仍为十六块，块大小由裸事件扩至 8 B 以容纳 ID。
 物理 key 不再通过 Flash_nvsRead/Write 暴露，裸区 RPC 保持。
-此段为旧实现记录。当前已改用 nvm 的 NvmManager 和具体实例，
+此段为旧实现记录。当前 Manager 实现位于
+app/application/aos/flash/nvm；共享数据块位于
+app/application/nvm/instance，公共接口与 Meta 实现在 sm_nvs。
 不再提供 Nvm_writeResult；保存失败由 Flash AO 记录。
 细节与验证命令见 [nvm-storage.md](nvm-storage.md)。
 

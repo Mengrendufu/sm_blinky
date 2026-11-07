@@ -32,11 +32,9 @@ void UiArc_create(UiArc *me, lv_obj_t *parent,
     lv_obj_set_style_arc_width(me->container, 10, LV_PART_INDICATOR);
     me->percent = Label_create(me->container,
         &(LabelConfig){
-            .width = lv_pct(100), .height = 17,
+            .style = &UiStyle_livePercent,
             .longMode = LV_LABEL_LONG_MODE_CLIP,
-            .textAlign = LV_TEXT_ALIGN_CENTER, .text = ""});
-    lv_obj_add_style(me->percent, &UiStyle_liveText, LV_PART_MAIN);
-    lv_obj_center(me->percent);
+            .text = ""});
     UiArc_setValue(me, 0);
 }
 

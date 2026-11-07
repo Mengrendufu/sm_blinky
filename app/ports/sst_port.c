@@ -118,6 +118,14 @@ bool SST_Task_postFromISR(SST_Task * const me,
                      (pHigherPriorityTaskWoken != (BaseType_t *)0));
 
     isrStatus = taskENTER_CRITICAL_FROM_ISR();
+#if (SST_EVT_POOL_NUM > 0U)
+    if (e->poolId != 0U) {
+        DBC_INVARIANT(311, e->poolId <= SST_EVT_POOL_NUM &&
+                           e->refCtr < 255U);
+        ++((SST_Evt *)e)->refCtr;
+    }
+#endif // (SST_EVT_POOL_NUM > 0U)
+
     me->qBuf[me->head] = e;
     if (me->head == 0U) {
         me->head = me->end;
